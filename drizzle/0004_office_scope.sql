@@ -1,0 +1,1 @@
+ALTER TABLE "hr_internal"."users" ADD COLUMN "offices" jsonb;

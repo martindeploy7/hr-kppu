@@ -1,0 +1,13 @@
+node_modules/
+dist/
+dist-server/
+.env
+.env.*
+!.env.example
+.devdata/
+.e2e/
+artifacts/
+*.tsbuildinfo
+.DS_Store
+image1.png
+image2.png
