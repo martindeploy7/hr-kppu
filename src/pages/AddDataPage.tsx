@@ -1,54 +1,12 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react'
-import { BriefcaseBusiness, CheckCircle2, CircleUserRound, Database, Download, FileSpreadsheet, Plus, UploadCloud } from 'lucide-react'
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
+import { BriefcaseBusiness, CircleUserRound, Database, Download, FileSpreadsheet, Plus, UploadCloud } from 'lucide-react'
 import { useAuth } from '../state/Auth.tsx'
 import { useHr } from '../state/HrData.tsx'
 import type { Employee } from '../engine/types.ts'
 import { OFFICES } from '../engine/ids.ts'
-import { excelSerialToISO, parseSingleDate } from '../engine/dates.ts'
-import { nameKey } from '../engine/names.ts'
-import { downloadWorkbook, loadXlsx } from '../lib/xlsx.ts'
+import { downloadWorkbook, readSheets } from '../lib/xlsx.ts'
+import { MASTER_COLUMNS as COLUMNS, parseMasterSheets, previewMasterImport, type MasterImport } from '../lib/masterImport.ts'
 import { Note, PageHeader, Seg } from '../components/ui.tsx'
-
-const COLUMNS: { header: string; key: keyof Employee; example: string }[] = [
-  { header: 'NIP', key: 'nip', example: '198908242025211126' },
-  { header: 'NIKA', key: 'nika', example: '3.24.0404' },
-  { header: 'Nama', key: 'nama', example: 'Abbas R' },
-  { header: 'Kantor', key: 'kantor', example: 'Pusat' },
-  { header: 'Unit', key: 'unit', example: 'Biro Pencegahan' },
-  { header: 'Status Kepegawaian', key: 'statusKepegawaian', example: 'PPPK' },
-  { header: 'Golongan', key: 'golongan', example: 'IX' },
-  { header: 'Jabatan', key: 'jabatan', example: 'Penata Kelola Persaingan Usaha' },
-  { header: 'Tanggal Lahir', key: 'tanggalLahir', example: '1989-08-24' },
-  { header: 'Tempat Lahir', key: 'tempatLahir', example: 'Jakarta' },
-  { header: 'Jenis Kelamin', key: 'jenisKelamin', example: 'Laki-laki' },
-  { header: 'Agama', key: 'agama', example: 'Islam' },
-  { header: 'Nomor WhatsApp', key: 'nomorWhatsApp', example: '6281200000000' },
-  { header: 'Email', key: 'email', example: 'nama@kppu.go.id' },
-  { header: 'Pendidikan', key: 'pendidikan', example: 'S1' },
-  { header: 'Disiplin Ilmu', key: 'disiplinIlmu', example: 'Hukum' },
-  { header: 'Pelatihan', key: 'pelatihan', example: 'Hukum Persaingan Usaha; Investigasi' },
-  { header: 'Tanggal Mulai Kerja', key: 'tanggalMulaiKerja', example: '2024-01-02' },
-  { header: 'Alamat', key: 'alamat', example: '' },
-  { header: 'Nama Kontak Darurat', key: 'namaKontakDarurat', example: '' },
-  { header: 'Kontak Darurat', key: 'kontakDarurat', example: '' },
-  { header: 'Status Perkawinan', key: 'statusPerkawinan', example: 'Kawin' },
-]
-
-const DATE_KEYS: (keyof Employee)[] = ['tanggalLahir', 'tanggalMulaiKerja']
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '')
-
-function mapRow(r: Record<string, unknown>): Partial<Employee> {
-  const lookup = new Map(Object.entries(r).map(([k, v]) => [norm(k), v]))
-  const out: Record<string, unknown> = {}
-  for (const c of COLUMNS) {
-    const v = lookup.get(norm(c.header)) ?? lookup.get(norm(c.key))
-    if (v === undefined || v === null || v === '') continue
-    if (DATE_KEYS.includes(c.key)) out[c.key] = typeof v === 'number' ? excelSerialToISO(v) : /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? String(v) : parseSingleDate(String(v)) ?? ''
-    else if (c.key === 'pelatihan') out[c.key] = String(v).split(/[;,]/).map(x => x.trim()).filter(Boolean)
-    else out[c.key] = String(v).trim()
-  }
-  return out as Partial<Employee>
-}
 
 export function AddDataPage({ toast }: { toast: (m: string) => void }) {
   const hr = useHr()
@@ -56,28 +14,37 @@ export function AddDataPage({ toast }: { toast: (m: string) => void }) {
   const defaultOffice = user.offices?.[0] ?? 'Pusat'
   const allowedOffices = OFFICES.filter(o => !user.offices?.length || user.offices.includes(o))
   const [tab, setTab] = useState<'bulk' | 'manual'>('bulk')
-  const [preview, setPreview] = useState<Partial<Employee>[]>([])
+  const [preview, setPreview] = useState<MasterImport>({ rows: [], notices: [] })
+  const [fileName, setFileName] = useState(''), [busy, setBusy] = useState(false), [page, setPage] = useState(0), [confirmed, setConfirmed] = useState(false)
+  const plan = useMemo(() => previewMasterImport(preview, hr.roster.employees, allowedOffices), [preview, hr.roster.employees, user.offices])
+  useEffect(() => setConfirmed(false), [preview, hr.revision])
   const [form, setForm] = useState<Partial<Employee>>({ kantor: defaultOffice, statusKepegawaian: 'Belum diketahui' })
 
-  const matchOf = (row: Partial<Employee>) => hr.roster.employees.find(e => (row.nip && (e.nip === row.nip || e.aliases.some(a => a.kind === 'nip' && a.value === row.nip))) || (row.nika && e.nika === row.nika) || (!row.nip && row.nama && nameKey(e.nama) === nameKey(row.nama)))
   const onFile = async (ev: ChangeEvent<HTMLInputElement>) => {
     const file = ev.target.files?.[0]; if (!file) return
-    try {
-      const XLSX = await loadXlsx()
-      const wb = file.name.endsWith('.csv') ? XLSX.read(await file.text(), { type: 'string' }) : XLSX.read(await file.arrayBuffer(), { type: 'array' })
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[wb.SheetNames[0]], { defval: '', raw: true })
-      setPreview(rows.map(mapRow).filter(r => r.nama || r.nip))
-      toast(`${file.name} dibaca`)
-    } catch { toast('File tidak dapat dibaca. Gunakan template.') }
     ev.target.value = ''
+    setBusy(true); setPreview({ rows: [], notices: [] }); setFileName(''); setConfirmed(false); setPage(0)
+    try {
+      if (file.size > 15 * 1024 * 1024) throw new Error('Ukuran file melebihi 15 MB')
+      setPreview(parseMasterSheets(await readSheets(file))); setFileName(file.name)
+      toast(`${file.name} siap diperiksa`)
+    } catch (e) { toast((e as Error).message) }
+    finally { setBusy(false) }
   }
-  const commit = () => { const r = hr.upsertMaster(preview); setPreview([]); toast(`${r.updated} pegawai diperbarui · ${r.added} pegawai baru`) }
+  const commit = () => {
+    if (!confirmed || plan.invalid || !plan.rows.length || hr.saveStatus !== 'saved') return
+    try { const r = hr.upsertMaster(plan.rows); setPreview({ rows: [], notices: [] }); setConfirmed(false); toast(`${r.updated} pegawai diperbarui · ${r.added} pegawai baru; periksa status penyimpanan server`) }
+    catch (e) { toast((e as Error).message) }
+  }
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    if (!form.nama) { toast('Nama wajib diisi'); return }
-    if (form.nip && !/^\d{18}$/.test(form.nip)) { toast('NIP harus 18 digit'); return }
-    const r = hr.upsertMaster([form]); setForm({ kantor: defaultOffice, statusKepegawaian: 'Belum diketahui' })
-    toast(r.updated ? 'Data pegawai yang sudah ada diperbarui' : 'Pegawai baru ditambahkan')
+    const result = previewMasterImport({ rows: [{ ref: 'Input manual', value: form, errors: [] }], notices: [] }, hr.roster.employees, allowedOffices)
+    if (result.invalid) { toast(result.entries[0].errors.join(' · ')); return }
+    if (!result.rows.length) { toast('Tidak ada perubahan data'); return }
+    try {
+      const r = hr.upsertMaster(result.rows); setForm({ kantor: defaultOffice, statusKepegawaian: 'Belum diketahui' })
+      toast(r.updated ? 'Perubahan pegawai disiapkan; periksa status penyimpanan' : 'Pegawai baru disiapkan; periksa status penyimpanan')
+    } catch (e) { toast((e as Error).message) }
   }
   const template = () => downloadWorkbook('Template_Master_Pegawai_KPPU.xlsx', [
     { name: 'Master Pegawai', rows: [COLUMNS.map(c => c.header), COLUMNS.map(c => c.example)], widths: COLUMNS.map(c => Math.max(14, c.header.length + 2)) },
@@ -85,18 +52,26 @@ export function AddDataPage({ toast }: { toast: (m: string) => void }) {
   ])
   const field = (k: keyof Employee, label: string, type = 'text') => <label><span>{label}</span><input type={type} value={String(form[k] ?? '')} onChange={e => setForm({ ...form, [k]: e.target.value })} /></label>
 
-  const matched = preview.filter(r => matchOf(r)).length
   return <div className="page">
     <PageHeader title="Tambah & lengkapi data pegawai" actions={<Seg label="Mode" value={tab} onChange={setTab} options={[{ value: 'bulk', label: 'Bulk import' }, { value: 'manual', label: 'Input manual' }]} />}>
       Pegawai sudah terbentuk dari sumber absensi. Halaman ini untuk melengkapi field yang tidak ada di absensi (golongan, jabatan, agama, WhatsApp) atau menambah pegawai baru.
     </PageHeader>
     {tab === 'bulk' ? <section className="panel">
-      <div className="bulk-top"><div className="upload-icon"><UploadCloud /></div><div><h3>Bulk import master pegawai</h3><p>Excel atau CSV dengan header sesuai template. Pencocokan memakai NIP → NIKA → nama.</p></div><button className="btn secondary" onClick={template}><Download size={16} /> Download template</button></div>
-      <label className="dropzone"><input type="file" accept=".xlsx,.xls,.csv" onChange={onFile} /><div><FileSpreadsheet size={32} /><strong>Pilih file master</strong><span>.xlsx, .xls, .csv</span></div></label>
-      {preview.length > 0 && <div className="import-preview">
-        <div className="preview-head"><div><strong>Pratinjau {preview.length} baris</strong><span>{matched} cocok dengan pegawai yang ada (akan diperbarui) · {preview.length - matched} pegawai baru</span></div><button className="btn primary" onClick={commit}><Database size={16} /> Simpan ke master</button></div>
-        <div className="table-wrap"><table className="data"><thead><tr><th>Nama</th><th>NIP</th><th>Golongan</th><th>Kantor</th><th>Hasil</th></tr></thead>
-          <tbody>{preview.slice(0, 8).map((r, i) => { const m = matchOf(r); return <tr key={i}><td>{r.nama}</td><td className="mono">{r.nip}</td><td>{r.golongan}</td><td>{r.kantor}</td><td>{m ? <span className="tag ok"><CheckCircle2 size={11} /> perbarui {m.nama}</span> : <span className="tag">baru</span>}</td></tr> })}</tbody></table></div>
+      <div className="bulk-top"><div className="upload-icon"><UploadCloud /></div><div><h3>Bulk import master pegawai</h3><p>Excel atau CSV; semua sheet master dikenali. Pencocokan memakai NIP/NIKA. Nama tidak menggabungkan pegawai.</p></div><button className="btn secondary" onClick={template}><Download size={16} /> Download template</button></div>
+      <label className="dropzone"><input type="file" accept=".xlsx,.xls,.csv" disabled={busy} onChange={onFile} /><div><FileSpreadsheet size={32} /><strong>{busy ? 'Membaca file…' : 'Pilih file master'}</strong><span>.xlsx, .xls, .csv</span></div></label>
+      {preview.rows.length > 0 && <div className="import-preview">
+        <div className="preview-head"><div><strong>{fileName} · {plan.entries.length} baris</strong><span>{plan.updated} pegawai diperbarui · {plan.added} pegawai baru · {plan.invalid} baris perlu diperiksa</span></div><button className="btn secondary" onClick={() => setPreview({ rows: [], notices: [] })}>Batalkan preview</button></div>
+        {preview.notices.map((notice, i) => <Note key={i}>{notice}</Note>)}
+        {plan.invalid > 0 && <Note>{plan.invalid} baris bermasalah. Tidak ada baris disimpan. Perbaiki seluruh masalah di file lalu unggah ulang.</Note>}
+        <div className="table-wrap"><table className="data"><thead><tr><th>Sumber</th><th>Nama / NIP / NIKA</th><th>Hasil & perubahan</th></tr></thead>
+          <tbody>{plan.entries.slice(page * 20, (page + 1) * 20).map((entry, i) => <tr key={`${page}-${i}`}><td>{entry.ref}</td><td>{entry.value.nama || entry.target || '—'}<div className="mono">{entry.value.nip || 'Tanpa NIP'}</div><div>{entry.value.nika}</div></td><td>
+            <span className={`tag ${entry.errors.length ? 'warn' : 'ok'}`}>{entry.action === 'gabung' ? 'digabung dalam batch' : entry.action === 'tetap' ? 'tidak berubah' : entry.action}</span>
+            {entry.errors.map((error, j) => <p key={j}>{error}</p>)}
+            {entry.changes.length > 0 && <details><summary>{entry.changes.length} field {entry.action === 'baru' ? 'terisi' : 'berubah'}{entry.target ? ` · ${entry.target}` : ''}</summary><ul>{entry.changes.map(change => <li key={change.field}><strong>{change.field}:</strong> {change.before || 'kosong'} → {change.after}</li>)}</ul></details>}
+          </td></tr>)}</tbody></table></div>
+        <div className="form-actions"><button className="btn secondary" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Sebelumnya</button><span>Halaman {page + 1} / {Math.ceil(plan.entries.length / 20)}</span><button className="btn secondary" disabled={(page + 1) * 20 >= plan.entries.length} onClick={() => setPage(p => p + 1)}>Berikutnya</button></div>
+        <label><input type="checkbox" checked={confirmed} disabled={plan.invalid > 0 || !plan.rows.length} onChange={e => setConfirmed(e.target.checked)} /> Saya telah memeriksa perubahan semua baris dan sheet. Field kosong tidak menghapus data lama.</label>
+        <div className="form-actions"><span>{plan.rows.length ? `${plan.rows.length} pegawai siap disimpan` : plan.invalid ? 'Perbaiki file sebelum menyimpan' : 'Tidak ada perubahan'}</span><button className="btn primary" disabled={!confirmed || plan.invalid > 0 || !plan.rows.length || hr.saveStatus !== 'saved'} onClick={commit}><Database size={16} /> Simpan ke master</button></div>
       </div>}
       <Note>Data di file Dashboard_Data_Pegawai_KPPU_V3.xlsx adalah contoh sintetis (NIP tidak cocok dengan absensi). Untuk produksi, sumber master idealnya ekspor SIASN/BKN atau sistem kepegawaian internal.</Note>
     </section> : <form className="panel form-card" onSubmit={submit}>
@@ -110,7 +85,7 @@ export function AddDataPage({ toast }: { toast: (m: string) => void }) {
           {field('unit', 'Unit')}
           <label><span>Status</span><select value={form.statusKepegawaian} onChange={e => setForm({ ...form, statusKepegawaian: e.target.value as Employee['statusKepegawaian'] })}>{['PPPK', 'PNS', 'Non-ASN', 'Belum diketahui'].map(x => <option key={x}>{x}</option>)}</select></label>
           {field('golongan', 'Golongan')}{field('jabatan', 'Jabatan')}{field('tanggalMulaiKerja', 'Tanggal mulai kerja', 'date')}</div></div>
-      <div className="form-actions"><span>Perubahan disimpan ke server; periksa status penyimpanan.</span><button className="btn primary" type="submit"><Plus size={16} /> Simpan pegawai</button></div>
+      <div className="form-actions"><span>Perubahan disimpan ke server; periksa status penyimpanan.</span><button className="btn primary" type="submit" disabled={hr.saveStatus !== 'saved'}><Plus size={16} /> Simpan pegawai</button></div>
     </form>}
   </div>
 }

@@ -13,7 +13,7 @@ export async function readSheets(file: File): Promise<Sheet[]> {
     if (expanded > 64 * 1024 * 1024) throw new Error('Workbook terkompresi melebihi batas 64 MB')
     return /\.xml$|\.rels$/.test(info.name)
   } }) : null
-  const wb = XLSX.read(data, { type: 'array', cellText: false })
+  const wb = XLSX.read(data, { type: 'array', cellText: false, raw: true })
   const attr = (tag: string, key: string) => tag.match(new RegExp(`${key}="([^"]*)"`))?.[1]
   const rels = zip?.['xl/_rels/workbook.xml.rels'] ? [...strFromU8(zip['xl/_rels/workbook.xml.rels']).matchAll(/<Relationship\b[^>]*\/>/g)] : []
   const sheetTags = zip?.['xl/workbook.xml'] ? [...strFromU8(zip['xl/workbook.xml']).matchAll(/<sheet\b[^>]*\/?\s*>/g)] : []

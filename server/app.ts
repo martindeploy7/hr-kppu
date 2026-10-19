@@ -20,6 +20,7 @@ import { monthBounds } from '../src/engine/dates.ts'
 import { createUser } from './create-user.ts'
 import { decisionOwned, globalAccess, officeAllowed, requireOffice, sourceAllowed, scopeWorkspace } from './scope.ts'
 import { registerSubmissions } from './submissions.ts'
+import { validateMasterChange } from './master.ts'
 
 const digest = (s: string | Buffer) => createHash('sha256').update(s).digest('hex')
 const publicUser = (u: typeof users.$inferSelect): User => ({ id: u.id, email: u.email, name: u.name, role: u.role, offices: u.offices })
@@ -157,7 +158,11 @@ export function createApp(db: Database, config: { origin: string; production: bo
         })
       }
       if (patch.decisions) patch.decisions = patch.decisions.map(d => state.decisions.some(old => JSON.stringify(old) === JSON.stringify(d)) ? d : { ...d, reviewer: actor.name, at: new Date().toISOString() })
-      return { ...state, ...patch, reviewer: actor.name }
+      const next = { ...state, ...patch, reviewer: actor.name }
+      if (patch.master || patch.overrides) {
+        try { validateMasterChange(state, next) } catch (e) { throw new HTTPException(400, { message: (e as Error).message }) }
+      }
+      return next
     }))
   })
   app.post('/api/imports/preview', async c => {
