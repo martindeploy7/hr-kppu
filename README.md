@@ -6,7 +6,7 @@ Backend menyimpan ruang kerja bersama, sumber Excel asli, revisi, akun, sesi dan
 
 ## Jalankan
 
-Gunakan Node 24. Siapkan `.env` dari `.env.example`, password admin unik minimal 14 karakter dan `APP_ORIGIN` yang sama persis dengan origin browser. Jangan commit environment atau workbook pegawai.
+Gunakan Node 24. Siapkan `.env` dari `.env.example`, `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_NAME`, password admin unik minimal 14 karakter dan `APP_ORIGIN` yang sama persis dengan origin browser. Jangan commit environment atau workbook pegawai.
 
 ```
 npm ci
