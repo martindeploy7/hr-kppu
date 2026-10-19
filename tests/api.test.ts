@@ -92,6 +92,82 @@ describe('Authenticated PostgreSQL API',()=>{
   const exported=await request(`/meal-submissions/${id}/export`);expect(exported.status).toBe(200);const wb=XLSX.read(await exported.arrayBuffer());const rows=XLSX.utils.sheet_to_json(wb.Sheets.Nominatif,{header:1}) as unknown[][];expect(rows[3][1]).toBe(person.nip);expect(rows[3][8]).toBe(773300)
   await expect(connection.sql.unsafe("UPDATE hr_internal.meal_submissions SET checksum='changed'")).rejects.toThrow('immutable')
  })
+ test('locked correction reserves new days, cancels safely, reapproves and atomically replaces claims',async()=>{
+  const parent=(await(await request('/meal-submissions')).json()).submissions.find((s:any)=>s.status==='locked')
+  const original=(await(await request(`/meal-submissions/${parent.id}`)).json()).submission
+  let w=await workspace();const state=structuredClone(w.state),oldPerson=state.master[0],newPerson={...oldPerson,id:'correction-added',nama:'Tambahan Koreksi Uji',nip:'198001012020011888'}
+  state.master.push(newPerson)
+  const source=state.files.find((f:any)=>f.evidence.length),originalEvidence=structuredClone(source.evidence)
+  source.evidence[0].clockIn='09:00'
+  source.evidence.push(...originalEvidence.map((e:any)=>({...e,id:`new-${e.id}`,name:newPerson.nama,ids:{nip:newPerson.nip}})))
+  expect((await request('/backup/restore','POST',{expectedRevision:w.revision,state,reason:'Koreksi fixture: satu hari dicabut, pegawai tambahan'})).status).toBe(200)
+  w=await workspace()
+  const body={id:randomUUID(),period:parent.period,office:parent.office,supersedesId:parent.id,expectedRevision:w.revision,reason:'Koreksi bukti hadir dan pegawai dengan dokumen pendukung'}
+  expect((await request('/meal-submissions','POST',{...body,reason:undefined})).status).toBe(400)
+  expect((await request('/meal-submissions','POST',{...body,office:'Kanwil I'})).status).toBe(409)
+  expect((await request('/meal-submissions','POST',body,'viewer')).status).toBe(403)
+  let response=await request('/meal-submissions','POST',body);expect(response.status).toBe(200)
+  const proposed=(await response.json()).submission
+  expect(proposed.version).toBe(2);expect(proposed.snapshot.correction.parentChecksum).toBe(original.checksum)
+  expect(proposed.snapshot.months.reduce((s:number,m:any)=>s+m.netto,0)).toBe(1634000)
+  expect(proposed.snapshot.correction.delta.reduce((s:number,d:any)=>s+d.after.netto-d.before.netto,0)).toBe(860700)
+  expect((await request('/meal-submissions','POST',body)).status).toBe(200)
+  expect((await request('/meal-submissions','POST',{...body,id:randomUUID()})).status).toBe(409)
+  expect((await connection.sql`select count(*)::int n from hr_internal.meal_claimed_days`)[0].n).toBe(44)
+  expect((await request(`/meal-submissions/${proposed.id}/cancel`,'POST',{expectedRevision:1,reason:'Batalkan usulan untuk menguji reservasi'})).status).toBe(200)
+  expect((await connection.sql`select count(*)::int n from hr_internal.meal_claimed_days`)[0].n).toBe(22)
+  body.id=randomUUID();response=await request('/meal-submissions','POST',body);expect(response.status).toBe(200)
+  const child=(await response.json()).submission
+  expect((await request(`/meal-submissions/${child.id}/approve`,'POST',{expectedRevision:1,reason:'Self approval must fail'})).status).toBe(403)
+  expect((await request(`/meal-submissions/${child.id}/approve`,'POST',{expectedRevision:1,reason:'Finance verifies correction delta'},'finance')).status).toBe(200)
+  expect((await request(`/meal-submissions/${child.id}/lock`,'POST',{expectedRevision:2,reason:'Finance locks corrected version'},'finance')).status).toBe(200)
+  const claims=await connection.sql`select * from hr_internal.meal_claimed_days`
+  expect(claims).toHaveLength(43);expect(claims.every(d=>d.submission_id===child.id)).toBe(true)
+  expect(claims.some(d=>d.key===`${oldPerson.nip}|2026-09-01`)).toBe(false)
+  const preserved=(await(await request(`/meal-submissions/${parent.id}`)).json()).submission
+  expect(preserved.snapshot).toEqual(original.snapshot);expect(preserved.checksum).toBe(original.checksum);expect(preserved.supersededBy).toBe(child.id)
+  await expect(connection.sql`delete from hr_internal.meal_claimed_days where submission_id=${child.id}`).rejects.toThrow('locked claim')
+  const wb=XLSX.read(await(await request(`/meal-submissions/${child.id}/export`)).arrayBuffer())
+  expect(wb.Sheets['Selisih Koreksi']).toBeDefined()
+  const diff=XLSX.utils.sheet_to_json(wb.Sheets['Selisih Koreksi'],{header:1}) as unknown[][]
+  expect(diff.slice(4).reduce((sum,row)=>sum+Number(row[13]),0)).toBe(860700)
+  const oldWb=XLSX.read(await(await request(`/meal-submissions/${parent.id}/export`)).arrayBuffer())
+  expect(oldWb.Sheets.Nominatif.A1.v).toContain('ARSIP DIGANTIKAN')
+ })
+ test('correction chains require the latest locked version and fresh workspace approval',async()=>{
+  const items=(await(await request('/meal-submissions')).json()).submissions,parent=items.find((s:any)=>s.status==='locked'&&s.version===2)
+  let w=await workspace(),body={id:randomUUID(),period:parent.period,office:parent.office,supersedesId:parent.id,expectedRevision:w.revision,reason:'Koreksi lanjutan sesuai verifikasi dokumen terbaru'}
+  expect((await request('/meal-submissions','POST',{...body,supersedesId:parent.supersedesId})).status).toBe(409)
+  const response=await request('/meal-submissions','POST',body);expect(response.status).toBe(200)
+  const child=(await response.json()).submission;expect(child.version).toBe(3)
+  expect((await request('/workspace','PUT',{expectedRevision:w.revision,patch:{policy:{...w.state.policy,rates:{...w.state.policy.rates,III:42000}}},reason:'Tarif berubah setelah pengajuan koreksi'})).status).toBe(200)
+  expect((await request(`/meal-submissions/${child.id}/approve`,'POST',{expectedRevision:1,reason:'Reject stale correction'},'finance')).status).toBe(409)
+  expect((await request(`/meal-submissions/${child.id}/cancel`,'POST',{expectedRevision:1,reason:'Batalkan usulan stale agar dapat diajukan ulang'})).status).toBe(200)
+  w=await workspace();body={...body,id:randomUUID(),expectedRevision:w.revision}
+  const next=await request('/meal-submissions','POST',body);expect(next.status).toBe(200);const corrected=(await next.json()).submission
+  expect(corrected.snapshot.months.reduce((s:number,m:any)=>s+m.netto,0)).toBe(1715700)
+  expect((await request(`/meal-submissions/${corrected.id}/approve`,'POST',{expectedRevision:1,reason:'Finance approves version three'},'finance')).status).toBe(200)
+  expect((await request(`/meal-submissions/${corrected.id}/lock`,'POST',{expectedRevision:2,reason:'Finance locks version three'},'finance')).status).toBe(200)
+  const claims=await connection.sql`select * from hr_internal.meal_claimed_days`
+  expect(claims).toHaveLength(43);expect(claims.every(d=>d.submission_id===corrected.id)).toBe(true)
+ })
+ test('fully withdrawn entitlement can be corrected to zero while preserving prior versions',async()=>{
+  const original=await workspace(),items=(await(await request('/meal-submissions')).json()).submissions,parent=items.find((s:any)=>s.status==='locked'&&!s.correctionId)
+  const state=emptyWorkspace();state.policy={...original.state.policy,parametersApproved:true}
+  state.files=original.state.files.filter((f:any)=>f.kind==='surat-tugas')
+  expect((await request('/backup/restore','POST',{expectedRevision:original.revision,state,reason:'Synthetic correction removes all previously claimed employees'})).status).toBe(200)
+  let w=await workspace();const id=randomUUID()
+  const response=await request('/meal-submissions','POST',{id,period:parent.period,office:parent.office,supersedesId:parent.id,expectedRevision:w.revision,reason:'Semua hak versi sebelumnya dicabut berdasarkan dokumen koreksi'})
+  expect(response.status).toBe(200);const s=(await response.json()).submission
+  expect(s.snapshot.months).toHaveLength(0)
+  expect(s.snapshot.correction.delta.reduce((n:number,d:any)=>n+d.after.netto-d.before.netto,0)).toBe(-1715700)
+  expect((await request(`/meal-submissions/${id}/approve`,'POST',{expectedRevision:1,reason:'Finance verifies total withdrawal'},'finance')).status).toBe(200)
+  expect((await request(`/meal-submissions/${id}/lock`,'POST',{expectedRevision:2,reason:'Finance locks zero replacement'},'finance')).status).toBe(200)
+  expect(await connection.sql`select * from hr_internal.meal_claimed_days`).toHaveLength(0)
+  const preserved=(await(await request(`/meal-submissions/${parent.id}`)).json()).submission
+  expect(preserved.status).toBe('locked');expect(preserved.supersededBy).toBe(id)
+  w=await workspace();expect((await request('/backup/restore','POST',{expectedRevision:w.revision,state:original.state,reason:'Restore shared synthetic workspace after zero correction test'})).status).toBe(200)
+ })
  test('office-scoped account cannot read, edit or submit another office',async()=>{
   const before=await workspace(),p={...blankEmployee('other-office-person'),nama:'Kanwil I Uji',nip:'199001012020011001',kantor:'Kanwil I'}
   expect((await request('/workspace','PUT',{expectedRevision:before.revision,patch:{master:[...before.state.master,p]},reason:'Additional office test'})).status).toBe(200)

@@ -1,4 +1,4 @@
-import { pgSchema, text, integer, jsonb, timestamp, boolean, customType, index } from 'drizzle-orm/pg-core'
+import { pgSchema, text, integer, jsonb, timestamp, boolean, customType, index, type AnyPgColumn } from 'drizzle-orm/pg-core'
 import type { SourceFile } from '../src/engine/types.ts'
 import type { Role, Workspace } from '../shared/workspace.ts'
 import type { MealSnapshot } from '../shared/submissions.ts'
@@ -27,6 +27,7 @@ export const mealSubmissions = hr.table('meal_submissions', {
   workspaceRevision: integer('workspace_revision').notNull(), status: text('status').$type<'submitted' | 'approved' | 'locked' | 'cancelled'>().default('submitted').notNull(),
   snapshot: jsonb('snapshot').$type<MealSnapshot>().notNull(), checksum: text('checksum').notNull(), createdBy: text('created_by').references(() => users.id).notNull(),
   approvedBy: text('approved_by').references(() => users.id), createdAt: time('created_at').defaultNow().notNull(), approvedAt: time('approved_at'), lockedAt: time('locked_at'),
+  supersedesId: text('supersedes_id').references((): AnyPgColumn => mealSubmissions.id), version: integer('version').default(1).notNull(), correctionReason: text('correction_reason'),
 })
 export const mealClaimedDays = hr.table('meal_claimed_days', {
   key: text('key').primaryKey(), submissionId: text('submission_id').references(() => mealSubmissions.id).notNull(), employeeId: text('employee_id').notNull(), date: text('date').notNull(),

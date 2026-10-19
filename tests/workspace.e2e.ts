@@ -71,6 +71,7 @@ test('bulk master validates all rows, requires confirmation and persists one mer
  await browser.setViewport({width:390,height:844});expect(await browser.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
  await screen.getByRole('checkbox').tap()
  await screen.getByRole('button','Simpan ke master',{exact:true}).tap()
+ await expect.poll(()=>browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json();return w.revision}),{timeout:10000}).toBe(before+1)
  await expect(browser.locator('.sidebar-footer')).toContainText('Tersimpan di server')
  await browser.reload()
  const result=await browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json(),people=w.state.master.filter((e:any)=>e.nip==='198001012020011997');const p=people[0];return {revision:w.revision,count:people.length,person:{...p,...w.state.overrides[p?.id]}}})
