@@ -4,6 +4,7 @@ import { eachDay, formatID, isWeekend, toMinutes } from './dates.ts'
 import { enforcePolicy, golGroup, type GolGroup, type MealPolicy } from './policy.ts'
 import { nameKey } from './names.ts'
 import { DAY_CODE_LABEL } from './parsers/common.ts'
+import { effectiveSource } from './recordReviews.ts'
 
 export type MealState = 'eligible' | 'held' | 'excluded'
 
@@ -113,7 +114,7 @@ export function locationCentroids(files: SourceFile[]): Record<string, [number, 
 }
 
 export function reconcile(files: SourceFile[], roster: Roster, period: { start: ISODate; end: ISODate }, policy: MealPolicy, resolutions: Resolution[], asOf = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date())): Reconciliation {
-  files = files.filter(f => f.active !== false)
+  files = files.filter(f => f.active !== false).map(effectiveSource)
   policy = enforcePolicy(policy)
   const holidays = new Set(policy.holidays)
   const days = eachDay(period.start, period.end)

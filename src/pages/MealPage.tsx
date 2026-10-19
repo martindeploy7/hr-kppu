@@ -52,6 +52,7 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
       { name: 'Nominatif', rows: [[`USULAN DAFTAR NOMINATIF UANG MAKAN — KOMISI PENGAWAS PERSAINGAN USAHA`], [`Periode ${period} · ${office === 'Semua' ? 'Semua kantor' : office} · dibuat ${new Date().toLocaleString('id-ID')} oleh ${hr.reviewer}`], [], head, ...nominatif, [], ['', 'JUMLAH', '', '', '', '', '', '', '', '', '', total(m => m.present), total(m => m.mealDays), total(m => m.heldDays), '', total(m => m.bruto), '', total(m => m.pph), total(m => m.netto)]], widths: [5, 30, 20, 11, 11, 34, 12, 16, 10, 12, 9, 10, 10, 10, 10, 13, 7, 11, 13, 32] },
       { name: 'Rincian Harian', rows: [['Nama', 'NIP', 'Tanggal', 'Status', 'Masuk', 'Pulang', 'Terlambat (mnt)', 'Uang makan', 'Alasan', 'Nominal', 'PPh % efektif', 'Dasar status', 'Sumber'], ...daily], widths: [28, 20, 11, 22, 7, 7, 9, 10, 40, 10, 40, 22] },
       { name: 'Ditahan', rows: [['Nama', 'NIP', 'Tanggal', 'Alasan', 'Detail isu'], ...held], widths: [28, 20, 11, 36, 80] },
+      { name: 'Review Sumber', rows: [['Sumber', 'Jenis', 'ID catatan', 'Keputusan', 'Alasan', 'Reviewer', 'Waktu'], ...hr.files.flatMap(f => (f.recordReviews ?? []).filter(r => office === 'Semua' || (r.kind === 'evidence' ? f.evidence : f.assignments).some(record => record.id === r.recordId && record.office === office)).map(r => [f.id, r.kind, r.recordId, r.disposition, r.reason, r.reviewer, r.at]))], widths: [32, 14, 32, 14, 60, 24, 26] },
       { name: 'Parameter', rows: [['Parameter', 'Nilai'], ['Wajib scan masuk & pulang', p.requireComplete ? 'Ya' : 'Tidak'], ['Wajib tepat waktu', p.requireOnTime ? `Ya (toleransi ${p.lateToleranceMin} mnt)` : 'Tidak'], ['Pulang cepat menggugurkan', p.requireNoEarlyLeave ? 'Ya' : 'Tidak'], ['WFA dihitung', p.countWfa ? 'Ya' : 'Tidak'], ['Dinas lokal ≤ 8 jam dihitung', p.countLocalDuty ? 'Ya' : 'Tidak'], ['Tahan bila ada isu', p.holdOnIssues ? 'Ya' : 'Tidak'], ['Non-ASN dibayar', p.includeNonAsn ? 'Ya' : 'Tidak'], ...(['I', 'II', 'III', 'IV'] as GolGroup[]).map(g => [`Tarif gol. ${g}`, `${p.rates[g]} · PPh ${p.pph[g]}%`]), ['Golongan kosong', 'Nominal pending; tanpa tarif fallback'], ['Revisi workspace', String(hr.revision)], ['Filter pencarian', q], ['Versi kalkulasi', '2.0.0'], ...hr.files.map(f => [`Sumber r${f.revision ?? 1}: ${f.fileName}`, `${f.hash ?? 'legacy'} · ${f.id}`]), ['Catatan', 'Tarif & PPh adalah nilai acuan awal; wajib dikonfirmasi Bagian Keuangan/SDM.']], widths: [36, 50] },
     ])
     toast('Daftar nominatif diunduh')
@@ -107,7 +108,7 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
       </table></div>
     </Panel>
 
-    <AnimatePresence>{detail && <Drawer wide label="Rincian uang makan" onClose={() => setDetail(null)}><MealDetail month={hr.recon.months.find(m => m.employee.id === detail.employee.id) ?? detail} /></Drawer>}</AnimatePresence>
+    <AnimatePresence>{detail && <Drawer wide label="Rincian uang makan" onClose={() => setDetail(null)}>{(() => { const current = hr.recon.months.find(m => m.employee.id === detail.employee.id); return current ? <MealDetail month={current} /> : <p className="muted">Pegawai ini tidak lagi ada pada roster aktif periode ini setelah perubahan sumber. Tutup rincian untuk memeriksa perhitungan terbaru.</p> })()}</Drawer>}</AnimatePresence>
   </div>
 }
 

@@ -21,6 +21,7 @@ import { createUser } from './create-user.ts'
 import { decisionOwned, globalAccess, officeAllowed, requireOffice, sourceAllowed, scopeWorkspace } from './scope.ts'
 import { registerSubmissions } from './submissions.ts'
 import { validateMasterChange } from './master.ts'
+import { previewRecordReview, recordReviewInput } from './recordReviews.ts'
 
 const digest = (s: string | Buffer) => createHash('sha256').update(s).digest('hex')
 const publicUser = (u: typeof users.$inferSelect): User => ({ id: u.id, email: u.email, name: u.name, role: u.role, offices: u.offices })
@@ -95,7 +96,10 @@ export function createApp(db: Database, config: { origin: string; production: bo
       const revision = w.revision + 1
       await tx.update(workspaces).set({ state: next, revision, updatedAt: new Date() }).where(eq(workspaces.id, 'default'))
       const changed = Object.keys(next).filter(k => JSON.stringify(next[k as keyof Workspace]) !== JSON.stringify(w.state[k as keyof Workspace]))
-      await tx.insert(auditEvents).values({ id: randomUUID(), actorId: actor.id, action, revision, reason, details: { checksum: digest(JSON.stringify(next)), changed, restorePoint: action === 'workspace.restore' ? w.state : undefined, before: Object.fromEntries(changed.filter(k => k !== 'files').map(k => [k, w.state[k as keyof Workspace]])), after: Object.fromEntries(changed.filter(k => k !== 'files').map(k => [k, next[k as keyof Workspace]])), sourcesBefore: w.state.files.map(f => ({ id: f.id, active: f.active, hash: f.hash })), sourcesAfter: next.files.map(f => ({ id: f.id, active: f.active, hash: f.hash })) } })
+      const priorReviews = new Map(w.state.files.flatMap(f => (f.recordReviews ?? []).map(r => [r.id, { sourceId: f.id, review: r }] as const)))
+      const currentReviews = new Map(next.files.flatMap(f => (f.recordReviews ?? []).map(r => [r.id, { sourceId: f.id, review: r }] as const)))
+      const recordReviewChanges = [...new Set([...priorReviews.keys(), ...currentReviews.keys()])].flatMap(id => JSON.stringify(priorReviews.get(id)) === JSON.stringify(currentReviews.get(id)) ? [] : [{ id, sourceId: currentReviews.get(id)?.sourceId ?? priorReviews.get(id)?.sourceId, before: priorReviews.get(id)?.review, after: currentReviews.get(id)?.review }])
+      await tx.insert(auditEvents).values({ id: randomUUID(), actorId: actor.id, action, revision, reason, details: { checksum: digest(JSON.stringify(next)), changed, recordReviewChanges, restorePoint: action === 'workspace.restore' ? w.state : undefined, before: Object.fromEntries(changed.filter(k => k !== 'files').map(k => [k, w.state[k as keyof Workspace]])), after: Object.fromEntries(changed.filter(k => k !== 'files').map(k => [k, next[k as keyof Workspace]])), sourcesBefore: w.state.files.map(f => ({ id: f.id, active: f.active, hash: f.hash, revision: f.revision, recordReviewCount: f.recordReviews?.length ?? 0 })), sourcesAfter: next.files.map(f => ({ id: f.id, active: f.active, hash: f.hash, revision: f.revision, recordReviewCount: f.recordReviews?.length ?? 0 })) } })
       return { state: scopeWorkspace(next, actor), revision }
     })
   }
@@ -210,6 +214,20 @@ export function createApp(db: Database, config: { origin: string; production: bo
       state.files.push(file)
       await tx.update(uploads).set({ committed: true }).where(eq(uploads.id, upload.id))
       return state
+    }))
+  })
+  app.post('/api/sources/:id/record-review/preview', async c => {
+    const input = recordReviewInput.parse(await c.req.json()), w = await read()
+    return c.json(previewRecordReview(w.state, w.revision, c.req.param('id'), input, c.get('user')).preview)
+  })
+  app.post('/api/sources/:id/record-review', async c => {
+    const input = recordReviewInput.parse(await c.req.json()), actor = c.get('user')
+    if (!['admin', 'hr'].includes(actor.role)) throw new HTTPException(403)
+    if (!input.confirmedImpact) throw new HTTPException(400, { message: 'Preview dampak dan konfirmasi wajib sebelum menyimpan' })
+    return c.json(await change(input.expectedRevision, actor, 'source.record-review', input.reason, state => {
+      const result = previewRecordReview(state, input.expectedRevision, c.req.param('id'), input, actor)
+      if (result.preview.checksum !== input.confirmedImpact) throw new HTTPException(409, { message: 'Dampak telah berubah; periksa preview kembali' })
+      return result.next
     }))
   })
   app.post('/api/sources/:id/withdraw', async c => {

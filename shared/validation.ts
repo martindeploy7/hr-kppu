@@ -50,12 +50,23 @@ const sourceSchema = z.object({
   evidence: z.array(evidenceSchema).max(100000), assignments: z.array(assignmentSchema).max(20000), warnings: z.array(text), stats: z.object({ rows: z.number().int().nonnegative(), people: z.number().int().nonnegative() }),
   hash: z.string().regex(/^[a-f0-9]{64}$/).optional(), parserVersion: text.optional(), revision: z.number().int().positive().optional(), supersedes: text.optional(), active: z.boolean().optional(), completeThrough: date.optional(),
   declaration: z.object({ actorId: text, basis: text, at: z.iso.datetime() }).optional(),
+  recordReviews: z.array(z.object({ id: z.uuid(), kind: z.enum(['evidence', 'assignment']), recordId: text, disposition: z.enum(['excluded', 'active']), reason: text.min(10), actorId: text, reviewer: text, at: z.iso.datetime() })).max(10000).optional(),
   master: z.array(employeeSchema.partial()).optional(), partialDates: z.array(date).optional(), quarantined: z.array(z.object({ ref: text, reason: text, raw: text })).optional(),
   summaries: z.array(z.object({ name: text, mesin: text.optional(), duty: z.number().optional(), actual: z.number().optional(), absent: z.number().optional(), late: z.number().optional(), early: z.number().optional(), overtimeHours: z.number().optional() })).optional(),
 })
 export const workspaceSchema = z.object({
   version: z.union([z.literal(1), z.literal(2)]), files: z.array(sourceSchema).max(2000), master: z.array(employeeSchema).max(10000),
   overrides: z.record(identifierKey, employeeSchema.partial()), decisions: z.array(decisionSchema), resolutions: z.array(resolutionSchema), policy: policySchema, reviewer: text, period: z.string().regex(/^$|^\d{4}-(0[1-9]|1[0-2])$/),
+}).superRefine((workspace, ctx) => {
+  const ids = new Set<string>()
+  for (const [i, file] of workspace.files.entries()) {
+    const evidenceIds = new Set(file.evidence.map(e => e.id)), assignmentIds = new Set(file.assignments.map(a => a.id))
+    for (const [j, review] of (file.recordReviews ?? []).entries()) {
+      if (ids.has(review.id)) ctx.addIssue({ code: 'custom', path: ['files', i, 'recordReviews', j, 'id'], message: 'ID keputusan sumber berulang' })
+      ids.add(review.id)
+      if (!(review.kind === 'evidence' ? evidenceIds : assignmentIds).has(review.recordId)) ctx.addIssue({ code: 'custom', path: ['files', i, 'recordReviews', j, 'recordId'], message: 'Keputusan merujuk catatan sumber yang tidak ada' })
+    }
+  }
 })
 export function migrateWorkspace(input: unknown): Workspace {
   const v = workspaceSchema.parse(input)

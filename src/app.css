@@ -150,6 +150,18 @@ table.coverage td.gap{background:repeating-linear-gradient(135deg,#fbfaf7 0 6px,
 .warn-toggle.has{border-color:#f1dca4;background:#fff8e6;color:#7a5200}
 .file-detail{padding:0 14px 12px 58px;color:#4f5c69;font-size:12px}
 .file-detail ul{margin:0;padding-left:16px;line-height:1.65}
+.source-records{margin-top:20px;min-width:0}
+.source-records>label,.record-review label{display:grid;gap:8px;font-size:12px;font-weight:600;color:#314c5b;margin:12px 0}
+.source-records input[type=search],.record-review textarea{width:100%;min-width:0;min-height:42px;padding:10px;border:1px solid #b7c7cf;border-radius:7px;font:inherit;background:#fff;color:#203d4f}
+.record-review{min-width:0;max-width:100%;font-size:12px}
+.record-review>.link{text-align:left;white-space:normal;overflow-wrap:anywhere;line-height:1.5}
+.record-review .import-preview{width:560px;max-width:70vw;padding:14px 0;margin-top:10px;color:#314c5b}
+.record-review p{line-height:1.6;overflow-wrap:anywhere}
+.record-review textarea{min-height:88px;resize:vertical}
+.record-review textarea:focus-visible{outline:2px solid #156c78;outline-offset:3px}
+.record-review .review-confirm{display:flex;align-items:flex-start;gap:10px;font-weight:400}
+.record-review .review-confirm input{margin-top:3px;flex:0 0 auto}
+.record-review .btn{margin:8px 0}
 .format-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}
 .format-list>div{display:flex;gap:10px;padding:12px;border:1px solid #ece9e3;border-radius:11px}
 .format-list svg{flex:0 0 auto;color:#3e765d;margin-top:2px}

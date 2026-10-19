@@ -8,6 +8,7 @@ import { formatID } from '../engine/dates.ts'
 import { fmt } from '../lib/format.ts'
 import { Note, PageHeader, Panel } from '../components/ui.tsx'
 import type { Nav } from '../App.tsx'
+import { SourceRecords } from '../components/SourceRecords.tsx'
 
 type Column = { id: string; label: string; kinds: SourceKind[] }
 const COLUMNS: Column[] = [
@@ -127,6 +128,7 @@ function FileRow({ file, open, onToggle, onRemove, onOffice }: { file: SourceFil
     {open && <div className="file-detail">
       {warn ? <ul>{file.warnings.map((w, i) => <li key={`warning-${i}`}>{w}</li>)}{file.quarantined?.map((q, i) => <li key={`quarantine-${i}`}>{q.ref}: {q.reason}</li>)}</ul> : <p>Tidak ada anomali format.</p>}
       {file.summaries && <p className="muted">Laporan juga memuat ringkasan per pegawai (Duty/Actual/Absent/Late) yang dipakai sebagai pembanding.</p>}
+      <SourceRecords file={file} />
     </div>}
   </article>
 }

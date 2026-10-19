@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { Employee, Resolution, SourceFile } from '../engine/types.ts'
+import type { Employee, RecordReview, Resolution, SourceFile } from '../engine/types.ts'
 import { buildRoster, type Roster } from '../engine/roster.ts'
 import { reconcile, type Reconciliation } from '../engine/reconcile.ts'
 import { enforcePolicy, type MealPolicy } from '../engine/policy.ts'
@@ -11,12 +11,13 @@ import { emptyWorkspace, upsertEmployees, type Workspace, type WorkspaceResponse
 export type ImportResult = { name: string; ok: boolean; message: string }
 type Preview = { duplicate: boolean; file: SourceFile }
 type Ctx = Workspace & {
-  ready: boolean; roster: Roster; recon: Reconciliation; periods: string[]; activePeriod: string
+  ready: boolean; roster: Roster; recordRoster: Roster; recon: Reconciliation; periods: string[]; activePeriod: string
   revision: number; saveStatus: 'loading' | 'saved' | 'saving' | 'error'; saveError: string
   retrySave: () => void; reload: () => Promise<void>; backup: () => void
   previewFiles: (files: File[], dateOrder?: 'DMY' | 'MDY') => Promise<{ previews: Preview[]; results: ImportResult[] }>
   commitImport: (file: SourceFile, office: string, replaces?: string, completeThrough?: string) => Promise<void>
   declareNilSt: (office: string, period: string, basis: string) => Promise<void>
+  reviewRecord: (sourceId: string, input: { id: string; kind: RecordReview['kind']; recordId: string; disposition: RecordReview['disposition']; reason: string; confirmedImpact: string }) => Promise<void>
   restoreBackup: (state: Workspace) => Promise<void>
   removeFile: (id: string) => Promise<void>; setFileOffice: (id: string, office: string) => Promise<void>; clearAll: () => void
   upsertMaster: (rows: Partial<Employee>[]) => { added: number; updated: number }
@@ -87,6 +88,7 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
   const patch = (fn: (s: Workspace) => Partial<Workspace>) => setState(s => ({ ...s, ...fn(s) }))
   const files = useMemo(() => state.files.filter(f => f.active !== false), [state.files])
   const roster = useMemo(() => buildRoster(files, state.master, state.overrides, state.decisions), [files, state.master, state.overrides, state.decisions])
+  const recordRoster = useMemo(() => files.some(f => f.recordReviews?.length) ? buildRoster(files, state.master, state.overrides, state.decisions, true) : roster, [files, state.master, state.overrides, state.decisions, roster])
   const periods = useMemo(() => [...new Set(files.flatMap(f => [...f.evidence.map(e => e.date.slice(0, 7)), ...f.assignments.flatMap(a => eachDay(a.start, a.end).map(d => d.slice(0, 7))) ]))].sort().reverse(), [files])
   const activePeriod = period || state.period || periods[0] || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date()).slice(0, 7)
   const recon = useMemo(() => reconcile(files, roster, monthBounds(activePeriod), state.policy, state.resolutions), [files, roster, activePeriod, state.policy, state.resolutions])
@@ -102,7 +104,7 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
     ...state, files, reviewer: user.name, resolutions: effectiveResolutions, ready, revision, saveStatus, saveError,
     retrySave: () => { setSaveError(''); setRetry(n => n + 1) }, reload,
     backup: () => downloadJson(`KPPU_HR_backup_r${revision}.json`, { application: 'kppu-hr', exportedAt: new Date().toISOString(), revision, state }),
-    roster, recon, periods: [...new Set([activePeriod, ...periods])], activePeriod,
+    roster, recordRoster, recon, periods: [...new Set([activePeriod, ...periods])], activePeriod,
     previewFiles: async (files, dateOrder) => {
       const previews: Preview[] = [], results: ImportResult[] = []
       for (const file of files) {
@@ -113,6 +115,7 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
     },
     commitImport: (file, office, replaces, completeThrough) => serverAction('/imports/commit', { uploadId: file.id, office, replaces, completeThrough, reason: replaces ? 'Mengganti dataset yang dipilih pada preview' : 'Menambahkan sumber setelah preview' }),
     declareNilSt: (office, period, basis) => serverAction('/coverage/nil-st', { office, period, basis }),
+    reviewRecord: (sourceId, input) => serverAction(`/sources/${sourceId}/record-review`, input),
     restoreBackup: state => serverAction('/backup/restore', { state, reason: 'Pemulihan workspace setelah preview dan konfirmasi admin' }),
     removeFile: id => serverAction(`/sources/${id}/withdraw`, { reason: 'Sumber ditarik dari perhitungan oleh SDM' }),
     setFileOffice: (id, office) => serverAction(`/sources/${id}/office`, { office, reason: 'Koreksi kantor sumber oleh SDM' }),

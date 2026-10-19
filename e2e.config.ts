@@ -14,6 +14,9 @@ writeFileSync('.e2e/fixtures/E2E_Master_Valid.csv', `NIP,Nama,Kantor,Unit,Golong
 const withdrawFixture = XLSX.utils.book_new()
 XLSX.utils.book_append_sheet(withdrawFixture, XLSX.utils.aoa_to_sheet([[`E2E withdraw ${Date.now()}`], ['NIK','Nama','Tanggal','Scan Masuk','Scan Pulang'], ['198001012020011999','E2E Pegawai Sintetis','14/10/2026','08:00','16:00']]), 'Sheet1')
 writeFileSync('.e2e/fixtures/E2E_Withdraw_Pusat.xlsx', XLSX.write(withdrawFixture, { type: 'buffer', bookType: 'xlsx' }))
+const reviewFixture = XLSX.utils.book_new()
+XLSX.utils.book_append_sheet(reviewFixture, XLSX.utils.aoa_to_sheet([[`E2E record review ${Date.now()}`], ['Nama Pegawai','NIP PPPK','SURAT TUGAS','','TANGGAL TUGAS','TUJUAN'], ['','','TANGGAL ST','NO SURAT','',''], ['E2E Pegawai Sintetis','198001012020011999',46308,'E2E/Review','15 Oktober 2026','Jakarta']]), 'ST')
+writeFileSync('.e2e/fixtures/E2E_Review_ST_Pusat.xlsx', XLSX.write(reviewFixture, { type: 'buffer', bookType: 'xlsx' }))
 export default {
  tests: 'tests/**/*.e2e.ts', workers: 1,
  targets: [{ engine: web(), app: { url: 'http://127.0.0.1:5173' } }],

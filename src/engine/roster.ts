@@ -1,6 +1,7 @@
 import type { Alias, Assignment, Employee, Evidence, MatchDecision, SourceFile, SourceKind } from './types.ts'
 import { decodeNIP, officeFromUnit } from './ids.ts'
 import { nameKey, nameScore, nameTokens, titleCase } from './names.ts'
+import { effectiveSource } from './recordReviews.ts'
 
 export type LinkMethod = 'nip' | 'nika' | 'app' | 'mesin' | 'nama' | 'manual' | 'baru'
 export type Candidate = { employeeId: string; score: number }
@@ -57,8 +58,8 @@ const MARGIN = 0.07
 export const matchKey = (office: string, name: string) => `${office}|${nameKey(name)}`
 export const mergeKey = (fromId: string) => `merge|${fromId}`
 
-export function buildRoster(files: SourceFile[], master: Employee[], overrides: Record<string, Partial<Employee>>, decisions: MatchDecision[]): Roster {
-  files = files.filter(f => f.active !== false)
+export function buildRoster(files: SourceFile[], master: Employee[], overrides: Record<string, Partial<Employee>>, decisions: MatchDecision[], includeExcluded = false): Roster {
+  files = files.filter(f => f.active !== false).map(f => includeExcluded ? f : effectiveSource(f))
   const byId = new Map<string, Employee>()
   const byNip = new Map<string, string>(), byNika = new Map<string, string>(), byApp = new Map<string, string>(), byMesin = new Map<string, string>()
   const decisionMap = new Map(decisions.map(d => [d.key, d]))

@@ -91,3 +91,48 @@ test('source withdrawal confirms server success and preserves the archived datas
  const result=await browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json();return {active:w.state.files.filter((f:any)=>f.active!==false).length,archive:w.state.files.filter((f:any)=>f.fileName==='E2E_Withdraw_Pusat.xlsx'&&f.active===false).length}})
  expect(result.active).toBe(before);expect(result.archive>0).toBe(true)
 })
+test('participant review previews impact, preserves original ST and requires a new reason to reactivate',async({app,screen,browser})=>{
+ await app.open('/');const account=credentials.user('admin')
+ await screen.getByLabel('Email akun').fill(account.username);await screen.getByLabel('Password').fill(account.password);await screen.getByRole('button','Masuk',{exact:true}).tap()
+ await expect(screen.getByRole('button','Impor Sumber',{exact:true})).toBeVisible()
+ const cleanup=async()=>browser.evaluate(async()=>{
+  let w=await(await fetch('/api/workspace')).json()
+  for(const f of w.state.files.filter((s:any)=>s.fileName==='E2E_Review_ST_Pusat.xlsx'&&s.active!==false)){
+   const r=await fetch(`/api/sources/${f.id}/withdraw`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({expectedRevision:w.revision,reason:'E2E cleanup synthetic record-review fixture'})})
+   if(!r.ok)throw new Error(`Review fixture cleanup: ${r.status}`)
+   w=await r.json()
+  }
+ })
+ await cleanup();await browser.reload()
+ try {
+ await screen.getByRole('button','Impor Sumber',{exact:true}).tap()
+ await browser.locator('input[type="file"]').setInputFiles(['.e2e/fixtures/E2E_Review_ST_Pusat.xlsx'])
+ await screen.getByRole('button','Konfirmasi impor',{exact:true}).tap()
+ await expect(browser.locator('.sidebar-footer')).toContainText('Tersimpan di server')
+ const rowSelector='.file-row:has(.file-name strong[title="E2E_Review_ST_Pusat.xlsx"])',editorSelector=`${rowSelector} .record-review`
+ const row=browser.locator(rowSelector)
+ await browser.locator(`${rowSelector} .warn-toggle`).tap()
+ const editor=browser.locator(editorSelector)
+ await browser.locator(`${editorSelector} button[aria-expanded]`).tap()
+ await browser.locator(`${editorSelector} textarea`).fill('E2E pembatalan peserta sesuai dokumen sintetis revisi')
+ await editor.getByRole('button','Preview dampak',{exact:true}).tap()
+ await expect(editor.getByText('1 hari pegawai berubah',{exact:true})).toBeVisible()
+ expect(await editor.getByRole('button','Keluarkan peserta ST',{exact:true}).isDisabled()).toBe(true)
+ for(const width of [390,1280]){await browser.setViewport({width,height:844});expect(await browser.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await screen.scrollUntilVisible(editor.getByText('1 hari pegawai berubah',{exact:true}))}
+ await editor.getByRole('checkbox').tap()
+ await editor.getByRole('button','Keluarkan peserta ST',{exact:true}).tap()
+ await expect(browser.locator(`${editorSelector} .tag.warn`)).toContainText('Dikeluarkan dari bukti aktif')
+ const original=await browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json(),f=w.state.files.find((s:any)=>s.fileName==='E2E_Review_ST_Pusat.xlsx'&&s.active!==false);return {count:f.assignments.length,reviews:f.recordReviews.length,reason:f.recordReviews[0].reason}})
+ expect(original.count).toBe(1);expect(original.reviews).toBe(1);expect(original.reason).toBe('E2E pembatalan peserta sesuai dokumen sintetis revisi')
+ await browser.locator(`${editorSelector} button[aria-expanded]`).tap()
+ await browser.locator(`${editorSelector} textarea`).fill('E2E peserta diaktifkan kembali dengan dasar verifikasi baru')
+ await editor.getByRole('button','Preview dampak',{exact:true}).tap()
+ await expect(editor.getByText('1 hari pegawai berubah',{exact:true})).toBeVisible()
+ await editor.getByRole('checkbox').tap();await editor.getByRole('button','Aktifkan kembali catatan',{exact:true}).tap()
+ await expect(browser.locator(`${editorSelector} button[aria-expanded]`)).toHaveAttribute('aria-expanded','false')
+ const restored=await browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json(),f=w.state.files.find((s:any)=>s.fileName==='E2E_Review_ST_Pusat.xlsx'&&s.active!==false);return {count:f.assignments.length,reviews:f.recordReviews.length,last:f.recordReviews.at(-1).disposition}})
+ expect(restored.count).toBe(1);expect(restored.reviews).toBe(2);expect(restored.last).toBe('active')
+ await row.getByRole('button','Tarik sumber E2E_Review_ST_Pusat.xlsx',{exact:true}).tap()
+ await expect(screen.getByText('E2E_Review_ST_Pusat.xlsx ditarik dari perhitungan; arsip tetap tersimpan',{exact:true})).toBeVisible()
+ } finally { await cleanup() }
+})

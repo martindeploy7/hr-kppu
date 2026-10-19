@@ -58,6 +58,8 @@ export type Assignment = {
 
 export type ReportSummary = { name: string; mesin?: string; duty?: number; actual?: number; absent?: number; late?: number; early?: number; overtimeHours?: number }
 
+export type RecordReview = { id: string; kind: 'evidence' | 'assignment'; recordId: string; disposition: 'excluded' | 'active'; reason: string; actorId: string; reviewer: string; at: string }
+
 export type SourceFile = {
   id: string
   fileName: string
@@ -82,6 +84,7 @@ export type SourceFile = {
   declaration?: { actorId: string; basis: string; at: string }
   master?: Partial<Employee>[]
   quarantined?: { ref: string; reason: string; raw: string }[]
+  recordReviews?: RecordReview[]
 }
 
 export type StatusKepegawaian = 'PPPK' | 'PNS' | 'Non-ASN' | 'Belum diketahui'

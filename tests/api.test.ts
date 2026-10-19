@@ -186,6 +186,46 @@ describe('Authenticated PostgreSQL API',()=>{
   const calculation=await (await request('/calculations/2026-09','GET',undefined,'officeOne')).json();expect(calculation.calculation.months.every((m:any)=>m.employee.kantor==='Kanwil I')).toBe(true)
   const backup=await (await request('/backup','GET',undefined,'officeOne')).json();expect(backup.state.master).toHaveLength(1)
  })
+ test('record review previews impact, keeps participants separate and audits cancellation/reinstatement',async()=>{
+  const original=await workspace(),state=structuredClone(original.state),people=state.master.filter((p:any)=>p.kantor==='Pusat'),id='review-st-source'
+  state.files.push({id,fileName:'Synthetic participant review',kind:'surat-tugas',label:'Synthetic',office:'Pusat',importedAt:'2026-10-20T00:00:00Z',period:{start:'2026-09-02',end:'2026-09-02'},evidence:[],assignments:people.map((p:any,i:number)=>({id:`review-st-${i}`,fileId:id,office:'Pusat',name:p.nama,nip:p.nip,start:'2026-09-02',end:'2026-09-02',rawDate:'2 September 2026',letterNo:'Synthetic/1',local:true,ref:`Sheet1 A${i+2}`})),warnings:[],stats:{rows:people.length,people:people.length}})
+  expect((await request('/backup/restore','POST',{expectedRevision:original.revision,state,reason:'Synthetic multi-participant ST review fixture'})).status).toBe(200)
+  let w=await workspace(),body={id:randomUUID(),expectedRevision:w.revision,kind:'assignment',recordId:'review-st-0',disposition:'excluded',reason:'Pembatalan peserta pertama dikonfirmasi dokumen revisi'}
+  const path=`/sources/${id}/record-review`
+  expect((await request(path+'/preview','POST',body,'reviewer')).status).toBe(403)
+  expect((await request(path+'/preview','POST',body,'officeOne')).status).toBe(403)
+  expect((await request(path+'/preview','POST',{...body,actorId:'spoof'})).status).toBe(400)
+  expect((await request(path+'/preview','POST',{...body,reason:'short'})).status).toBe(400)
+  expect((await request(path,'POST',body)).status).toBe(400)
+  const response=await request(path+'/preview','POST',body);expect(response.status).toBe(200);const preview=await response.json()
+  expect(preview.affected).toHaveLength(1);expect(preview.affected[0]).toMatchObject({employeeId:people[0].id,before:{mealState:'excluded'},after:{mealState:'eligible',amount:42000}})
+  expect((await workspace()).revision).toBe(w.revision)
+  expect((await request(path,'POST',{...body,confirmedImpact:'0'.repeat(64)})).status).toBe(409)
+  const changed=await request('/workspace','PUT',{expectedRevision:w.revision,patch:{period:'2026-09'},reason:'Concurrent change invalidates preview'});expect(changed.status).toBe(200)
+  expect((await request(path,'POST',{...body,confirmedImpact:preview.checksum})).status).toBe(409)
+  w=await workspace();body={...body,expectedRevision:w.revision}
+  const fresh=await(await request(path+'/preview','POST',body)).json()
+  expect((await request(path,'POST',{...body,confirmedImpact:fresh.checksum})).status).toBe(200)
+  w=await workspace();const source=w.state.files.find((f:any)=>f.id===id)
+  expect(source.assignments).toHaveLength(2);expect(source.recordReviews).toHaveLength(1);expect(source.recordReviews[0].reviewer).toBe('admin Test')
+  const calculation=(await(await request('/calculations/2026-09')).json()).calculation
+  expect(calculation.months.find((m:any)=>m.employee.id===people[0].id).days.find((d:any)=>d.date==='2026-09-02').meal.state).toBe('eligible')
+  expect(calculation.months.find((m:any)=>m.employee.id===people[1].id).days.find((d:any)=>d.date==='2026-09-02').meal.state).toBe('excluded')
+  const events=await connection.db.select().from(auditEvents),event=events.find(e=>e.action==='source.record-review')!
+  expect((event.details as any).recordReviewChanges[0]).toMatchObject({sourceId:id,after:{recordId:'review-st-0',reviewer:'admin Test'}})
+  const head=(await(await request('/meal-submissions')).json()).submissions.find((s:any)=>s.status==='locked'&&!s.correctionId&&s.office==='Pusat'),proposalId=randomUUID()
+  const proposal=await request('/meal-submissions','POST',{id:proposalId,period:'2026-09',office:'Pusat',supersedesId:head.id,expectedRevision:w.revision,reason:'Snapshot koreksi menyertakan dasar keputusan peserta ST'})
+  expect(proposal.status).toBe(200);expect((await proposal.json()).submission.snapshot.sources.find((f:any)=>f.id===id).recordReviews).toHaveLength(1)
+  const exported=XLSX.read(await(await request(`/meal-submissions/${proposalId}/export`)).arrayBuffer());expect(exported.Sheets['Review Sumber']).toBeDefined()
+  expect(exported.Sheets['Review Sumber'].F2.v).toBe(body.reason)
+  expect((await request(`/meal-submissions/${proposalId}/cancel`,'POST',{expectedRevision:1,reason:'Cancel synthetic review snapshot after export verification'})).status).toBe(200)
+  body={...body,id:randomUUID(),expectedRevision:w.revision,disposition:'active',reason:'Peserta diaktifkan kembali berdasarkan dokumen sah'}
+  const reactivation=await(await request(path+'/preview','POST',body)).json()
+  expect(reactivation.affected[0].after.mealState).toBe('excluded')
+  expect((await request(path,'POST',{...body,confirmedImpact:reactivation.checksum})).status).toBe(200)
+  w=await workspace();expect(w.state.files.find((f:any)=>f.id===id).recordReviews).toHaveLength(2)
+  expect((await request('/backup/restore','POST',{expectedRevision:w.revision,state:original.state,reason:'Restore shared fixture after record review integration test'})).status).toBe(200)
+ })
  test('password change reauthenticates and revokes other sessions',async()=>{
   const oldCookie=cookies.reviewer
   const login=await request('/auth/login','POST',{email:'reviewer@kppu.test',password});cookies.reviewer=login.headers.get('set-cookie')!.split(';')[0]
