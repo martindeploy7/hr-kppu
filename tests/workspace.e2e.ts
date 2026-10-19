@@ -48,10 +48,11 @@ test('workspace refreshes changes committed by another client',async({app,screen
  await app.open('/');const account=credentials.user('admin')
  await screen.getByLabel('Email akun').fill(account.username);await screen.getByLabel('Password').fill(account.password);await screen.getByRole('button','Masuk',{exact:true}).tap()
  await screen.getByRole('button','Data Pegawai',{exact:true}).tap()
- const response=await browser.evaluate(async()=>{
+ const name = `E2E Perubahan Admin Lain ${Date.now()}`
+ const response=await browser.evaluate(async(name:string)=>{
   const before=await(await fetch('/api/workspace')).json(),id='e2e-refresh-person'
-  const person={id,nama:'E2E Perubahan Admin Lain',nip:'198001012020011998',nika:'',kantor:'Pusat',unit:'',statusKepegawaian:'Belum diketahui',golongan:'',jabatan:'',tanggalLahir:'',jenisKelamin:'',tempatLahir:'',pendidikan:'',disiplinIlmu:'',pelatihan:[],tanggalMulaiKerja:'',alamat:'',kontakDarurat:'',namaKontakDarurat:'',statusPerkawinan:'',agama:'',nomorWhatsApp:'',email:'',statusPegawai:'Aktif',aliases:[],sources:[],derived:[]}
+  const person={id,nama:name,nip:'198001012020011998',nika:'',kantor:'Pusat',unit:'',statusKepegawaian:'Belum diketahui',golongan:'',jabatan:'',tanggalLahir:'',jenisKelamin:'',tempatLahir:'',pendidikan:'',disiplinIlmu:'',pelatihan:[],tanggalMulaiKerja:'',alamat:'',kontakDarurat:'',namaKontakDarurat:'',statusPerkawinan:'',agama:'',nomorWhatsApp:'',email:'',statusPegawai:'Aktif',aliases:[],sources:[],derived:[]}
   const result=await fetch('/api/workspace',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({expectedRevision:before.revision,patch:{master:[...before.state.master.filter((e:any)=>e.id!==id),person]},reason:'E2E external client update'})});return result.status
- });expect(response).toBe(200)
- await expect(screen.getByText('E2E Perubahan Admin Lain',{exact:true})).toBeVisible({timeout:22000})
+ },name);expect(response).toBe(200)
+ await expect(screen.getByText(name,{exact:true})).toBeVisible({timeout:22000})
 })
