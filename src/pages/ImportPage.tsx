@@ -90,7 +90,7 @@ export function ImportPage({ nav, toast }: { nav: Nav; toast: (m: string) => voi
 
     <Panel title={`File sumber (${hr.files.length})`} sub="Periksa jenis yang terdeteksi dan kantor asal. Peringatan menjelaskan anomali format yang ditemukan saat membaca.">
       {hr.files.length === 0 ? <p className="muted">Belum ada file. Mulai dengan menarik folder "Rapat Absensi" ke kotak di atas.</p> :
-        <div className="file-list">{[...hr.files].sort(sortFiles).map(f => <FileRow key={f.id} file={f} open={open === f.id} onToggle={() => setOpen(open === f.id ? null : f.id)} onRemove={() => { hr.removeFile(f.id); toast(`${f.fileName} dihapus`) }} onOffice={o => hr.setFileOffice(f.id, o)} />)}</div>}
+        <div className="file-list">{[...hr.files].sort(sortFiles).map(f => <FileRow key={f.id} file={f} open={open === f.id} onToggle={() => setOpen(open === f.id ? null : f.id)} onRemove={async () => { try { await hr.removeFile(f.id); toast(`${f.fileName} ditarik dari perhitungan; arsip tetap tersimpan`) } catch (e) { toast((e as Error).message) } }} onOffice={async o => { try { await hr.setFileOffice(f.id, o); toast('Kantor sumber diperbarui di server') } catch (e) { toast((e as Error).message) } }} />)}</div>}
     </Panel>
 
     <Panel title="Format yang dikenali" sub="Dipetakan dari file nyata yang dipakai saat ini. Format baru bisa ditambahkan sebagai parser terpisah.">
@@ -103,22 +103,26 @@ export function ImportPage({ nav, toast }: { nav: Nav; toast: (m: string) => voi
 const ORDER: SourceKind[] = ['mesin', 'daring', 'matriks-kanwil', 'jadwal-kanwil', 'laporan-kanwil', 'surat-tugas']
 const sortFiles = (a: SourceFile, b: SourceFile) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) || a.office.localeCompare(b.office)
 
-function FileRow({ file, open, onToggle, onRemove, onOffice }: { file: SourceFile; open: boolean; onToggle: () => void; onRemove: () => void; onOffice: (o: string) => void }) {
+function FileRow({ file, open, onToggle, onRemove, onOffice }: { file: SourceFile; open: boolean; onToggle: () => void; onRemove: () => Promise<void>; onOffice: (o: string) => Promise<void> }) {
   const warn = file.warnings.length + (file.quarantined?.length ?? 0)
+  const { user } = useAuth()
+  const [busy, setBusy] = useState(false)
+  const editable = ['admin', 'hr'].includes(user.role)
+  const perform = async (fn: () => Promise<void>) => { setBusy(true); try { await fn() } finally { setBusy(false) } }
   return <article className={`file-row ${open ? 'open' : ''}`}>
     <div className="file-main">
       <div className={`file-kind k-${file.kind}`}><UploadCloud size={16} /></div>
       <div className="file-name"><strong title={file.fileName}>{file.fileName}</strong><span>{file.label}</span></div>
       <div className="file-meta">
         {file.kind === 'daring' ? <span className="pill">Semua kantor</span> :
-          <select aria-label={`Kantor asal ${file.fileName}`} value={file.office} onChange={e => onOffice(e.target.value)}>
+          <select aria-label={`Kantor asal ${file.fileName}`} value={file.office} disabled={busy || !editable} onChange={e => void perform(() => onOffice(e.target.value))}>
             {[...(OFFICES.includes(file.office) ? [] : [file.office]), ...OFFICES].map(o => <option key={o}>{o}</option>)}
           </select>}
         <span>{file.period ? `${formatID(file.period.start, { short: true })} – ${formatID(file.period.end, { short: true })}` : '—'}</span>
         <span>{fmt.format(file.stats.rows)} baris · {fmt.format(file.stats.people)} nama</span>
       </div>
       <button className={`warn-toggle ${warn ? 'has' : ''}`} onClick={onToggle} aria-expanded={open}>{warn ? <><AlertTriangle size={14} /> {warn} catatan</> : 'Bersih'} <ChevronDown size={14} /></button>
-      <button className="icon-btn" aria-label={`Hapus ${file.fileName}`} onClick={onRemove}><Trash2 size={15} /></button>
+      {editable && <button className="icon-btn" aria-label={`Tarik sumber ${file.fileName}`} disabled={busy} onClick={() => void perform(onRemove)}><Trash2 size={15} /></button>}
     </div>
     {open && <div className="file-detail">
       {warn ? <ul>{file.warnings.map((w, i) => <li key={`warning-${i}`}>{w}</li>)}{file.quarantined?.map((q, i) => <li key={`quarantine-${i}`}>{q.ref}: {q.reason}</li>)}</ul> : <p>Tidak ada anomali format.</p>}

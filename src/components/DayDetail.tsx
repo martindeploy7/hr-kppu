@@ -11,7 +11,7 @@ const NOTE_LABEL: Record<string, string> = {
 
 export function DayDetail({ day, showMeal = true }: { day: DayRecord; showMeal?: boolean }) {
   const hr = useHr()
-  const fileName = (id: string) => hr.files.find(f => f.id === id)?.fileName ?? 'file dihapus'
+  const fileName = (id: string) => hr.files.find(f => f.id === id)?.fileName ?? 'sumber tidak aktif'
   return <div className="day-detail">
     <div className="day-head">
       <div><strong>{formatID(day.date, { day: true })}</strong><span>{day.basis}</span></div>
@@ -44,7 +44,7 @@ export function DayDetail({ day, showMeal = true }: { day: DayRecord; showMeal?:
       {day.lateMin > 0 && <span>Terlambat <b>{day.lateMin} mnt</b></span>}
       {day.earlyMin > 0 && <span>Pulang cepat <b>{day.earlyMin} mnt</b></span>}
       {day.overtimeMin > 0 && <span>Lembur <b>{Math.round(day.overtimeMin / 6) / 10} jam</b></span>}
-      {showMeal && <span className={`meal-tag m-${day.meal.state}`}>Uang makan: {day.meal.state === 'eligible' ? 'dibayar' : day.meal.state === 'held' ? 'ditahan' : 'tidak'} · {day.meal.reason}</span>}
+      {showMeal && <span className={`meal-tag m-${day.meal.state}`}>Uang makan: {day.meal.state === 'eligible' ? day.meal.amountReady ? 'hari memenuhi syarat' : 'hari memenuhi syarat, nominal pending' : day.meal.state === 'held' ? 'ditahan' : 'tidak memenuhi syarat'} · {day.meal.reason}</span>}
     </div>
     {day.resolved.length > 0 && <div className="audit">{day.resolved.map(r => <p key={r.issueId}>✓ {r.reviewer} · {new Date(r.at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })} · {r.decision.replace('-', ' ')}{r.note ? ` — "${r.note}"` : ''}</p>)}</div>}
   </div>

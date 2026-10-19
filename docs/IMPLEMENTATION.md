@@ -19,16 +19,17 @@ Repository privat: https://github.com/martindeploy7/hr-kppu. File kerja tetap di
 - Pengajuan memakai kalkulasi server, membutuhkan kelengkapan/review/nominal; pernyataan nihil ST harus eksplisit. Pengaju tidak bisa menyetujui diri sendiri. Kunci pegawai-tanggal mencegah pengajuan ganda. Snapshot Excel tetap sama ketika data aktif berubah.
 - Koreksi snapshot terkunci memakai versi pengganti dengan alasan, checksum induk dan selisih employee-day. Satu cabang koreksi aktif per versi, persetujuan akun lain dan pemeriksaan revisi workspace. Usulan mereservasi hari baru; pembatalan melepas reservasi baru, penguncian memindahkan klaim secara atomik. Koreksi nol penuh dan rantai versi berikutnya didukung. Versi lama tetap utuh, UI/ekspor menandainya sebagai arsip setelah pengganti dikunci.
 - Ekspor koreksi memuat nominatif penuh dan sheet selisih bruto/PPh/netto; selisih adalah bahan pemeriksaan, bukan perintah pembayaran tambahan otomatis. Pembulatan pajak per pegawai/bulan dipertahankan dalam rincian delta. File Excel yang sudah diunduh sebelumnya tetap merupakan snapshot waktu unduh.
+- Penarikan sumber menunggu konfirmasi server sebelum menampilkan sukses; sumber tidak aktif tetap diarsipkan. Detail harian membedakan hari memenuhi syarat, nominal pending dan proses pembayaran.
 - Font disajikan lokal; halaman dimuat terpisah; label koneksi WA konsisten sebagai simulasi. Konfigurasi Netlify lama diarsipkan.
 
 ## Bukti lokal
 
-- Checkpoint lokal: 51 tes domain/API/parser dan 6 tes browser lulus. Angka ini tidak mencakup E2E cloud.
+- Checkpoint lokal: 51 tes domain/API/parser dan 7 tes browser lulus. Angka ini tidak mencakup E2E cloud.
 - Workbook dengan rentang sheet sangat besar ditolak sebelum ekspansi baris; arsip terkompresi juga memiliki batas ukuran hasil ekstraksi.
 - Smoke bundle dalam mode production lokal: FE/health/login/logout merespons 200, cookie memakai `__Host-`/Secure/HttpOnly/SameSite dan origin asing ditolak 403. Ini bukan bukti HTTPS live.
 - `npm run build`: FE dan BE berhasil dibangun. Ini belum merupakan deployment Render.
 - Suite `tests/*.test.ts`: domain, identifier XML, parser multi-sheet, review stale, migrasi, transaksi, RBAC/scope, impor/revisi/idempotency, restore, audit, approval/lock dan konsistensi Excel.
-- Browser e2e: login, master bertahan setelah reload, logout, 390px, preview/konfirmasi dan upload ulang identik; tambahan tes menunjukkan perubahan klien lain muncul otomatis. Bulk master membuktikan penolakan konflik, konfirmasi eksplisit, satu pegawai setelah penggabungan, persistensi sesudah reload dan lebar 390px. Alur koreksi browser memakai akun pengaju dan Keuangan berbeda: submit, approve/lock, revisi tarif, usulan selisih, approve/lock ulang, arsip lama utuh dan lebar 390/1280px. Fixture kerja dipulihkan lewat restore point dan akun sintetis dinonaktifkan setelah tes.
+- Browser e2e: login, master bertahan setelah reload, logout, 390px, preview/konfirmasi dan upload ulang identik; tambahan tes menunjukkan perubahan klien lain muncul otomatis. Bulk master membuktikan penolakan konflik, konfirmasi eksplisit, satu pegawai setelah penggabungan, persistensi sesudah reload dan lebar 390px. Alur koreksi browser memakai akun pengaju dan Keuangan berbeda: submit, approve/lock, revisi tarif, usulan selisih, approve/lock ulang, arsip lama utuh dan lebar 390/1280px. Fixture kerja dipulihkan lewat restore point dan akun sintetis dinonaktifkan setelah tes. Tes penarikan sumber membuktikan jumlah aktif berkurang setelah respons sukses dan dataset lama tetap ada sebagai arsip.
 - `npm audit --omit=dev`: tidak melaporkan vulnerability dependency runtime pada pemeriksaan sesi ini. Ini bukan pentest.
 - `scripts/parser-audit.ts`: 19 isi workbook unik diperiksa; 18 sumber dikenali. Workbook dashboard sintetis sengaja tidak dipakai sebagai sumber operasional. Laporan aktual berada di `artifacts/parser-audit.json` (privat, tidak di-commit).
 

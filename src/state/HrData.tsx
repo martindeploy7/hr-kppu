@@ -18,7 +18,7 @@ type Ctx = Workspace & {
   commitImport: (file: SourceFile, office: string, replaces?: string, completeThrough?: string) => Promise<void>
   declareNilSt: (office: string, period: string, basis: string) => Promise<void>
   restoreBackup: (state: Workspace) => Promise<void>
-  removeFile: (id: string) => void; setFileOffice: (id: string, office: string) => void; clearAll: () => void
+  removeFile: (id: string) => Promise<void>; setFileOffice: (id: string, office: string) => Promise<void>; clearAll: () => void
   upsertMaster: (rows: Partial<Employee>[]) => { added: number; updated: number }
   updateEmployee: (id: string, patch: Partial<Employee>) => void
   decide: (key: string, employeeId: string | null) => void; undoDecision: (key: string) => void
@@ -114,8 +114,8 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
     commitImport: (file, office, replaces, completeThrough) => serverAction('/imports/commit', { uploadId: file.id, office, replaces, completeThrough, reason: replaces ? 'Mengganti dataset yang dipilih pada preview' : 'Menambahkan sumber setelah preview' }),
     declareNilSt: (office, period, basis) => serverAction('/coverage/nil-st', { office, period, basis }),
     restoreBackup: state => serverAction('/backup/restore', { state, reason: 'Pemulihan workspace setelah preview dan konfirmasi admin' }),
-    removeFile: id => { void serverAction(`/sources/${id}/withdraw`, { reason: 'Sumber ditarik dari perhitungan oleh SDM' }).catch(() => {}) },
-    setFileOffice: (id, office) => { void serverAction(`/sources/${id}/office`, { office, reason: 'Koreksi kantor sumber oleh SDM' }).catch(() => {}) },
+    removeFile: id => serverAction(`/sources/${id}/withdraw`, { reason: 'Sumber ditarik dari perhitungan oleh SDM' }),
+    setFileOffice: (id, office) => serverAction(`/sources/${id}/office`, { office, reason: 'Koreksi kantor sumber oleh SDM' }),
     clearAll: () => { setSaveError('Penghapusan massal dinonaktifkan; tarik sumber satu per satu agar jejak tetap tersedia') },
     upsertMaster: rows => { const result = upsertEmployees(state.master, roster.employees, state.overrides, rows, () => crypto.randomUUID()); patch(() => ({ master: result.master, overrides: result.overrides })); return result },
     updateEmployee: (id, p) => patch(s => ({ overrides: { ...s.overrides, [id]: { ...s.overrides[id], ...p } } })),
