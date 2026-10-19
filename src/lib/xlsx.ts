@@ -19,6 +19,10 @@ export async function readSheets(file: File): Promise<Sheet[]> {
   const sheetTags = zip?.['xl/workbook.xml'] ? [...strFromU8(zip['xl/workbook.xml']).matchAll(/<sheet\b[^>]*\/?\s*>/g)] : []
   return wb.SheetNames.map((name, index) => {
     const ws = wb.Sheets[name], risks: NonNullable<Sheet['identifierRisks']> = []
+    if (ws['!ref']) {
+      const range = XLSX.utils.decode_range(ws['!ref'])
+      if (range.e.r >= 100000 || range.e.c >= 512 || (range.e.r + 1) * (range.e.c + 1) > 2000000) throw new Error(`Rentang sheet "${name}" terlalu besar. Hapus format/baris kosong di luar tabel atau pecah workbook sebelum mengunggah.`)
+    }
     const rel = rels.find(r => attr(r[0], 'Id') === attr(sheetTags[index]?.[0] ?? '', 'r:id'))
     const target = rel ? attr(rel[0], 'Target') : undefined
     const path = target?.startsWith('/') ? target.slice(1) : `xl/${target ?? `worksheets/sheet${index + 1}.xml`}`

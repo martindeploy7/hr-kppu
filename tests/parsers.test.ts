@@ -49,3 +49,8 @@ test('all recognized sheets are parsed with distinct evidence IDs',()=>{
  const parsed=parseWorkbook('Pusat.xls',[{name:'A',rows:[header,row]},{name:'B',rows:[header,row]}],'file')
  expect(parsed.evidence).toHaveLength(2);expect(new Set(parsed.evidence.map(e=>e.id)).size).toBe(2)
 })
+test('excessive worksheet dimensions are rejected before expansion',async()=>{
+ const zip=unzipSync(workbook([{name:'Test',rows:[['NIP'],['198001012020011001']]}]))
+ const xml=strFromU8(zip['xl/worksheets/sheet1.xml']).replace(/<dimension ref="[^"]+"\/>/,'<dimension ref="A1:XFD1048576"/>');zip['xl/worksheets/sheet1.xml']=strToU8(xml)
+ await expect(readSheets(new File([zipSync(zip)],'oversized.xlsx'))).rejects.toThrow('terlalu besar')
+})

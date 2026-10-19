@@ -21,7 +21,8 @@ Repository privat: https://github.com/martindeploy7/hr-kppu. File kerja tetap di
 
 ## Bukti lokal
 
-- Checkpoint lokal: 38 tes domain/API/parser dan 4 tes browser lulus. Angka ini tidak mencakup E2E cloud.
+- Checkpoint lokal: 39 tes domain/API/parser dan 4 tes browser lulus. Angka ini tidak mencakup E2E cloud.
+- Workbook dengan rentang sheet sangat besar ditolak sebelum ekspansi baris; arsip terkompresi juga memiliki batas ukuran hasil ekstraksi.
 - Smoke bundle dalam mode production lokal: FE/health/login/logout merespons 200, cookie memakai `__Host-`/Secure/HttpOnly/SameSite dan origin asing ditolak 403. Ini bukan bukti HTTPS live.
 - `npm run build`: FE dan BE berhasil dibangun. Ini belum merupakan deployment Render.
 - Suite `tests/*.test.ts`: domain, identifier XML, parser multi-sheet, review stale, migrasi, transaksi, RBAC/scope, impor/revisi/idempotency, restore, audit, approval/lock dan konsistensi Excel.
