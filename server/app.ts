@@ -22,8 +22,15 @@ import { decisionOwned, globalAccess, officeAllowed, requireOffice, sourceAllowe
 import { registerSubmissions } from './submissions.ts'
 import { validateMasterChange } from './master.ts'
 import { previewRecordReview, recordReviewInput } from './recordReviews.ts'
+import { canRetryImport, importCommitSchema, importIntentSchema, previewImport } from './imports.ts'
 
 const digest = (s: string | Buffer) => createHash('sha256').update(s).digest('hex')
+const stableValue = (value: unknown): unknown => Array.isArray(value)
+  ? value.map(stableValue)
+  : value && typeof value === 'object'
+    ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, stableValue(item)]))
+    : value
+const sameValue = (a: unknown, b: unknown) => JSON.stringify(stableValue(a)) === JSON.stringify(stableValue(b))
 const publicUser = (u: typeof users.$inferSelect): User => ({ id: u.id, email: u.email, name: u.name, role: u.role, offices: u.offices })
 export function createApp(db: Database, config: { origin: string; production: boolean }) {
   const app = new Hono<{ Variables: { user: User; sessionHash: string } }>()
@@ -84,14 +91,15 @@ export function createApp(db: Database, config: { origin: string; production: bo
   const read = async () => {
     await db.insert(workspaces).values({ id: 'default', state: emptyWorkspace() }).onConflictDoNothing()
     const [w] = await db.select().from(workspaces).where(eq(workspaces.id, 'default'))
-    return w
+    return { ...w, state: { ...w.state, policy: enforcePolicy(w.state.policy) } }
   }
   const change = async (expectedRevision: number, actor: User, action: string, reason: string, mutate: (state: Workspace, tx: Database) => Promise<Workspace> | Workspace) => {
     await read()
     return db.transaction(async tx => {
       const [w] = await tx.select().from(workspaces).where(eq(workspaces.id, 'default')).for('update')
       if (w.revision !== expectedRevision) throw new HTTPException(409, { message: 'Data berubah oleh admin lain. Simpan backup pekerjaan, lalu muat ulang data server.' })
-      const next = await mutate(structuredClone(w.state), tx as unknown as Database)
+      const currentState = { ...w.state, policy: enforcePolicy(w.state.policy) }
+      const next = await mutate(structuredClone(currentState), tx as unknown as Database)
       next.policy = enforcePolicy(next.policy)
       const revision = w.revision + 1
       await tx.update(workspaces).set({ state: next, revision, updatedAt: new Date() }).where(eq(workspaces.id, 'default'))
@@ -99,7 +107,22 @@ export function createApp(db: Database, config: { origin: string; production: bo
       const priorReviews = new Map(w.state.files.flatMap(f => (f.recordReviews ?? []).map(r => [r.id, { sourceId: f.id, review: r }] as const)))
       const currentReviews = new Map(next.files.flatMap(f => (f.recordReviews ?? []).map(r => [r.id, { sourceId: f.id, review: r }] as const)))
       const recordReviewChanges = [...new Set([...priorReviews.keys(), ...currentReviews.keys()])].flatMap(id => JSON.stringify(priorReviews.get(id)) === JSON.stringify(currentReviews.get(id)) ? [] : [{ id, sourceId: currentReviews.get(id)?.sourceId ?? priorReviews.get(id)?.sourceId, before: priorReviews.get(id)?.review, after: currentReviews.get(id)?.review }])
-      await tx.insert(auditEvents).values({ id: randomUUID(), actorId: actor.id, action, revision, reason, details: { checksum: digest(JSON.stringify(next)), changed, recordReviewChanges, restorePoint: action === 'workspace.restore' ? w.state : undefined, before: Object.fromEntries(changed.filter(k => k !== 'files').map(k => [k, w.state[k as keyof Workspace]])), after: Object.fromEntries(changed.filter(k => k !== 'files').map(k => [k, next[k as keyof Workspace]])), sourcesBefore: w.state.files.map(f => ({ id: f.id, active: f.active, hash: f.hash, revision: f.revision, recordReviewCount: f.recordReviews?.length ?? 0 })), sourcesAfter: next.files.map(f => ({ id: f.id, active: f.active, hash: f.hash, revision: f.revision, recordReviewCount: f.recordReviews?.length ?? 0 })) } })
+      const priorSources = new Map(w.state.files.map(f => [f.id, f])), currentSources = new Map(next.files.map(f => [f.id, f]))
+      const assignmentScopeChanges = [...new Set([...priorSources.keys(), ...currentSources.keys()])].flatMap(id => {
+        const before = priorSources.get(id), after = currentSources.get(id), beforeScope = before?.assignmentImport, afterScope = after?.assignmentImport
+        if (JSON.stringify(beforeScope) === JSON.stringify(afterScope) && JSON.stringify(before?.importCommit) === JSON.stringify(after?.importCommit)) return []
+        const beforeSelected = new Set(beforeScope?.selectedIds ?? []), afterSelected = new Set(afterScope?.selectedIds ?? [])
+        const priorSupersessions = new Set((beforeScope?.supersessions ?? []).map(s => `${s.bySourceId}|${s.registerKey}|${s.at}`))
+        return [{ sourceId: id, selectedAdded: [...afterSelected].filter(x => !beforeSelected.has(x)), selectedRemoved: [...beforeSelected].filter(x => !afterSelected.has(x)), supersessionsAdded: (afterScope?.supersessions ?? []).filter(s => !priorSupersessions.has(`${s.bySourceId}|${s.registerKey}|${s.at}`)), importCommit: after?.importCommit ? { mode: after.importCommit.mode, confirmation: after.importCommit.confirmation, replacedScopes: after.importCommit.replacedScopes } : undefined }]
+      })
+      const evidenceScopeChanges = [...new Set([...priorSources.keys(), ...currentSources.keys()])].flatMap(id => {
+        const before = priorSources.get(id), after = currentSources.get(id), beforeScope = before?.evidenceImport, afterScope = after?.evidenceImport
+        if (JSON.stringify(beforeScope) === JSON.stringify(afterScope) && JSON.stringify(before?.importCommit) === JSON.stringify(after?.importCommit)) return []
+        const beforeSelected = new Set(beforeScope?.selectedIds ?? []), afterSelected = new Set(afterScope?.selectedIds ?? [])
+        return [{ sourceId: id, selectedAdded: [...afterSelected].filter(x => !beforeSelected.has(x)), selectedRemoved: [...beforeSelected].filter(x => !afterSelected.has(x)), importMode: after?.importCommit?.mode, importConfirmation: after?.importCommit?.confirmation }]
+      })
+      const sourceSummary = (f: Workspace['files'][number]) => ({ id: f.id, active: f.active, hash: f.hash, revision: f.revision, recordReviewCount: f.recordReviews?.length ?? 0, evidenceSelectedCount: f.evidenceImport?.selectedIds?.length, assignmentSelectedCount: f.assignmentImport?.selectedIds?.length, assignmentSupersessionCount: f.assignmentImport?.supersessions?.length ?? 0, importMode: f.importCommit?.mode, importConfirmation: f.importCommit?.confirmation })
+      await tx.insert(auditEvents).values({ id: randomUUID(), actorId: actor.id, action, revision, reason, details: { checksum: digest(JSON.stringify(next)), changed, recordReviewChanges, assignmentScopeChanges, evidenceScopeChanges, restorePoint: action === 'workspace.restore' ? w.state : undefined, before: Object.fromEntries(changed.filter(k => k !== 'files').map(k => [k, w.state[k as keyof Workspace]])), after: Object.fromEntries(changed.filter(k => k !== 'files').map(k => [k, next[k as keyof Workspace]])), sourcesBefore: w.state.files.map(sourceSummary), sourcesAfter: next.files.map(sourceSummary) } })
       return { state: scopeWorkspace(next, actor), revision }
     })
   }
@@ -137,13 +160,13 @@ export function createApp(db: Database, config: { origin: string; production: bo
           patch.resolutions = [...state.resolutions.filter(r => !allowedIds.has(r.issueId.split('|')[0])), ...patch.resolutions]
         }
       }
-      if (patch.master && actor.role !== 'admin' && patch.master.some(e => JSON.stringify(e.rateHistory) !== JSON.stringify(state.master.find(old => old.id === e.id)?.rateHistory))) throw new HTTPException(403, { message: 'Tarif efektif hanya dapat diubah Keuangan/admin' })
+      if (patch.master && actor.role !== 'admin' && patch.master.some(e => !sameValue(e.rateHistory, state.master.find(old => old.id === e.id)?.rateHistory))) throw new HTTPException(403, { message: 'Tarif efektif hanya dapat diubah Keuangan/admin' })
       if (patch.overrides && actor.role !== 'admin') {
         const ids = new Set([...Object.keys(state.overrides), ...Object.keys(patch.overrides)])
         for (const id of ids) {
           const before = state.overrides[id] ?? {}, after = patch.overrides[id] ?? {}
           for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
-            if (JSON.stringify(before[key as keyof typeof before]) === JSON.stringify(after[key as keyof typeof after])) continue
+            if (sameValue(before[key as keyof typeof before], after[key as keyof typeof after])) continue
             if (actor.role === 'finance' ? key !== 'rateHistory' : key === 'rateHistory') throw new HTTPException(403, { message: 'Perubahan tarif efektif dan profil memakai kewenangan berbeda' })
           }
         }
@@ -190,30 +213,35 @@ export function createApp(db: Database, config: { origin: string; production: bo
     await db.insert(uploads).values({ id, hash: checksum, name: file.name, bytes, parsed, userId: actor.id })
     return c.json({ duplicate: false, file: parsed })
   })
+  app.post('/api/imports/impact', async c => {
+    const actor = c.get('user'), intent = importIntentSchema.parse(await c.req.json())
+    const [upload] = await db.select().from(uploads).where(eq(uploads.id, intent.uploadId))
+    if (!upload || upload.userId !== actor.id) throw new HTTPException(404, { message: 'Preview tidak ditemukan' })
+    const current = await read(), committed = current.state.files.find(f => f.id === upload.id)
+    if (committed) throw new HTTPException(409, { message: 'Workbook sudah di-commit; unggah sumber baru untuk perubahan berikutnya' })
+    return c.json(previewImport(current.state, current.revision, upload.parsed as Workspace['files'][number], actor, intent).impact)
+  })
   app.post('/api/imports/commit', async c => {
     const actor = c.get('user')
     if (!['admin', 'hr'].includes(actor.role)) throw new HTTPException(403, { message: 'Hanya admin/SDM dapat mengimpor sumber' })
-    const v = z.object({ uploadId: z.uuid(), expectedRevision: z.number().int().nonnegative(), office: z.string().min(1).max(100), replaces: z.string().optional(), completeThrough: z.iso.date().optional(), reason: z.string().min(3).max(2000) }).parse(await c.req.json())
-    requireOffice(actor, v.office)
+    const v = importCommitSchema.parse(await c.req.json())
     const [upload] = await db.select().from(uploads).where(eq(uploads.id, v.uploadId))
     if (!upload || upload.userId !== actor.id) throw new HTTPException(404, { message: 'Preview tidak ditemukan' })
     const current = await read(), committed = current.state.files.find(f => f.id === upload.id)
     if (committed) {
-      if (committed.office !== v.office || committed.supersedes !== v.replaces || committed.completeThrough !== v.completeThrough) throw new HTTPException(409, { message: 'Upload sudah di-commit dengan parameter berbeda' })
+      if (!canRetryImport(committed, actor, v.confirmedImpact)) throw new HTTPException(409, { message: 'Upload sudah di-commit dengan konfirmasi yang berbeda' })
       return c.json({ state: scopeWorkspace(current.state, actor), revision: current.revision })
     }
-    return c.json(await change(v.expectedRevision, actor, 'import.commit', v.reason, async (state, tx) => {
-      if (state.files.some(f => f.hash === upload.hash)) return state
-      const old = v.replaces ? state.files.find(f => f.id === v.replaces && f.active !== false) : undefined
-      if (v.replaces && !old) throw new HTTPException(409, { message: 'Dataset pengganti sudah berubah' })
-      const file = { ...withOffice(upload.parsed, v.office), completeThrough: v.completeThrough, supersedes: old?.id, revision: old ? (old.revision ?? 1) + 1 : 1 }
-      if (old && (old.kind !== file.kind || old.office !== file.office)) throw new HTTPException(400, { message: 'Jenis dan kantor dataset pengganti harus sama' })
-      if (old && !sourceAllowed(actor, old)) throw new HTTPException(403)
-      if (!sourceAllowed(actor, file)) throw new HTTPException(403)
-      if (old) old.active = false
-      state.files.push(file)
+    return c.json(await change(v.expectedRevision, actor, `import.${v.mode}`, v.reason, async (state, tx) => {
+      if (state.files.some(f => f.hash === upload.hash)) throw new HTTPException(409, { message: 'File identik sudah aktif atau diarsipkan; tidak ada bukti yang ditambahkan' })
+      const { confirmedImpact, ...intent } = v
+      const result = previewImport(state, v.expectedRevision, upload.parsed as Workspace['files'][number], actor, intent)
+      if (result.impact.checksum !== confirmedImpact) throw new HTTPException(409, { message: 'Dampak impor berubah; buka preview terbaru sebelum menyimpan' })
+      const file = result.next.files.find(f => f.id === upload.id)
+      if (!file) throw new HTTPException(500, { message: 'Hasil preview impor tidak lengkap' })
+      file.importCommit = { mode: v.mode, confirmation: v.confirmedImpact, actorId: actor.id, committedAt: new Date().toISOString(), selectedRegisterKeys: file.assignmentImport?.selectedRegisterKeys, replacedScopes: result.impact.replacedScopes.map(s => ({ sourceId: s.sourceId, registerKey: s.registerKey, label: s.label })) }
       await tx.update(uploads).set({ committed: true }).where(eq(uploads.id, upload.id))
-      return state
+      return result.next
     }))
   })
   app.post('/api/sources/:id/record-review/preview', async c => {

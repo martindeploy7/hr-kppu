@@ -7,6 +7,7 @@ import { eachDay, monthBounds } from '../engine/dates.ts'
 import { api, ApiError, downloadJson } from '../lib/api.ts'
 import { useAuth } from './Auth.tsx'
 import { emptyWorkspace, upsertEmployees, type Workspace, type WorkspaceResponse } from '../../shared/workspace.ts'
+import type { ImportImpactResponse, ImportProposal } from '../../shared/imports.ts'
 
 export type ImportResult = { name: string; ok: boolean; message: string }
 type Preview = { duplicate: boolean; file: SourceFile }
@@ -15,7 +16,8 @@ type Ctx = Workspace & {
   revision: number; saveStatus: 'loading' | 'saved' | 'saving' | 'error'; saveError: string
   retrySave: () => void; reload: () => Promise<void>; backup: () => void
   previewFiles: (files: File[], dateOrder?: 'DMY' | 'MDY') => Promise<{ previews: Preview[]; results: ImportResult[] }>
-  commitImport: (file: SourceFile, office: string, replaces?: string, completeThrough?: string) => Promise<void>
+  previewImport: (proposal: ImportProposal) => Promise<ImportImpactResponse>
+  commitImport: (proposal: ImportProposal, confirmedImpact: string) => Promise<void>
   declareNilSt: (office: string, period: string, basis: string) => Promise<void>
   reviewRecord: (sourceId: string, input: { id: string; kind: RecordReview['kind']; recordId: string; disposition: RecordReview['disposition']; reason: string; confirmedImpact: string }) => Promise<void>
   restoreBackup: (state: Workspace) => Promise<void>
@@ -93,10 +95,10 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
   const activePeriod = period || state.period || periods[0] || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date()).slice(0, 7)
   const recon = useMemo(() => reconcile(files, roster, monthBounds(activePeriod), state.policy, state.resolutions), [files, roster, activePeriod, state.policy, state.resolutions])
   const effectiveResolutions = useMemo(() => state.resolutions.filter(r => recon.issues.some(i => i.id === r.issueId && i.signature === r.signature)), [state.resolutions, recon])
-  const serverAction = async (path: string, body: Record<string, unknown>) => {
+  const serverAction = async (path: string, body: Record<string, unknown>, expectedRevision = revision) => {
     if (inFlight.current || editableKeys.some(k => JSON.stringify(current.current[k]) !== JSON.stringify(base.current[k]))) throw new Error('Tunggu sampai perubahan tersimpan, lalu ulangi tindakan')
     inFlight.current = true; setSaveStatus('saving')
-    try { apply(await api<WorkspaceResponse>(path, { method: 'POST', body: JSON.stringify({ ...body, expectedRevision: revision }) })) }
+    try { apply(await api<WorkspaceResponse>(path, { method: 'POST', body: JSON.stringify({ ...body, expectedRevision }) })) }
     catch (e) { setSaveStatus('error'); setSaveError((e as Error).message); throw e }
     finally { inFlight.current = false }
   }
@@ -113,7 +115,8 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
       }
       return { previews, results }
     },
-    commitImport: (file, office, replaces, completeThrough) => serverAction('/imports/commit', { uploadId: file.id, office, replaces, completeThrough, reason: replaces ? 'Mengganti dataset yang dipilih pada preview' : 'Menambahkan sumber setelah preview' }),
+    previewImport: proposal => api<ImportImpactResponse>('/imports/impact', { method: 'POST', body: JSON.stringify(proposal) }),
+    commitImport: (proposal, confirmedImpact) => serverAction('/imports/commit', { ...proposal, confirmedImpact }, proposal.expectedRevision),
     declareNilSt: (office, period, basis) => serverAction('/coverage/nil-st', { office, period, basis }),
     reviewRecord: (sourceId, input) => serverAction(`/sources/${sourceId}/record-review`, input),
     restoreBackup: state => serverAction('/backup/restore', { state, reason: 'Pemulihan workspace setelah preview dan konfirmasi admin' }),

@@ -3,7 +3,7 @@ import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import type { User, Workspace } from '../shared/workspace.ts'
 import type { RecordReviewPreview, ReviewDay } from '../shared/recordReviews.ts'
-import { recordDisposition } from '../src/engine/recordReviews.ts'
+import { sourceRecordState } from '../src/engine/recordReviews.ts'
 import { buildRoster } from '../src/engine/roster.ts'
 import { reconcile, type DayRecord } from '../src/engine/reconcile.ts'
 import { requireOffice, scopeWorkspace } from './scope.ts'
@@ -19,12 +19,14 @@ export function previewRecordReview(state: Workspace, revision: number, sourceId
   const assignment = input.kind === 'assignment' ? file.assignments.find(a => a.id === input.recordId) : undefined
   const record = evidence ?? assignment
   if (!record) throw new HTTPException(404)
+  const recordState = sourceRecordState(file, input.kind, input.recordId)
+  if (recordState === 'not-selected') throw new HTTPException(409, { message: 'Catatan tidak dipilih pada cakupan impor; unggah sumber dan pilih register tersebut untuk mengaktifkannya' })
   requireOffice(actor, record.office)
   const rawRoster = buildRoster(state.files, state.master, state.overrides, state.decisions, true)
   const employeeId = (input.kind === 'evidence' ? rawRoster.evidenceLink : rawRoster.assignmentLink).get(record.id)
   const employee = employeeId ? rawRoster.byId.get(employeeId) : undefined
   if (employee) requireOffice(actor, employee.kantor)
-  if ((recordDisposition(file, input.kind, input.recordId)?.disposition ?? 'active') === input.disposition) throw new HTTPException(409, { message: 'Status catatan sudah sama; muat ulang riwayat terbaru' })
+  if ((recordState === 'active' ? 'active' : 'excluded') === input.disposition) throw new HTTPException(409, { message: 'Status catatan sudah sama; muat ulang riwayat terbaru' })
   if ((file.recordReviews?.length ?? 0) >= 10000) throw new HTTPException(422, { message: 'Batas riwayat sumber tercapai; gunakan revisi sumber baru' })
   if (state.files.some(f => f.recordReviews?.some(r => r.id === input.id))) throw new HTTPException(409, { message: 'ID keputusan sudah digunakan' })
   const period = { start: evidence?.date ?? assignment!.start, end: evidence?.date ?? assignment!.end }

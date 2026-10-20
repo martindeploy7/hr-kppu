@@ -5,7 +5,7 @@ Satu layanan Node menyajikan FE Vite dan API Hono dari origin yang sama. Postgre
 ## Database Supabase
 
 1. Buat project khusus HR KPPU dalam organisasi Free, region Singapore bila tersedia. Jangan gunakan database Cozzy.
-2. Salin PostgreSQL connection string **transaction pooler** dari Connect, dengan password database, ke `DATABASE_URL` di Render. Driver memakai `prepare: false`, maksimum tiga koneksi dan TLS. URL/password tidak pernah memakai prefix `VITE_`.
+2. Salin PostgreSQL connection string **shared Session pooler** dari Connect (port 5432, IPv4), dengan password database, ke `DATABASE_URL` di Render. Render menjalankan backend persisten; Session pooler cocok untuk koneksi jangka panjang dari jaringan IPv4. Jangan gunakan Transaction pooler untuk Postgres.js: walau `prepare: false` sudah disetel, pipelining bawaan Postgres.js dapat menggantung query atau mengembalikan hasil yang tidak cocok. Driver membatasi pool lokal ke tiga koneksi dan memakai TLS. URL/password tidak pernah memakai prefix `VITE_`. Lihat [panduan mode koneksi Supabase](https://supabase.com/docs/guides/database/connecting-to-postgres) dan [catatan Postgres.js](https://supabase.com/docs/guides/database/postgres-js).
 3. Backend menjalankan migrasi Drizzle saat startup. Objek berada di schema privat `hr_internal`, bukan `public`. Jangan tambahkan schema ini ke exposed schemas Data API; akses aplikasi lewat API Hono.
 4. Akun aplikasi berbeda dari akun Supabase. Set `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_NAME`, dan `INITIAL_ADMIN_PASSWORD` unik minimal 14 karakter. Bootstrap hanya berjalan jika belum ada akun. Hapus password bootstrap dari environment setelah akun berhasil dibuat.
 
@@ -32,7 +32,7 @@ npm run dev
 
 ## Batas free tier dan operasional
 
-Render Free tidur setelah 15 menit tanpa trafik dan berbagi 750 jam gratis per workspace per bulan. Supabase Free dapat pause saat aktivitas rendah. Cold start dan pause perlu dipahami pengguna; konfigurasi ini tidak menjamin layanan selalu aktif. Lihat [Render Free](https://render.com/docs/free) dan [Supabase pausing](https://supabase.com/docs/guides/platform/free-project-pausing).
+Render Free tidur setelah 15 menit tanpa trafik, memakai filesystem sementara dan memberi 750 jam instance per workspace per bulan. Render menyatakan free instance ditujukan untuk pengujian/proyek hobi, bukan aplikasi produksi; cold start dapat memakan sekitar satu menit. Supabase Free dapat pause ketika aktivitas database rendah selama periode tujuh hari. Karena itu kombinasi ini hanya target biaya nol untuk demo/pilot dengan ketersediaan terbatas, bukan jaminan hosting operasional uang makan yang selalu aktif. Untuk penggunaan produksi, pindah ke paket hosting yang memberi ketersediaan sesuai kebutuhan. Lihat [batas Render Free](https://render.com/docs/free) dan [kebijakan pause Supabase](https://supabase.com/docs/guides/platform/free-project-pausing).
 
 Backup JSON ruang kerja mengandung data personal; simpan privat. Backup JSON tidak menyertakan byte workbook asli. Arsip file server berada di database dan perlu backup database tersendiri untuk pemulihan penuh. Jangan menaruh workbook pegawai, dump DB, password, screenshot berdata nyata atau `.env` ke GitHub/public assets.
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RecordReview as Review, SourceFile } from '../engine/types.ts'
-import { recordDisposition } from '../engine/recordReviews.ts'
+import { recordDisposition, sourceRecordState } from '../engine/recordReviews.ts'
 import { STATUS_LABEL } from '../engine/reconcile.ts'
 import type { RecordReviewPreview, ReviewDay } from '../../shared/recordReviews.ts'
 import { api } from '../lib/api.ts'
@@ -10,12 +10,13 @@ const stateLabel: Record<string, string> = { eligible: 'hari memenuhi syarat', h
 const facts = (day: ReviewDay) => `${STATUS_LABEL[day.status as keyof typeof STATUS_LABEL] ?? 'Tidak dalam roster aktif'} · ${day.clockIn || '—'}–${day.clockOut || '—'} · ${stateLabel[day.mealState]}${day.mealState === 'eligible' && !day.amountReady ? ', nominal pending' : ''} · ${day.amountReady ? `Rp${day.amount.toLocaleString('id-ID')}` : 'nominal belum siap'} · ${day.issues} isu terbuka`
 
 export function RecordReview({ file, kind, recordId }: { file: SourceFile; kind: Review['kind']; recordId: string }) {
-  const hr = useHr(), { user } = useAuth(), latest = recordDisposition(file, kind, recordId)
+  const hr = useHr(), { user } = useAuth(), latest = recordDisposition(file, kind, recordId), currentState = sourceRecordState(file, kind, recordId)
   const [open, setOpen] = useState(false), [reason, setReason] = useState(''), [preview, setPreview] = useState<RecordReviewPreview | null>(null), [confirmed, setConfirmed] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [page, setPage] = useState(0)
   const id = useRef(crypto.randomUUID())
   const record = (kind === 'evidence' ? file.evidence : file.assignments).find(r => r.id === recordId)
-  const editable = ['admin', 'hr'].includes(user.role) && (!user.offices?.length || user.offices.includes(record?.office ?? ''))
-  const excluded = latest?.disposition === 'excluded'
+  const editable = ['admin', 'hr'].includes(user.role) && currentState !== 'not-selected' && (!user.offices?.length || user.offices.includes(record?.office ?? ''))
+  const excluded = currentState !== 'active'
+  const superseded = (file.assignmentImport?.supersessions ?? []).filter(s => s.recordIds.includes(recordId)).at(-1)
   useEffect(() => { setPreview(null); setConfirmed(false) }, [reason, hr.revision, latest?.id])
   if (!record) return null
   const request = { id: id.current, expectedRevision: hr.revision, recordId, kind, reason, disposition: excluded ? 'active' as const : 'excluded' as const }
@@ -31,11 +32,15 @@ export function RecordReview({ file, kind, recordId }: { file: SourceFile; kind:
     catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
   return <div className="record-review">
-    {excluded && <span className="tag warn">Dikeluarkan dari bukti aktif</span>}
+    {currentState === 'excluded' && <span className="tag warn">Dikeluarkan dari bukti aktif</span>}
+    {currentState === 'superseded' && <span className="tag warn">Diganti oleh revisi register</span>}
+    {currentState === 'not-selected' && <span className="tag warn">Tidak dipilih saat impor</span>}
     <button className="link" onClick={() => setOpen(v => !v)} aria-expanded={open}>Tinjau {kind === 'assignment' ? 'peserta ST' : 'bukti'} · {record.ref}</button>
     {open && <section className="import-preview" aria-label={`Review ${record.ref}`}>
       <p><strong>{record.name}</strong> · {file.fileName} · {record.ref}</p>
       {latest && <p>Keputusan terakhir: {excluded ? 'dikeluarkan' : 'diaktifkan kembali'} oleh {latest.reviewer} · {new Date(latest.at).toLocaleString('id-ID')} · {latest.reason}</p>}
+      {superseded && <p>Scope diganti oleh {superseded.registerLabel} · {superseded.reviewer} · {new Date(superseded.at).toLocaleString('id-ID')} · {superseded.reason}</p>}
+      {currentState === 'not-selected' && <p>Catatan asli tetap disimpan bersama workbook, tetapi tidak termasuk register yang dipilih saat impor. Unggah ulang lalu pilih register ini untuk mengaktifkannya.</p>}
       {editable && <><p>{excluded ? 'Aktifkan kembali catatan asli. Bukti lain dan aturan UM tetap diperiksa.' : kind === 'assignment' ? 'Keluarkan peserta ST ini bila batal atau salah peserta/tanggal. Peserta lain tetap aktif.' : 'Tolak bukti ini bila tidak sah; pasangan jam dari bukti lain tetap diperiksa tanpa menggabungkan jam antarbaris.'} Catatan asli tetap diarsipkan.</p>
         <label>Dasar koreksi {record.ref}<textarea rows={2} value={reason} onChange={e => setReason(e.target.value)} maxLength={2000} placeholder="Alasan dan rujukan dokumen pendukung, minimal 10 karakter" disabled={busy} /></label>
         <button className="btn secondary" disabled={busy || reason.trim().length < 10 || hr.saveStatus !== 'saved'} onClick={() => void inspect()}>Preview dampak</button>

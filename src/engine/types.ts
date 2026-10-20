@@ -60,6 +60,35 @@ export type ReportSummary = { name: string; mesin?: string; duty?: number; actua
 
 export type RecordReview = { id: string; kind: 'evidence' | 'assignment'; recordId: string; disposition: 'excluded' | 'active'; reason: string; actorId: string; reviewer: string; at: string }
 
+export type AssignmentSupersession = {
+  recordIds: string[]
+  bySourceId: string
+  registerKey: string
+  registerLabel: string
+  reason: string
+  actorId: string
+  reviewer: string
+  at: string
+}
+
+export type AssignmentImportScope = {
+  /** Only these parsed rows were selected for use when this source was committed. */
+  selectedIds?: string[]
+  selectedRegisterKeys?: string[]
+  supersessions?: AssignmentSupersession[]
+  omittedMasterCount?: number
+}
+export type EvidenceImportScope = { selectedIds?: string[] }
+
+export type ImportCommit = {
+  mode: 'add' | 'replace-file' | 'replace-registers'
+  confirmation: string
+  actorId: string
+  committedAt: string
+  selectedRegisterKeys?: string[]
+  replacedScopes?: { sourceId: string; registerKey: string; label: string }[]
+}
+
 export type SourceFile = {
   id: string
   fileName: string
@@ -85,6 +114,9 @@ export type SourceFile = {
   master?: Partial<Employee>[]
   quarantined?: { ref: string; reason: string; raw: string }[]
   recordReviews?: RecordReview[]
+  assignmentImport?: AssignmentImportScope
+  evidenceImport?: EvidenceImportScope
+  importCommit?: ImportCommit
 }
 
 export type StatusKepegawaian = 'PPPK' | 'PNS' | 'Non-ASN' | 'Belum diketahui'

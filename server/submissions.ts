@@ -8,6 +8,7 @@ import type { Database } from './db.ts'
 import { auditEvents, mealClaimedDays, mealSubmissions, users, workspaces } from './schema.ts'
 import { buildRoster } from '../src/engine/roster.ts'
 import { reconcile } from '../src/engine/reconcile.ts'
+import { enforcePolicy } from '../src/engine/policy.ts'
 import { monthBounds } from '../src/engine/dates.ts'
 import { loadXlsx } from '../src/lib/xlsx.ts'
 import { globalAccess, requireOffice } from './scope.ts'
@@ -67,7 +68,7 @@ export function registerSubmissions(app: Hono<{ Variables: { user: User; session
       const ancestors = parent ? await ancestorsOf(tx, parent.id) : []
       const overlap = await tx.select({ id: mealSubmissions.id }).from(mealSubmissions).where(and(eq(mealSubmissions.period, v.period), ne(mealSubmissions.status, 'cancelled'), ancestors.length ? notInArray(mealSubmissions.id, ancestors) : undefined, v.office === 'Semua' ? undefined : or(eq(mealSubmissions.office, v.office), eq(mealSubmissions.office, 'Semua')))).limit(1)
       if (overlap.length) throw new HTTPException(409, { message: 'Scope periode ini sudah diajukan. Koreksi membutuhkan versi/adjustment tersendiri.' })
-      const state = w.state, bounds = monthBounds(v.period), roster = buildRoster(state.files, state.master, state.overrides, state.decisions)
+      const state = { ...w.state, policy: enforcePolicy(w.state.policy) }, bounds = monthBounds(v.period), roster = buildRoster(state.files, state.master, state.overrides, state.decisions)
       const calculation = reconcile(state.files, roster, bounds, state.policy, state.resolutions)
       const months = calculation.months.filter(m => v.office === 'Semua' || m.employee.kantor === v.office)
       if ((!months.length && !parent) || !state.policy.parametersApproved || months.some(m => m.heldDays || m.amountPendingDays || m.openIssues)) throw new HTTPException(422, { message: 'Pengajuan ditahan: lengkapi bukti, mapping, review, dan pengesahan parameter/nominal terlebih dahulu' })

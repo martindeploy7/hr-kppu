@@ -1,6 +1,7 @@
 import { HTTPException } from 'hono/http-exception'
 import type { User, Workspace } from '../shared/workspace.ts'
 import { buildRoster } from '../src/engine/roster.ts'
+import { assignmentRegisterKey } from '../shared/imports.ts'
 import { reviewsForRecords } from '../src/engine/recordReviews.ts'
 export const globalAccess = (user: User) => !user.offices?.length
 export const officeAllowed = (user: User, office: string) => globalAccess(user) || user.offices!.includes(office)
@@ -21,7 +22,19 @@ export function scopeWorkspace(state: Workspace, user: User): Workspace {
   const files = state.files.flatMap(f => {
     const evidence = f.evidence.filter(e => officeAllowed(user, e.office)), assignments = f.assignments.filter(a => officeAllowed(user, a.office)), master = f.master?.filter(e => officeAllowed(user, e.kantor ?? f.office))
     if (!evidence.length && !assignments.length && !master?.length && !officeAllowed(user, f.office)) return []
-    return [{ ...f, evidence, assignments, master, recordReviews: reviewsForRecords(f, new Set(evidence.map(e => e.id)), new Set(assignments.map(a => a.id))), summaries: sourceAllowed(user, f) ? f.summaries : undefined, quarantined: sourceAllowed(user, f) ? f.quarantined : undefined, warnings: sourceAllowed(user, f) ? f.warnings : ['Sumber lintas kantor; hanya catatan dalam cakupan akun ditampilkan.'], stats: { rows: evidence.length + assignments.length, people: new Set([...evidence.map(e => e.name), ...assignments.map(a => a.name)]).size } }]
+    const assignmentIds = new Set(assignments.map(a => a.id)), registerKeys = new Set(assignments.map(assignmentRegisterKey))
+    const assignmentImport = f.assignmentImport ? {
+      ...f.assignmentImport,
+      selectedIds: f.assignmentImport.selectedIds?.filter(id => assignmentIds.has(id)),
+      selectedRegisterKeys: f.assignmentImport.selectedRegisterKeys?.filter(key => registerKeys.has(key)),
+      supersessions: f.assignmentImport.supersessions?.flatMap(item => {
+        const recordIds = item.recordIds.filter(id => assignmentIds.has(id))
+        return recordIds.length ? [{ ...item, recordIds }] : []
+      }),
+    } : undefined
+    const evidenceImport = f.evidenceImport ? { ...f.evidenceImport, selectedIds: f.evidenceImport.selectedIds?.filter(id => evidence.some(e => e.id === id)) } : undefined
+    const importCommit = f.importCommit ? { ...f.importCommit, replacedScopes: f.importCommit.replacedScopes?.filter(s => s.registerKey === '*' ? sourceAllowed(user, f) : registerKeys.has(s.registerKey)) } : undefined
+    return [{ ...f, evidence, assignments, master, assignmentImport, evidenceImport, importCommit, recordReviews: reviewsForRecords(f, new Set(evidence.map(e => e.id)), assignmentIds), summaries: sourceAllowed(user, f) ? f.summaries : undefined, quarantined: sourceAllowed(user, f) ? f.quarantined : undefined, warnings: sourceAllowed(user, f) ? f.warnings : ['Sumber lintas kantor; hanya catatan dalam cakupan akun ditampilkan.'], stats: { rows: evidence.length + assignments.length, people: new Set([...evidence.map(e => e.name), ...assignments.map(a => a.name)]).size } }]
   })
   return { ...state, files, master: state.master.filter(e => ids.has(e.id)), overrides: Object.fromEntries(Object.entries(state.overrides).filter(([id]) => ids.has(id))), decisions: state.decisions.filter(d => decisionOwned(user, d, ids)), resolutions: state.resolutions.filter(r => ids.has(r.issueId.split('|')[0])) }
 }

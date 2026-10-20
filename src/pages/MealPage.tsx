@@ -3,6 +3,7 @@ import { AnimatePresence } from 'framer-motion'
 import { AlertTriangle, ArrowDownUp, Download, Search, Settings2, UploadCloud, WalletCards } from 'lucide-react'
 import { SubmissionPanel } from '../components/SubmissionPanel.tsx'
 import { useHr } from '../state/HrData.tsx'
+import { useAuth } from '../state/Auth.tsx'
 import { reconcile, STATUS_LABEL, type EmployeeMonth } from '../engine/reconcile.ts'
 import { POLICY_PRESETS, type GolGroup, type MealPolicy } from '../engine/policy.ts'
 import { formatID, monthBounds, monthLabel } from '../engine/dates.ts'
@@ -16,6 +17,7 @@ type SortKey = 'nama' | 'mealDays' | 'heldDays' | 'netto'
 
 export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void }) {
   const hr = useHr()
+  const { user } = useAuth()
   const [q, setQ] = useState('')
   const [office, setOffice] = useState('Semua')
   const [sort, setSort] = useState<SortKey>('nama')
@@ -53,13 +55,13 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
       { name: 'Rincian Harian', rows: [['Nama', 'NIP', 'Tanggal', 'Status', 'Masuk', 'Pulang', 'Terlambat (mnt)', 'Uang makan', 'Alasan', 'Nominal', 'PPh % efektif', 'Dasar status', 'Sumber'], ...daily], widths: [28, 20, 11, 22, 7, 7, 9, 10, 40, 10, 40, 22] },
       { name: 'Ditahan', rows: [['Nama', 'NIP', 'Tanggal', 'Alasan', 'Detail isu'], ...held], widths: [28, 20, 11, 36, 80] },
       { name: 'Review Sumber', rows: [['Sumber', 'Jenis', 'ID catatan', 'Keputusan', 'Alasan', 'Reviewer', 'Waktu'], ...hr.files.flatMap(f => (f.recordReviews ?? []).filter(r => office === 'Semua' || (r.kind === 'evidence' ? f.evidence : f.assignments).some(record => record.id === r.recordId && record.office === office)).map(r => [f.id, r.kind, r.recordId, r.disposition, r.reason, r.reviewer, r.at]))], widths: [32, 14, 32, 14, 60, 24, 26] },
-      { name: 'Parameter', rows: [['Parameter', 'Nilai'], ['Wajib scan masuk & pulang', p.requireComplete ? 'Ya' : 'Tidak'], ['Wajib tepat waktu', p.requireOnTime ? `Ya (toleransi ${p.lateToleranceMin} mnt)` : 'Tidak'], ['Pulang cepat menggugurkan', p.requireNoEarlyLeave ? 'Ya' : 'Tidak'], ['WFA dihitung', p.countWfa ? 'Ya' : 'Tidak'], ['Dinas lokal ≤ 8 jam dihitung', p.countLocalDuty ? 'Ya' : 'Tidak'], ['Tahan bila ada isu', p.holdOnIssues ? 'Ya' : 'Tidak'], ['Non-ASN dibayar', p.includeNonAsn ? 'Ya' : 'Tidak'], ...(['I', 'II', 'III', 'IV'] as GolGroup[]).map(g => [`Tarif gol. ${g}`, `${p.rates[g]} · PPh ${p.pph[g]}%`]), ['Golongan kosong', 'Nominal pending; tanpa tarif fallback'], ['Revisi workspace', String(hr.revision)], ['Filter pencarian', q], ['Versi kalkulasi', '2.0.0'], ...hr.files.map(f => [`Sumber r${f.revision ?? 1}: ${f.fileName}`, `${f.hash ?? 'legacy'} · ${f.id}`]), ['Catatan', 'Tarif & PPh adalah nilai acuan awal; wajib dikonfirmasi Bagian Keuangan/SDM.']], widths: [36, 50] },
+      { name: 'Parameter', rows: [['Parameter', 'Nilai'], ['Batas kedatangan pukul 08:00', p.arrivalBoundary === 'inclusive' ? '≤ 08:00:00' : p.arrivalBoundary === 'exclusive' ? '< 08:00:00' : 'Belum ditetapkan; tepat 08:00 ditahan'], ['Parameter diverifikasi Keuangan', p.parametersApproved ? 'Ya' : 'Belum'], ['Wajib scan masuk & pulang', p.requireComplete ? 'Ya' : 'Tidak'], ['Wajib tepat waktu', p.requireOnTime ? `Ya (toleransi ${p.lateToleranceMin} mnt)` : 'Tidak'], ['Pulang cepat menggugurkan', p.requireNoEarlyLeave ? 'Ya' : 'Tidak'], ['WFA dihitung', p.countWfa ? 'Ya' : 'Tidak'], ['Dinas lokal ≤ 8 jam dihitung', p.countLocalDuty ? 'Ya' : 'Tidak'], ['Tahan bila ada isu', p.holdOnIssues ? 'Ya' : 'Tidak'], ['Non-ASN dibayar', p.includeNonAsn ? 'Ya' : 'Tidak'], ...(['I', 'II', 'III', 'IV'] as GolGroup[]).map(g => [`Tarif gol. ${g}`, `${p.rates[g]} · PPh ${p.pph[g]}%`]), ['Golongan kosong', 'Nominal pending; tanpa tarif fallback'], ['Revisi workspace', String(hr.revision)], ['Filter pencarian', q], ['Versi kalkulasi', '2.0.0'], ...hr.files.map(f => [`Sumber r${f.revision ?? 1}: ${f.fileName}`, `${f.hash ?? 'legacy'} · ${f.id}`]), ['Catatan', 'Tarif & PPh adalah nilai acuan awal; wajib dikonfirmasi Bagian Keuangan/SDM.']], widths: [36, 50] },
     ])
     toast('Daftar nominatif diunduh')
   }
 
   return <div className="page">
-    <PageHeader kicker={`Langkah 4 · Hitung · ${monthLabel(hr.activePeriod)}`} title="Perhitungan uang makan" actions={<><button className="btn secondary" onClick={() => setShowPolicy(v => !v)}><Settings2 size={15} /> Aturan & tarif</button><button className="btn primary" onClick={exportXlsx}><Download size={15} /> Unduh daftar nominatif</button></>}>
+    <PageHeader kicker={`Langkah 4 · Hitung · ${monthLabel(hr.activePeriod)}`} title="Perhitungan uang makan" actions={<>{['admin', 'finance'].includes(user.role) && <button className="btn secondary" onClick={() => setShowPolicy(v => !v)}><Settings2 size={15} /> Aturan & tarif</button>}<button className="btn primary" onClick={exportXlsx}><Download size={15} /> Unduh daftar nominatif</button></>}>
       Dihitung per hari dari status rekonsiliasi: hadir di kantor dan WFA dengan pasangan scan lengkap dan tepat waktu dihitung; dinas lokal/luar, tugas belajar, diperbantukan, perjalanan dinas (menerima uang harian), cuti, sakit, izin, dan tanpa keterangan tidak. Hari dengan isu yang belum diputuskan ditahan, tidak otomatis dibayar.
     </PageHeader>
 
@@ -71,7 +73,7 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
       <Kpi label="Gugur karena terlambat" value={fmt.format(late)} note="Pada aturan aktif" tone="red" />
     </div>
 
-    <Panel title="Dampak pilihan aturan" sub="Brief menyebut uang makan untuk pegawai yang tepat waktu (masuk ≤ 08:00) sampai jam pulang. Aturan resmi perlu dikonfirmasi; bandingkan dampaknya di sini.">
+    <Panel title="Dampak pilihan aturan" sub="Aturan mensyaratkan datang sebelum pukul 08:00. Kasus tepat pukul 08:00 tetap ditahan sampai Keuangan/SDM memilih operator < atau ≤; bandingkan dampaknya di sini.">
       <div className="presets">{presetImpact.map(p => <button key={p.id} className={`preset ${p.active ? 'on' : ''}`} onClick={() => hr.setPolicy(p.patch)}>
         <strong>{p.label}</strong><small>{p.detail}</small>
         <span>{fmt.format(p.days)} hari · {money.format(p.netto)}</span>
@@ -132,13 +134,16 @@ function MealDetail({ month }: { month: EmployeeMonth }) {
 
 function PolicyEditor() {
   const hr = useHr()
+  const { user } = useAuth()
   const p = hr.policy
   const toggle = (k: keyof MealPolicy, label: string, help: string) => <label className="toggle-row"><input type="checkbox" checked={p[k] as boolean} onChange={e => hr.setPolicy({ [k]: e.target.checked } as Partial<MealPolicy>)} /><span><strong>{label}</strong><small>{help}</small></span></label>
   return <Panel title="Aturan & tarif" sub="Nilai acuan awal mengikuti pola standar biaya uang makan ASN (PNS gol. I–IV; PPPK dipetakan I–IV≈I, V–VIII≈II, IX–XII≈III, XIII–XVII≈IV). Wajib dikonfirmasi Bagian Keuangan/SDM sebelum dipakai membayar.">
     <div className="policy-grid">
       <div className="toggles">
         <Note>Wajib scan masuk dan pulang, tepat waktu tanpa toleransi. Semua dinas tidak mendapat UM.</Note>
-        {toggle('parametersApproved', 'Parameter telah diverifikasi Keuangan', 'Sahkan hanya setelah jadwal, tarif, pajak dan kalender terkonfirmasi.')}
+        <label className="toggle-row"><span><strong>Batas kedatangan pukul 08:00</strong><small>{p.arrivalBoundary ? 'Diterapkan ke semua hari dengan waktu masuk.' : 'Belum diputuskan. Waktu tepat 08:00 ditahan; waktu setelahnya gugur.'}</small></span><select className="select" aria-label="Batas kedatangan pukul 08:00" disabled={!['admin', 'finance'].includes(user.role)} value={p.arrivalBoundary ?? ''} onChange={e => hr.setPolicy({ arrivalBoundary: e.target.value ? e.target.value as NonNullable<MealPolicy['arrivalBoundary']> : undefined })}><option value="">Belum ditetapkan</option><option value="exclusive">Harus sebelum 08:00 (&lt;)</option><option value="inclusive">Termasuk tepat pukul 08:00 (≤ 08:00:00)</option></select></label>
+        {!p.arrivalBoundary && <Note tone="warn">Pengesahan parameter tetap nonaktif sampai operator batas 08:00 dipilih.</Note>}
+        {toggle('parametersApproved', 'Parameter telah diverifikasi Keuangan', 'Sahkan setelah operator batas 08:00, jadwal, tarif, pajak dan kalender terkonfirmasi.')}
         {toggle('requireNoEarlyLeave', 'Pulang sebelum jadwal menggugurkan', 'Sen–Kam 16:00, Jumat 16:30.')}
         {toggle('countWfa', 'WFA dihitung hadir', 'Presensi WFA lewat aplikasi yang disetujui.')}
         {toggle('holdOnIssues', 'Tahan hari yang punya isu terbuka', 'Mis. dinas luar tapi scan di kantor, jam diisi manual.')}

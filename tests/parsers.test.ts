@@ -25,7 +25,7 @@ test('leading-zero text IDs survive Excel round trip',async()=>{
 test('review signature survives unrelated data and becomes stale after changed evidence',()=>{
  const employee={...blankEmployee('person'),nama:'Uji',nip:'198001012020011001',kantor:'Pusat',golongan:'III/a',statusKepegawaian:'PNS' as const}
  const file={id:'file',fileName:'test',kind:'mesin' as const,label:'Test',office:'Pusat',importedAt:'2026-10-19T00:00:00Z',period:{start:'2026-10-05',end:'2026-10-05'},evidence:[{id:'ev',fileId:'file',kind:'mesin' as const,office:'Pusat',name:'Uji',ids:{nip:employee.nip},date:'2026-10-05',clockIn:'08:00',clockOut:'16:00',notes:['jam-manual-absen-error' as const],ref:'row 1'}],assignments:[],warnings:[],stats:{rows:1,people:1}}
- const policy={...DEFAULT_POLICY,parametersApproved:true}, roster=buildRoster([file],[employee],{},[]), scope={start:'2026-10-05',end:'2026-10-05'}
+ const policy={...DEFAULT_POLICY,parametersApproved:true,arrivalBoundary:'inclusive' as const}, roster=buildRoster([file],[employee],{},[]), scope={start:'2026-10-05',end:'2026-10-05'}
  const issue=reconcile([file],roster,scope,policy,[]).issues[0], resolution={issueId:issue.id,signature:issue.signature,decision:'valid' as const,note:'Bukti dikonfirmasi',reviewer:'HR',at:'2026-10-19T00:00:00Z'}
  expect(reconcile([file],roster,scope,policy,[resolution]).months[0].mealDays).toBe(1)
  const unrelated={...file,id:'other',evidence:[],assignments:[]};expect(reconcile([file,unrelated],roster,scope,policy,[resolution]).months[0].mealDays).toBe(1)

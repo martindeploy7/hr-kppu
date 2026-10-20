@@ -1,5 +1,12 @@
 import { test } from '@e2e-dev/web'
 import { expect, credentials } from 'e2e'
+async function confirmImport(screen:any, reason='E2E sumber sintetis, data diperiksa sebelum disimpan'){
+ await screen.getByLabel('Alasan impor / dasar kelengkapan').fill(reason)
+ await screen.getByRole('button','Hitung diff & dampak',{exact:true}).tap()
+ await expect(screen.getByText(/Hasil preview terikat revisi \d+/)).toBeVisible()
+ await screen.getByLabel('Saya sudah memeriksa diff, scope penggantian, dan dampak hari UM.').tap()
+ await screen.getByRole('button','Konfirmasi impor',{exact:true}).tap()
+}
 test('login, master persists after reload, logout revokes session',async({app,screen,browser})=>{
  await app.open('/')
  await expect(screen.getByRole('heading','Masuk ke ruang kerja SDM')).toBeVisible()
@@ -36,13 +43,41 @@ test('source preview, confirm and renamed identical reupload do not duplicate so
  await expect(browser.locator('.import-results')).toBeVisible()
  // Re-runs may already contain this exact fixture; both paths must preserve idempotency.
  const exists=await browser.evaluate(()=>document.body.textContent?.includes('Duplikat identik'))
- if(!exists){await expect(screen.getByRole('button','Konfirmasi impor',{exact:true})).toBeVisible();await screen.getByRole('button','Konfirmasi impor',{exact:true}).tap();await expect(browser.locator('.sidebar-footer')).toContainText('Tersimpan di server')}
+ if(!exists){await confirmImport(screen);await expect(browser.locator('.sidebar-footer')).toContainText('Tersimpan di server')}
  const count=await browser.evaluate(async()=>{const r=await fetch('/api/workspace');const data=await r.json();return data.state.files.filter((f:any)=>f.active!==false).length})
  expect(count).toBe(exists?countBefore:countBefore+1)
  await browser.locator('input[type="file"]').setInputFiles(['.e2e/fixtures/E2E_Renamed.xlsx'])
  await expect(screen.getByText('Duplikat identik; tidak ditambahkan',{exact:true})).toBeVisible()
  expect(await browser.evaluate(async()=>{const r=await fetch('/api/workspace');const d=await r.json();return d.state.files.filter((f:any)=>f.active!==false).length})).toBe(count)
  for(const width of [390,1280]){await browser.setViewport({width,height:844});expect(await browser.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)}
+})
+test('admin selects and persists the explicit 08:00 boundary',async({app,screen,browser})=>{
+ await app.open('/');const account=credentials.user('admin')
+ await screen.getByLabel('Email akun').fill(account.username);await screen.getByLabel('Password').fill(account.password);await screen.getByRole('button','Masuk',{exact:true}).tap()
+ await expect(screen.getByRole('button','Uang Makan',{exact:true})).toBeVisible()
+ const original=await browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json();return {policy:w.state.policy,files:w.state.files.length}})
+ let seedId:string|undefined
+ try{
+  if(!original.files){
+   await screen.getByRole('button','Impor Sumber',{exact:true}).tap()
+   await browser.locator('input[type="file"]').setInputFiles(['.e2e/fixtures/E2E_Withdraw_Pusat.xlsx'])
+   await confirmImport(screen,'E2E sumber sintetis untuk uji pengaturan batas kedatangan')
+   seedId=await browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json();return w.state.files.find((f:any)=>f.fileName==='E2E_Withdraw_Pusat.xlsx')?.id})
+   if(!seedId)throw new Error('Synthetic source was not committed')
+  }
+  await screen.getByRole('button','Uang Makan',{exact:true}).tap()
+  await screen.getByRole('button','Aturan & tarif',{exact:true}).tap()
+  const boundary=screen.getByLabel('Batas kedatangan pukul 08:00',{exact:true})
+  await boundary.selectOption({value:'exclusive'})
+  await expect.poll(()=>browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json();return w.state.policy.arrivalBoundary}),{timeout:10000}).toBe('exclusive')
+  await expect(browser.locator('.sidebar-footer')).toContainText('Tersimpan di server')
+  await boundary.selectOption({value:'inclusive'})
+  await expect.poll(()=>browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json();return w.state.policy.arrivalBoundary}),{timeout:10000}).toBe('inclusive')
+ }finally{
+  try{await browser.evaluate(async(policy:any)=>{const w=await(await fetch('/api/workspace')).json(),r=await fetch('/api/workspace',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({expectedRevision:w.revision,patch:{policy},reason:'E2E restore policy after boundary test'})});if(!r.ok)throw new Error(`Policy cleanup failed: ${r.status}`)},original.policy)}finally{
+   if(seedId)await browser.evaluate(async(id:string)=>{const w=await(await fetch('/api/workspace')).json(),r=await fetch(`/api/sources/${id}/withdraw`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({expectedRevision:w.revision,reason:'E2E remove synthetic policy test source'})});if(!r.ok)throw new Error(`Source cleanup failed: ${r.status}`)},seedId)
+  }
+ }
 })
 test('workspace refreshes changes committed by another client',async({app,screen,browser})=>{
  await app.open('/');const account=credentials.user('admin')
@@ -83,7 +118,7 @@ test('source withdrawal confirms server success and preserves the archived datas
  await screen.getByRole('button','Impor Sumber',{exact:true}).tap()
  const before=await browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json();return w.state.files.filter((f:any)=>f.active!==false).length})
  await browser.locator('input[type="file"]').setInputFiles(['.e2e/fixtures/E2E_Withdraw_Pusat.xlsx'])
- await screen.getByRole('button','Konfirmasi impor',{exact:true}).tap()
+ await confirmImport(screen,'E2E impor dataset sintetis sebelum menguji penarikan')
  await expect.poll(()=>browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json();return w.state.files.filter((f:any)=>f.active!==false).length}),{timeout:10000}).toBe(before+1)
  await expect(browser.locator('.sidebar-footer')).toContainText('Tersimpan di server')
  await screen.getByRole('button','Tarik sumber E2E_Withdraw_Pusat.xlsx',{exact:true}).tap()
@@ -107,7 +142,7 @@ test('participant review previews impact, preserves original ST and requires a n
  try {
  await screen.getByRole('button','Impor Sumber',{exact:true}).tap()
  await browser.locator('input[type="file"]').setInputFiles(['.e2e/fixtures/E2E_Review_ST_Pusat.xlsx'])
- await screen.getByRole('button','Konfirmasi impor',{exact:true}).tap()
+ await confirmImport(screen,'E2E bukti ST sintetis sebelum menguji tinjauan peserta')
  await expect(browser.locator('.sidebar-footer')).toContainText('Tersimpan di server')
  const rowSelector='.file-row:has(.file-name strong[title="E2E_Review_ST_Pusat.xlsx"])',editorSelector=`${rowSelector} .record-review`
  const row=browser.locator(rowSelector)

@@ -4,6 +4,8 @@ export type GolGroup = 'I' | 'II' | 'III' | 'IV'
 
 export type MealPolicy = {
   parametersApproved?: boolean
+  /** Meaning of the exact 08:00:00 boundary; absent means boundary cases stay held. */
+  arrivalBoundary?: 'exclusive' | 'inclusive'
   requireComplete: boolean
   requireOnTime: boolean
   lateToleranceMin: number
@@ -43,7 +45,7 @@ export const DEFAULT_POLICY: MealPolicy = {
 }
 
 export const POLICY_PRESETS: { id: string; label: string; detail: string; patch: Partial<MealPolicy> }[] = [
-  { id: 'brief', label: 'Sesuai brief: tepat waktu & lengkap', detail: 'Masuk ≤ 08:00, scan masuk & pulang, tidak pulang cepat.', patch: { requireComplete: true, requireOnTime: true, lateToleranceMin: 0, requireNoEarlyLeave: true } },
+  { id: 'brief', label: 'Aturan wajib UM (draf)', detail: 'Masuk sebelum 08:00, scan masuk & pulang. Tepat 08:00 ditahan sampai operator batas disahkan.', patch: { requireComplete: true, requireOnTime: true, lateToleranceMin: 0, requireNoEarlyLeave: true } },
 ]
 
 /** Golongan PNS (I–IV, "III/b") atau PPPK (I–XVII) → kelompok tarif uang makan. PPPK I–IV≈I, V–VIII≈II, IX–XII≈III, XIII–XVII≈IV. */
@@ -60,5 +62,13 @@ export function golGroup(golongan: string, status: string, fallback: GolGroup): 
 
 /** Aturan wajib berlaku juga untuk backup lama dan request API. */
 export function enforcePolicy(policy: MealPolicy): MealPolicy {
-  return { ...policy, requireComplete: true, requireOnTime: true, lateToleranceMin: 0, countLocalDuty: false, holdOnIssues: true }
+  return {
+    ...policy,
+    parametersApproved: policy.parametersApproved === true && !!policy.arrivalBoundary,
+    requireComplete: true,
+    requireOnTime: true,
+    lateToleranceMin: 0,
+    countLocalDuty: false,
+    holdOnIssues: true,
+  }
 }

@@ -222,7 +222,7 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   const timeKnown = !!(clockIn || clockOut)
   const complete = !!(clockIn && clockOut && clockOut >= clockIn)
   const official = evs.find(e => e.kind === 'mesin' && e.schedule && !e.notes?.includes('jadwal-puasa'))?.schedule ?? evs.find(e => e.schedule && e.kind !== 'mesin')?.schedule ?? defaultSchedule(date)
-  const lateMin = clockIn ? Math.max(0, Math.ceil(toMinutes(clockIn)! - toMinutes(official.start)!)) : 0
+  const lateMin = clockIn ? Math.max(0, Math.ceil(toMinutes(clockIn)! - 8 * 60)) : 0
   const earlyMin = clockOut && clockIn ? Math.max(0, Math.ceil(toMinutes(official.end)! - toMinutes(clockOut)!)) : 0
   const overtimeMin = Math.max(0, ...evs.map(e => e.overtimeMin ?? 0))
 
@@ -300,7 +300,7 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   }
   const open = issues.filter(i => !resolved.some(r => r.issueId === i.id))
   if (partialDay && finalStatus === 'tidak-lengkap' && clockIn && !clockOut) { finalStatus = remoteEv.length && !officePresence ? 'hadir-wfa' : 'hadir'; finalBasis = `${finalBasis} — jam pulang belum tersinkron (ekspor belum lengkap)` }
-  const meal = partialDay && workday && (['tidak-lengkap', 'tidak-ada-data'].includes(finalStatus) || (['hadir', 'hadir-wfa'].includes(finalStatus) && !clockOut && timeKnown)) ? { state: 'held' as const, reason: 'Ditahan: data mesin belum lengkap, tunggu ekspor ulang', amount: 0 } : mealFor(employee, date, finalStatus, workday, complete, timeKnown, lateMin, earlyMin, open, policy)
+  const meal = partialDay && workday && (['tidak-lengkap', 'tidak-ada-data'].includes(finalStatus) || (['hadir', 'hadir-wfa'].includes(finalStatus) && !clockOut && timeKnown)) ? { state: 'held' as const, reason: 'Ditahan: data mesin belum lengkap, tunggu ekspor ulang', amount: 0 } : mealFor(employee, date, finalStatus, workday, complete, timeKnown, clockIn, lateMin, earlyMin, open, policy)
   return { employeeId: employee.id, date, workday, covered, evidence: evs, assignments: sts, status: finalStatus, basis: finalBasis, clockIn, clockOut, lateMin, earlyMin, overtimeMin, complete, timeKnown, issues, resolved, meal }
 }
 
@@ -319,7 +319,7 @@ export function defaultSchedule(date: ISODate) {
   return fri ? { start: '08:00', end: '16:30', label: 'Jumat 08:00–16:30' } : { start: '08:00', end: '16:00', label: 'Sen–Kam 08:00–16:00' }
 }
 
-function mealFor(employee: Employee, date: ISODate, status: DayStatus, workday: boolean, complete: boolean, timeKnown: boolean, lateMin: number, earlyMin: number, open: Issue[], policy: MealPolicy): DayRecord['meal'] {
+function mealFor(employee: Employee, date: ISODate, status: DayStatus, workday: boolean, complete: boolean, timeKnown: boolean, clockIn: string | undefined, lateMin: number, earlyMin: number, open: Issue[], policy: MealPolicy): DayRecord['meal'] {
   const no = (reason: string): DayRecord['meal'] => ({ state: 'excluded', reason, amount: 0 })
   if (!workday) return no('Bukan hari kerja')
   const excludedStatus = employee.workStatusPeriods?.find(s => s.start <= date && s.end >= date)
@@ -340,7 +340,12 @@ function mealFor(employee: Employee, date: ISODate, status: DayStatus, workday: 
   }
   {
     if (policy.requireComplete && !complete) return no('Scan masuk/pulang tidak lengkap')
-    if (policy.requireOnTime && timeKnown && lateMin > policy.lateToleranceMin) return no(`Terlambat ${lateMin} menit`)
+    const arrivalMinutes = toMinutes(clockIn)
+    if (policy.requireOnTime && arrivalMinutes !== undefined && arrivalMinutes > 8 * 60) return no(`Terlambat ${lateMin} menit (melewati batas pukul 08:00)`)
+    if (policy.requireOnTime && arrivalMinutes === 8 * 60) {
+      if (!policy.arrivalBoundary) return { state: 'held', amount: 0, reason: 'Batas tepat pukul 08:00 belum ditetapkan; minta konfirmasi apakah batasnya < 08:00 atau ≤ 08:00' }
+      if (policy.arrivalBoundary === 'exclusive') return no('Tepat pukul 08:00 tidak memenuhi batas hadir sebelum 08:00')
+    }
     if (policy.requireNoEarlyLeave && timeKnown && earlyMin > 0) return no(`Pulang ${earlyMin} menit sebelum jadwal`)
   }
   const blocking = open.filter(i => i.blocksMeal)

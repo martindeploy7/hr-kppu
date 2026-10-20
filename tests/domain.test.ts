@@ -7,7 +7,7 @@ import { upsertEmployees } from '../shared/workspace.ts'
 import { parseTime } from '../src/engine/dates.ts'
 import { splitPeople } from '../src/engine/names.ts'
 const employee: Employee = { ...blankEmployee('person'), nama: 'Pegawai Uji', nip: '198001012020011001', kantor: 'Pusat', statusKepegawaian: 'PNS', golongan: 'III/a' }
-const policy = { ...DEFAULT_POLICY, parametersApproved: true, holidays: [] }
+const policy = { ...DEFAULT_POLICY, parametersApproved: true, arrivalBoundary: 'inclusive' as const, holidays: [] }
 const ev = (id: string, change: Partial<Evidence> = {}): Evidence => ({ id, fileId: 'file', kind: 'mesin', office: 'Pusat', name: employee.nama, ids: { nip: employee.nip }, date: '2026-10-05', clockIn: '08:00', clockOut: '16:00', ref: id, ...change })
 const source = (evidence: Evidence[]): SourceFile => ({ id:'file', fileName:'test.xls', kind:'mesin', label:'Test', office:'Pusat', importedAt:'2026-10-19T00:00:00Z', period:{start:'2026-10-05',end:'2026-10-05'}, evidence, assignments:[], warnings:[], stats:{rows:evidence.length,people:1} })
 const run = (items: Evidence[], person = employee, config = policy, assignments: SourceFile['assignments'] = []) => {
@@ -16,8 +16,13 @@ const run = (items: Evidence[], person = employee, config = policy, assignments:
  return reconcile(files,roster,{start:'2026-10-05',end:'2026-10-05'},config,[],'2026-10-19').months[0]
 }
 describe('Aturan wajib UM',()=>{
- test('08:00 lengkap eligible, pajak dihitung secara independen',()=>{const r=run([ev('a')]);expect(r.mealDays).toBe(1);expect(r.bruto).toBe(37000);expect(r.pph).toBe(1850);expect(r.netto).toBe(35150)})
- test('detik setelah batas 08:00 tidak dibulatkan menjadi tepat waktu',()=>{expect(parseTime('08:00:01')).toBe('08:00:01');expect(run([ev('a',{clockIn:parseTime('08:00:01')})]).mealDays).toBe(0);expect(parseTime((8*3600+1)/86400)).toBe('08:00:01')})
+ test('08:00 lengkap eligible only after inclusive boundary is explicit',()=>{const r=run([ev('a')]);expect(r.mealDays).toBe(1);expect(r.bruto).toBe(37000);expect(r.pph).toBe(1850);expect(r.netto).toBe(35150)})
+ test('exact 08:00 remains held while the boundary operator is unknown',()=>{const r=run([ev('a')],employee,{...policy,arrivalBoundary:undefined});expect(r.days[0].meal.state).toBe('held');expect(r.days[0].meal.reason).toContain('belum ditetapkan');expect(r.mealDays).toBe(0)})
+ test('strict boundary excludes exact 08:00 and later time stays late despite a later source schedule',()=>{
+  const strict=run([ev('exact')],employee,{...policy,arrivalBoundary:'exclusive'}),late=run([ev('late',{clockIn:'08:15',schedule:{start:'08:30',end:'16:00',label:'Jadwal sumber 08:30–16:00'}})])
+  expect(strict.days[0].meal.state).toBe('excluded');expect(strict.days[0].meal.reason).toContain('sebelum 08:00');expect(late.days[0].meal.state).toBe('excluded');expect(late.days[0].meal.reason).toContain('Terlambat 15 menit')
+ })
+ test('detik setelah inclusive 08:00 boundary is not rounded to on time',()=>{expect(parseTime('08:00:01')).toBe('08:00:01');expect(run([ev('a',{clockIn:parseTime('08:00:01')})]).mealDays).toBe(0);expect(parseTime((8*3600+1)/86400)).toBe('08:00:01')})
  test('telat + lembur tidak eligible meskipun policy legacy longgar',()=>{const r=run([ev('a',{clockIn:'08:01',clockOut:'20:00',overtimeMin:240})],employee,{...policy,requireOnTime:false,lateToleranceMin:15});expect(r.mealDays).toBe(0)})
  test.each(['PD','DL'] as const)('dinas %s tetap gugur',code=>{expect(run([ev('a',{code})],employee,{...policy,countLocalDuty:true}).mealDays).toBe(0)})
  test('hadir tanpa jam ditahan',()=>{const r=run([ev('a',{clockIn:undefined,clockOut:undefined,present:true})]);expect(r.days[0].complete).toBe(false);expect(r.mealDays).toBe(0)})

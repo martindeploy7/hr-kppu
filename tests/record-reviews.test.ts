@@ -10,7 +10,7 @@ import { migrateWorkspace } from '../shared/validation.ts'
 const actor = { id: 'actor', name: 'HR Uji', email: 'hr@test.invalid', role: 'hr' as const, offices: ['Pusat'] }
 function fixture() {
   const state = emptyWorkspace(), person = { ...blankEmployee('person'), nama: 'Uji', nip: '198001012020011001', kantor: 'Pusat', golongan: 'III/a', statusKepegawaian: 'PNS' as const }
-  state.master = [person]; state.policy = { ...DEFAULT_POLICY, parametersApproved: true }
+  state.master = [person]; state.policy = { ...DEFAULT_POLICY, parametersApproved: true, arrivalBoundary: 'inclusive' }
   state.files = [{ id: 'attendance', fileName: 'Synthetic', kind: 'mesin', label: 'Test', office: 'Pusat', importedAt: '2026-10-20T00:00:00Z', period: { start: '2026-10-05', end: '2026-10-05' }, evidence: [{ id: 'good', fileId: 'attendance', kind: 'mesin', office: 'Pusat', name: person.nama, ids: { nip: person.nip }, date: '2026-10-05', clockIn: '08:00', clockOut: '16:00', ref: 'Sheet1 A2' }, { id: 'bad', fileId: 'attendance', kind: 'daring', office: 'Pusat', name: person.nama, ids: { nip: person.nip }, date: '2026-10-05', clockIn: '09:00', clockOut: '16:00', approved: true, mode: 'WFO', ref: 'Sheet1 A3' }], assignments: [], warnings: [], stats: { rows: 2, people: 1 } }]
   return state
 }
