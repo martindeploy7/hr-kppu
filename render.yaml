@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: kppu-hr
+    name: absensi-kkpu
     runtime: node
     plan: free
     region: singapore
