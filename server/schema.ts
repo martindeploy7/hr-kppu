@@ -22,6 +22,9 @@ export const auditEvents = hr.table('audit_events', {
   revision: integer('revision').notNull(), reason: text('reason').notNull(), details: jsonb('details').notNull(), at: time('at').defaultNow().notNull(),
 })
 export const loginAttempts = hr.table('login_attempts', { key: text('key').primaryKey(), count: integer('count').default(0).notNull(), resetAt: time('reset_at').notNull() })
+export const whatsappAuthState = hr.table('whatsapp_auth_state', {
+  id: text('id').primaryKey(), encryptedState: bytes('encrypted_state').notNull(), updatedAt: time('updated_at').defaultNow().notNull(),
+})
 export const mealSubmissions = hr.table('meal_submissions', {
   id: text('id').primaryKey(), period: text('period').notNull(), office: text('office').notNull(), revision: integer('revision').default(1).notNull(),
   workspaceRevision: integer('workspace_revision').notNull(), status: text('status').$type<'submitted' | 'approved' | 'locked' | 'cancelled'>().default('submitted').notNull(),

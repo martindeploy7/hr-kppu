@@ -1,9 +1,12 @@
-import { useState } from 'react'
-import { Activity, AlertCircle, CheckCircle2, BookOpenCheck, BriefcaseBusiness, Cake, CalendarDays, Clock3, Database, FileSpreadsheet, HeartHandshake, MessageCircleMore, Settings2, ShieldCheck, UsersRound } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Activity, AlertCircle, CheckCircle2, BookOpenCheck, BriefcaseBusiness, Cake, CalendarDays, Clock3, Database, FileSpreadsheet, HeartHandshake, LoaderCircle, MessageCircleMore, QrCode, Settings2, ShieldCheck, UsersRound } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import type { AutomationRule, Employee } from '../types.ts'
 import { useHr } from '../state/HrData.tsx'
+import { useAuth } from '../state/Auth.tsx'
+import { api } from '../lib/api.ts'
 import { nextBirthdayDays, tenureYears } from '../lib/format.ts'
+import type { WhatsAppStatus } from '../../shared/whatsapp.ts'
 
 const initialAutomations: AutomationRule[] = [
   { id: 'forgotout', title: 'Pengingat lupa scan pulang', description: 'Dikirim sore hari ke pegawai yang punya jam masuk tetapi belum ada jam pulang — penyebab utama hari "bukti tidak lengkap".', trigger: 'Hari kerja • 16:45 WIB', audience: 'Pegawai dengan scan masuk tanpa scan pulang', enabled: true, category: 'Absensi', scope: 'personal', privacy: 'standard' },
@@ -36,12 +39,27 @@ const scopeLabels: Record<AutomationScope, string> = {
 
 export function AutomationCenter({ toast }: { toast: (m: string) => void }) {
   const hr = useHr()
+  const { user } = useAuth()
   const [rules, setRules] = useState(initialAutomations)
   const employees = hr.roster.employees
   const showToast = toast
   const forgot = hr.recon.months.reduce((s, m) => s + m.days.filter(d => d.status === 'tidak-lengkap' && d.clockIn && !d.clockOut).length, 0)
   const readiness = employees.length ? Math.round(employees.filter(e => e.nomorWhatsApp).length / employees.length * 100) : 0
-  const [connected,setConnected]=useState(false)
+  const [waStatus,setWaStatus]=useState<WhatsAppStatus>({ configured:false,status:'not_configured',message:'Memuat status koneksi…' })
+  const [waBusy,setWaBusy]=useState(false)
+  const [waError,setWaError]=useState('')
+  const isAdmin=user.role==='admin'
+  useEffect(()=>{
+    if(!isAdmin)return
+    let active=true
+    const refresh=async()=>{
+      try { const status=await api<WhatsAppStatus>('/whatsapp/status');if(active){setWaStatus(status);setWaError('')} }
+      catch(error){if(active)setWaError((error as Error).message)}
+    }
+    void refresh()
+    const timer=window.setInterval(()=>void refresh(),2500)
+    return()=>{active=false;window.clearInterval(timer)}
+  },[isAdmin])
   const [scopeFilter,setScopeFilter]=useState<AutomationFilter>('all')
   const [composerScope,setComposerScope]=useState<AutomationScope>('personal')
   const [selectedRule,setSelectedRule]=useState('birthday')
@@ -56,8 +74,22 @@ export function AutomationCenter({ toast }: { toast: (m: string) => void }) {
     if(next)setSelectedRule(next.id)
   }
   const toggle=(id:string)=>setRules(rules.map(r=>r.id===id?{...r,enabled:!r.enabled}:r))
+  const connectWhatsApp=async()=>{
+    setWaBusy(true);setWaError('')
+    try { const status=await api<WhatsAppStatus>('/whatsapp/connect',{method:'POST'});setWaStatus(status);showToast('Permintaan koneksi WhatsApp dimulai. Pindai QR saat muncul.') }
+    catch(error){setWaError((error as Error).message)}
+    finally{setWaBusy(false)}
+  }
+  const disconnectWhatsApp=async()=>{
+    setWaBusy(true);setWaError('')
+    try { const status=await api<WhatsAppStatus>('/whatsapp/disconnect',{method:'POST'});setWaStatus(status);showToast('Sesi WhatsApp diputus dan kredensial lokal dihapus.') }
+    catch(error){setWaError((error as Error).message)}
+    finally{setWaBusy(false)}
+  }
+  const waConnected=waStatus.status==='connected'
+  const connectionLabel:Record<WhatsAppStatus['status'],string>={not_configured:'Perlu konfigurasi',disconnected:'Belum terhubung',connecting:'Menghubungkan',qr:'Pindai QR',connected:'Terhubung',reconnecting:'Menyambung ulang',logged_out:'Sesi keluar',error:'Perlu tindakan'}
   return <>
-    <div className="page-heading"><div><h2>WhatsApp Automation Center</h2><p>Kelola pengumuman, pesan tersegmentasi, komunikasi personal, dan template HR.</p></div><span className={`connection-chip ${connected?'online':''}`}><span></span>{connected?'Simulasi terhubung':'Koneksi demo'}</span></div>
+    <div className="page-heading"><div><h2>WhatsApp Automation Center</h2><p>Kelola pengumuman, pesan tersegmentasi, komunikasi personal, dan template HR.</p></div><span className={`connection-chip ${waConnected?'online':''}`}><span></span>{isAdmin?connectionLabel[waStatus.status]:'Koneksi dikelola admin'}</span></div>
     <section className="auto-facts">
       <div><strong>{employees.filter(e => e.tanggalLahir).length}</strong><span>pegawai punya tanggal lahir (dibaca dari NIP) — bahan pratinjau ulang tahun, belum ada pengiriman</span></div>
       <div><strong>{forgot}</strong><span>hari periode ini dengan scan masuk tanpa scan pulang — sasaran pengingat sore</span></div>
@@ -69,10 +101,13 @@ export function AutomationCenter({ toast }: { toast: (m: string) => void }) {
       <div className="blast-lane personal"><span>Personal & benefit</span><strong>Satu pesan untuk pegawai terkait</strong><p>Ulang tahun, peristiwa keluarga, slip gaji, atau pembaruan klaim.</p></div>
     </section>
     <div className="automation-layout">
-      <section className="card wa-connect"><div className="card-head"><div><h3>Koneksi WhatsApp HR</h3><p>Flow QR dibuat menyerupai integrasi Baileys di production.</p></div><MessageCircleMore/></div>
-        {!connected ? <div className="qr-area"><div className="qr-box"><QRCodeSVG value="KPPU-HR-DEMO-BAILEYS-SESSION" size={170} fgColor="#072c52" bgColor="#ffffff"/></div><strong>Contoh QR simulasi</strong><p>Prototype ini tidak benar-benar login ke WhatsApp. Saat backend Baileys aktif, QR dari session service akan ditampilkan di area ini.</p><button className="btn primary" onClick={()=>{setConnected(true);showToast('Demo: WhatsApp HR ditandai terhubung')}}><ShieldCheck size={17}/> Simulasikan connected</button></div> : <div className="connected-state"><div className="connected-icon"><CheckCircle2/></div><h3>Simulasi WhatsApp terhubung</h3><p>Nomor contoh · bukan akun aktif</p><div className="connection-meta"><div><span>Status</span><strong>Simulasi</strong></div><div><span>Session</span><strong>Tidak tersimpan</strong></div><div><span>Last sync</span><strong>Tidak ada sinkronisasi</strong></div></div><button className="btn secondary" onClick={()=>setConnected(false)}>Disconnect demo</button></div>}
+      <section className="card wa-connect"><div className="card-head"><div><h3>Koneksi WhatsApp HR</h3><p>Login perangkat tertaut dengan QR WhatsApp Web.</p></div><MessageCircleMore/></div>
+        {!isAdmin ? <div className="wa-setup-note"><ShieldCheck size={20}/><p>Hanya administrator yang dapat melihat QR dan mengelola perangkat tertaut WhatsApp.</p></div> : <>
+          {waConnected ? <div className="connected-state"><div className="connected-icon"><CheckCircle2/></div><h3>WhatsApp terhubung</h3><p>{waStatus.phoneNumber?`Nomor +${waStatus.phoneNumber}`:'Perangkat HR aktif'}</p><div className="connection-meta"><div><span>Status</span><strong>Terhubung</strong></div><div><span>Sesi</span><strong>Tersimpan terenkripsi</strong></div><div><span>Terhubung sejak</span><strong>{waStatus.connectedAt?new Intl.DateTimeFormat('id-ID',{dateStyle:'medium',timeStyle:'short'}).format(new Date(waStatus.connectedAt)):'Baru saja'}</strong></div></div><button type="button" className="btn secondary" disabled={waBusy} onClick={disconnectWhatsApp}><ShieldCheck size={16}/> Putuskan perangkat</button></div> : waStatus.qr ? <div className="qr-area"><div className="qr-box"><QRCodeSVG value={waStatus.qr} size={190} level="M" fgColor="#072c52" bgColor="#ffffff"/></div><strong>Pindai dari WhatsApp</strong><p>Buka WhatsApp di ponsel admin → <b>Perangkat tertaut</b> → <b>Tautkan perangkat</b>. QR akan diperbarui otomatis bila kedaluwarsa.</p><button type="button" className="btn secondary" disabled={waBusy} onClick={disconnectWhatsApp}>Batalkan login</button></div> : <div className="qr-area"><div className="qr-box qr-placeholder"><QrCode size={88}/></div><strong>{waStatus.status==='connecting'?'Menghubungkan ke WhatsApp…':waStatus.status==='reconnecting'?'Mencoba menyambungkan kembali…':waStatus.status==='logged_out'?'Sesi WhatsApp sudah keluar':waStatus.status==='error'?'Koneksi perlu diatur ulang':'Tautkan perangkat WhatsApp HR'}</strong><p>{waStatus.message??'Klik tombol untuk meminta QR langsung dari sesi WhatsApp.'}</p>{waStatus.status==='not_configured' ? <div className="wa-setup-note"><ShieldCheck size={18}/><p>Tambahkan <code>WHATSAPP_SESSION_ENCRYPTION_KEY</code> di Render, lalu restart service. Buat nilainya dengan <code>openssl rand -base64 32</code> dan simpan aman.</p></div> : <button type="button" className="btn primary" disabled={waBusy||waStatus.status==='connecting'||waStatus.status==='reconnecting'} onClick={connectWhatsApp}>{waBusy||waStatus.status==='connecting'||waStatus.status==='reconnecting'?<LoaderCircle size={17} className="spin-icon"/>:<QrCode size={17}/>} {waStatus.status==='error'?'Coba login ulang':'Mulai tautkan WhatsApp'}</button>}{waStatus.status==='error'&&waStatus.configured&&<button type="button" className="btn secondary wa-reset-button" disabled={waBusy} onClick={disconnectWhatsApp}>Hapus sesi tersimpan</button>}</div>}
+          {waError&&<p className="wa-inline-error" role="alert">{waError}</p>}
+        </>}
       </section>
-      <section className="card automation-rules"><div className="card-head"><div><h3>Aturan pesan</h3><p>{rules.filter(r=>r.enabled).length} dari {rules.length} automation aktif · toggle hanya simulasi</p></div><Settings2/></div>
+      <section className="card automation-rules"><div className="card-head"><div><h3>Aturan pesan</h3><p>{rules.filter(r=>r.enabled).length} dari {rules.length} automation aktif · belum dikirim ke WhatsApp</p></div><Settings2/></div>
         <div className="scope-filter" role="group" aria-label="Filter jangkauan pesan">
           {(['all','public','segmented','personal'] as AutomationFilter[]).map(scope=><button type="button" key={scope} className={scopeFilter===scope?'active':''} aria-pressed={scopeFilter===scope} onClick={()=>setScopeFilter(scope)}>{scope==='all'?'Semua':scopeLabels[scope]}</button>)}
         </div>
@@ -100,7 +135,7 @@ export function AutomationCenter({ toast }: { toast: (m: string) => void }) {
       </Card>
       <Card title="Antrean ulang tahun" subtitle="Pegawai dengan hari lahir dalam 30 hari" badge={`${upcoming.length} pegawai`}><div className="timeline">{upcoming.slice(0,6).map(e=><div key={e.id}><span className="timeline-dot"></span><div><strong>{e.nama}</strong><p>Ucapan ulang tahun • {nextBirthdayDays(e.tanggalLahir)} hari lagi</p></div><span className="ready-label">Preview</span></div>)}{upcoming.length===0&&<p className="empty-state">Belum ada hari lahir dalam 30 hari.</p>}</div></Card>
     </div>
-    <section className="architecture-note"><AlertCircle size={20}/><div><strong>Prototype & privasi</strong><p>QR, status koneksi, toggle, dan pratinjau di halaman ini adalah simulasi; tidak ada pesan terkirim. Untuk produksi, hubungkan ke service persisten Node + Baileys dan scheduler backend; pengingat absensi membaca hasil rekonsiliasi harian. Pesan slip gaji atau klaim hanya boleh menjadi notifikasi ke portal HR yang aman.</p></div></section>
+    <section className="architecture-note"><AlertCircle size={20}/><div><strong>Login nyata, pengiriman masih nonaktif</strong><p>QR dan status koneksi kini berasal dari sesi WhatsApp sungguhan; toggle aturan dan pratinjau pesan masih belum mengirim pesan. Koneksi QR memakai Baileys, klien komunitas WhatsApp Web, sehingga WhatsApp dapat memutus atau membatasi akun. Gunakan nomor kerja khusus, bukan nomor utama/terverifikasi. Pesan slip gaji atau klaim hanya boleh menjadi notifikasi ke portal HR yang aman.</p></div></section>
   </>
 }
 

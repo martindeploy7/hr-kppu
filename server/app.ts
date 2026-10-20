@@ -23,6 +23,7 @@ import { registerSubmissions } from './submissions.ts'
 import { validateMasterChange } from './master.ts'
 import { previewRecordReview, recordReviewInput } from './recordReviews.ts'
 import { canRetryImport, importCommitSchema, importIntentSchema, previewImport } from './imports.ts'
+import type { WhatsAppConnector } from './whatsapp.ts'
 
 const digest = (s: string | Buffer) => createHash('sha256').update(s).digest('hex')
 const stableValue = (value: unknown): unknown => Array.isArray(value)
@@ -32,7 +33,7 @@ const stableValue = (value: unknown): unknown => Array.isArray(value)
     : value
 const sameValue = (a: unknown, b: unknown) => JSON.stringify(stableValue(a)) === JSON.stringify(stableValue(b))
 const publicUser = (u: typeof users.$inferSelect): User => ({ id: u.id, email: u.email, name: u.name, role: u.role, offices: u.offices })
-export function createApp(db: Database, config: { origin: string; production: boolean }) {
+export function createApp(db: Database, config: { origin: string; production: boolean }, whatsapp?: WhatsAppConnector) {
   const app = new Hono<{ Variables: { user: User; sessionHash: string } }>()
   const cookie = config.production ? '__Host-kppu_session' : 'kppu_session'
   const dummyHash = hash(randomBytes(32).toString('hex'))
@@ -75,6 +76,25 @@ export function createApp(db: Database, config: { origin: string; production: bo
   })
   app.get('/api/auth/me', c => c.json({ user: c.get('user') }))
   app.post('/api/auth/logout', async c => { await db.delete(sessions).where(eq(sessions.tokenHash, c.get('sessionHash'))); deleteCookie(c, cookie, { path: '/', secure: config.production }); return c.json({ ok: true }) })
+  app.get('/api/whatsapp/status', c => {
+    if (c.get('user').role !== 'admin') throw new HTTPException(403, { message: 'Hanya administrator yang dapat melihat status koneksi WhatsApp' })
+    if (!whatsapp) throw new HTTPException(503, { message: 'Layanan koneksi WhatsApp belum aktif di server' })
+    return c.json(whatsapp.status())
+  })
+  app.post('/api/whatsapp/connect', async c => {
+    if (c.get('user').role !== 'admin') throw new HTTPException(403, { message: 'Hanya administrator yang dapat menautkan WhatsApp' })
+    if (!whatsapp) throw new HTTPException(503, { message: 'Layanan koneksi WhatsApp belum aktif di server' })
+    try { await whatsapp.connect() }
+    catch (error) { throw new HTTPException(503, { message: error instanceof Error ? error.message : 'Koneksi WhatsApp gagal dimulai' }) }
+    return c.json(whatsapp.status(), 202)
+  })
+  app.post('/api/whatsapp/disconnect', async c => {
+    if (c.get('user').role !== 'admin') throw new HTTPException(403, { message: 'Hanya administrator yang dapat memutuskan WhatsApp' })
+    if (!whatsapp) throw new HTTPException(503, { message: 'Layanan koneksi WhatsApp belum aktif di server' })
+    try { await whatsapp.disconnect() }
+    catch { throw new HTTPException(503, { message: 'Sesi WhatsApp gagal dihapus. Coba kembali.' }) }
+    return c.json(whatsapp.status())
+  })
   app.post('/api/auth/password', async c => {
     const v = z.object({ currentPassword: z.string().min(1).max(256), newPassword: z.string().min(14).max(256) }).parse(await c.req.json()), actor = c.get('user')
     const [account] = await db.select().from(users).where(eq(users.id, actor.id))

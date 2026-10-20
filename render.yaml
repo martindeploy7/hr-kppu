@@ -23,3 +23,5 @@ services:
         value: Administrator SDM
       - key: INITIAL_ADMIN_PASSWORD
         sync: false
+      - key: WHATSAPP_SESSION_ENCRYPTION_KEY
+        sync: false

@@ -1,6 +1,6 @@
 # KPPU HR
 
-Aplikasi HR KPPU dengan React/TypeScript/Vite, API Hono, Drizzle dan PostgreSQL. Alur frontend existing dipertahankan: impor sumber, pencocokan identitas, rekonsiliasi, ringkasan kehadiran, uang makan, master dan People Dashboard. Automation Center masih simulasi.
+Aplikasi HR KPPU dengan React/TypeScript/Vite, API Hono, Drizzle dan PostgreSQL. Alur frontend existing dipertahankan: impor sumber, pencocokan identitas, rekonsiliasi, ringkasan kehadiran, uang makan, master dan People Dashboard. Automation Center dapat menautkan WhatsApp melalui QR nyata; pengiriman pesan dan scheduler masih simulasi.
 
 Backend menyimpan ruang kerja bersama, sumber Excel asli, revisi, akun, sesi dan riwayat perubahan. Login memakai Argon2 dan cookie HttpOnly. Server memeriksa role serta expected revision; perubahan dua admin tidak saling menimpa secara diam-diam.
 

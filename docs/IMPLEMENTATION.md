@@ -1,6 +1,6 @@
 # Pelaksanaan fullstack HR KPPU
 
-20 Oktober 2026. Instruksi terbaru memperluas dua blueprint menjadi aplikasi bersama. Stack mengikuti keluarga teknologi Cozzy: React/TypeScript/Vite, Hono, Drizzle, PostgreSQL. Target tetap satu Render Free Web Service untuk FE/API dan Supabase PostgreSQL melalui pooler. Upload sumber tetap manual. WhatsApp tetap simulasi, tanpa pengiriman.
+20 Oktober 2026. Instruksi terbaru memperluas dua blueprint menjadi aplikasi bersama. Stack mengikuti keluarga teknologi Cozzy: React/TypeScript/Vite, Hono, Drizzle, PostgreSQL. Target tetap satu Render Free Web Service untuk FE/API dan Supabase PostgreSQL melalui pooler. Upload sumber tetap manual. Login WhatsApp QR kini memakai sesi nyata Baileys dengan penyimpanan terenkripsi; fitur kirim pesan dan scheduler tetap simulasi.
 
 Repository privat: https://github.com/martindeploy7/hr-kppu. File kerja tetap di checkout frontend existing; workbook asli di direktori induk tidak dipindah atau dibundel.
 
@@ -9,6 +9,7 @@ Repository privat: https://github.com/martindeploy7/hr-kppu. File kerja tetap di
 - Password Argon2, sesi 8 jam dalam cookie HttpOnly/Secure production, origin check, limiter login tersimpan di PostgreSQL, penggantian password yang mencabut sesi lain.
 - Role admin/SDM/reviewer/Keuangan/viewer serta cakupan kantor. Workspace, kalkulasi, backup, pengajuan dan ekspor diperiksa server. Tes membuktikan akun Kanwil I tidak dapat membaca/mengubah Pusat.
 - PostgreSQL menyimpan workspace berversi, sumber byte asli/hasil parsing, akun/sesi, audit, snapshot pengajuan dan kunci employee-date. Schema privat `hr_internal`; trigger melindungi audit dan isi snapshot/arsip dari perubahan.
+- Automation Center meminta QR dari backend Baileys, membatasi QR/status ke admin, mengenkripsi kredensial dan Signal keys dengan AES-256-GCM, serta menyimpannya di tabel privat agar sesi dapat dipulihkan ketika service hidup kembali. `WHATSAPP_SESSION_ENCRYPTION_KEY` wajib disetel di Render; koneksi WA belum diuji dengan perangkat/akun nyata.
 - Transaksi + expected revision menolak overwrite antaradmin. UI memuat perubahan server saat tidak ada edit tertunda, dengan pemeriksaan revisi ringan setiap 15 detik. Kegagalan simpan terlihat; backup tetap bisa diunduh.
 - Preview impor server terikat revisi dan checksum: diff per record (tambah, berubah, keluar dari scope, ambigu, duplikat), dampak hari UM/isu/nominal, alasan dan persetujuan eksplisit. Penggantian penuh memerlukan deklarasi snapshot lengkap; ST dapat dipilih per register dan target lama dipilih satu per satu. Baris persis yang duplikat tetap di arsip namun tidak aktif dalam kalkulasi. Baris ST yang diganti ditandai superseded tanpa menonaktifkan register lain; audit mencatat perubahan scope. Retry commit yang sama tidak menambah sumber.
 - Parser matriks online, master+ST DPH, header dua tingkat, identitas dan tanggal ST, kelanjutan peserta pada profil register yang sesuai, serta provenance tanggal. Identifier panjang tidak dikonversi ulang dari Number untuk menebak digit. Tanggal mesin yang ambigu memerlukan pilihan format eksplisit.
@@ -24,7 +25,7 @@ Repository privat: https://github.com/martindeploy7/hr-kppu. File kerja tetap di
 - Koreksi snapshot terkunci memakai versi pengganti dengan alasan, checksum induk dan selisih employee-day. Satu cabang koreksi aktif per versi, persetujuan akun lain dan pemeriksaan revisi workspace. Usulan mereservasi hari baru; pembatalan melepas reservasi baru, penguncian memindahkan klaim secara atomik. Koreksi nol penuh dan rantai versi berikutnya didukung. Versi lama tetap utuh, UI/ekspor menandainya sebagai arsip setelah pengganti dikunci.
 - Ekspor koreksi memuat nominatif penuh dan sheet selisih bruto/PPh/netto; selisih adalah bahan pemeriksaan, bukan perintah pembayaran tambahan otomatis. Pembulatan pajak per pegawai/bulan dipertahankan dalam rincian delta. File Excel yang sudah diunduh sebelumnya tetap merupakan snapshot waktu unduh.
 - Penarikan sumber menunggu konfirmasi server sebelum menampilkan sukses; sumber tidak aktif tetap diarsipkan. Detail harian membedakan hari memenuhi syarat, nominal pending dan proses pembayaran.
-- Font disajikan lokal; halaman dimuat terpisah; label koneksi WA konsisten sebagai simulasi. Konfigurasi Netlify lama diarsipkan.
+- Font disajikan lokal; halaman dimuat terpisah; UI menjelaskan bahwa login WA nyata terpisah dari pengiriman pesan yang belum aktif. Konfigurasi Netlify lama diarsipkan.
 
 ## Bukti lokal
 

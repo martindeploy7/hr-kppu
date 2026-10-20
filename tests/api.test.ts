@@ -25,12 +25,16 @@ beforeAll(async()=>{
  const base=postgres('postgres://kppu:kppu-local@127.0.0.1:5544/postgres')
  try{const exists=await base`select 1 from pg_database where datname='kppu_test'`;if(!exists.length)await base.unsafe('create database kppu_test')}finally{await base.end()}
  await migrateDatabase(URL)
- await connection.sql.unsafe('TRUNCATE hr_internal.audit_events, hr_internal.sessions, hr_internal.uploads, hr_internal.users, hr_internal.workspaces, hr_internal.login_attempts CASCADE')
+ await connection.sql.unsafe('TRUNCATE hr_internal.audit_events, hr_internal.sessions, hr_internal.uploads, hr_internal.users, hr_internal.workspaces, hr_internal.login_attempts, hr_internal.whatsapp_auth_state CASCADE')
  for(const role of ['admin','hr','reviewer','finance','viewer'] as const){await createUser(connection.db,`${role}@kppu.test`,`${role} Test`,password,role);const response=await request('/auth/login','POST',{email:`${role}@kppu.test`,password});expect(response.status).toBe(200);cookies[role]=response.headers.get('set-cookie')!.split(';')[0]}
 })
 afterAll(async()=>{await connection.sql.end()})
 describe('Authenticated PostgreSQL API',()=>{
  test('public API cannot read personnel data',async()=>{const r=await app.request('http://kppu.test/api/workspace');expect(r.status).toBe(401)})
+ test('WhatsApp QR and connection status are admin-only',async()=>{
+  expect((await request('/whatsapp/status','GET',undefined,'hr')).status).toBe(403)
+  const admin=await request('/whatsapp/status');expect(admin.status).toBe(503);expect((await admin.json()).error).toContain('belum aktif')
+ })
  test('CSRF/foreign origin rejected even with session',async()=>{const w=await workspace();expect((await request('/workspace','PUT',{expectedRevision:w.revision,patch:{},reason:'attempt'},'admin','https://other.test')).status).toBe(403)})
  test('viewer and reviewer cannot edit master, HR cannot approve policy',async()=>{const w=await workspace();for(const role of ['viewer','reviewer'])expect((await request('/workspace','PUT',{expectedRevision:w.revision,patch:{master:[]},reason:'test role'},role)).status).toBe(403);expect((await request('/workspace','PUT',{expectedRevision:w.revision,patch:{policy:w.state.policy},reason:'test role'},'hr')).status).toBe(403)})
  test('invalid values rejected server-side',async()=>{const w=await workspace();expect((await request('/workspace','PUT',{expectedRevision:w.revision,patch:{master:[{nama:'Only name'}]},reason:'invalid data'})).status).toBe(400)})

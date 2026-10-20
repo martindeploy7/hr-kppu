@@ -15,6 +15,12 @@ Import repository privat sebagai Blueprint menggunakan `render.yaml`. Isi `DATAB
 
 `APP_ORIGIN` harus tepat sama dengan origin web: mutasi dengan origin lain ditolak. Cookie production memakai Secure/HttpOnly/SameSite dan prefix `__Host-`. FE dan API tidak membutuhkan CORS lintas domain.
 
+## Login WhatsApp
+
+WhatsApp dapat ditautkan dari Automation Center menggunakan QR WhatsApp Web. Tambahkan environment variable `WHATSAPP_SESSION_ENCRYPTION_KEY` di Render dan buat nilainya secara privat dengan `openssl rand -base64 32`. Jangan kirim atau commit nilainya. Kunci ini mengenkripsi kredensial perangkat sebelum disimpan dalam schema privat `hr_internal`; pertahankan nilainya untuk memulihkan sesi setelah restart. Jika kunci hilang atau diganti, hapus sesi lama dari halaman koneksi lalu tautkan ulang. Migrasi tabel sesi berjalan otomatis saat server mulai.
+
+Setelah deploy, masuk sebagai administrator, buka Automation Center, pilih **Mulai tautkan WhatsApp**, lalu pindai QR melalui WhatsApp → Perangkat tertaut → Tautkan perangkat. Status akan berubah setelah koneksi berhasil. Render Free dapat menghentikan service saat idle; sesi yang tersimpan akan dipulihkan saat service aktif lagi, tetapi koneksi tidak dapat dijamin selalu hidup. QR login memakai Baileys, klien komunitas WhatsApp Web; gunakan nomor kerja khusus yang tidak kritis. Pengiriman pesan dan scheduler di Automation Center tetap belum diaktifkan.
+
 Periksa `/api/health` menunjukkan `ok: true` dan revision commit setelah deploy. Verifikasi login, impor fixture sintetis, reload, role yang ditolak dan dua sesi admin. Jangan menyatakan production siap hanya berdasarkan build lokal.
 
 ## Lokal
