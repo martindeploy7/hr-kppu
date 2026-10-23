@@ -1,10 +1,10 @@
-import type { Employee, RecordReview } from '../src/engine/types.ts'
+import type { DayReview, Employee, RecordReview } from '../src/engine/types.ts'
 import type { MealPolicy } from '../src/engine/policy.ts'
 import type { DayRecord } from '../src/engine/reconcile.ts'
 export type MealSnapshot = {
   calculationVersion: string; generatedAt: string; period: string; office: string; workspaceRevision: number; policy: MealPolicy
   sources: { id: string; hash?: string; name: string; revision?: number; completeThrough?: string; recordReviews?: RecordReview[] }[]
-  months: { employee: Employee; mealDays: number; bruto: number; pph: number; netto: number; days: { date: string; status: string; clockIn?: string; clockOut?: string; meal: DayRecord['meal']; evidenceIds: string[]; assignmentIds: string[] }[] }[]
+  months: { employee: Employee; mealDays: number; bruto: number; pph: number; netto: number; days: { date: string; status: string; reviewState?: DayRecord['reviewState']; reviewSignature?: string; decision?: DayReview; clockIn?: string; clockOut?: string; meal: DayRecord['meal']; evidenceIds: string[]; assignmentIds: string[] }[] }[]
   correction?: { parentId: string; parentChecksum: string; reason: string; delta: MealDelta[] }
 }
 

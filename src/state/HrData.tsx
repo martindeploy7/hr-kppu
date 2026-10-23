@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { Employee, RecordReview, Resolution, SourceFile } from '../engine/types.ts'
+import type { DayReview, Employee, RecordReview, Resolution, SourceFile, ValidatedDayStatus } from '../engine/types.ts'
 import { buildRoster, type Roster } from '../engine/roster.ts'
 import { reconcile, type Reconciliation } from '../engine/reconcile.ts'
+import { inspectMonthlyPackage, type MonthlyPackage } from '../engine/monthlyFlow.ts'
 import { enforcePolicy, type MealPolicy } from '../engine/policy.ts'
 import { eachDay, monthBounds } from '../engine/dates.ts'
 import { api, ApiError, downloadJson } from '../lib/api.ts'
@@ -12,7 +13,7 @@ import type { ImportImpactResponse, ImportProposal } from '../../shared/imports.
 export type ImportResult = { name: string; ok: boolean; message: string }
 type Preview = { duplicate: boolean; file: SourceFile }
 type Ctx = Workspace & {
-  ready: boolean; roster: Roster; recordRoster: Roster; recon: Reconciliation; periods: string[]; activePeriod: string
+  ready: boolean; roster: Roster; recordRoster: Roster; recon: Reconciliation; periods: string[]; activePeriod: string; monthlyPackage: MonthlyPackage
   revision: number; saveStatus: 'loading' | 'saved' | 'saving' | 'error'; saveError: string
   retrySave: () => void; reload: () => Promise<void>; backup: () => void
   previewFiles: (files: File[], dateOrder?: 'DMY' | 'MDY') => Promise<{ previews: Preview[]; results: ImportResult[] }>
@@ -25,18 +26,21 @@ type Ctx = Workspace & {
   upsertMaster: (rows: Partial<Employee>[]) => { added: number; updated: number }
   updateEmployee: (id: string, patch: Partial<Employee>) => void
   decide: (key: string, employeeId: string | null) => void; undoDecision: (key: string) => void
+  reviewDay: (input: { employeeId: string; date: string; status: ValidatedDayStatus; evidenceIds: string[]; assignmentIds: string[]; note: string; signature: string }) => void
+  unreviewDay: (employeeId: string, date: string) => void
   resolve: (ids: string[], decision: Resolution['decision'], note: string) => void; unresolve: (ids: string[]) => void
   setPolicy: (patch: Partial<MealPolicy>) => void; setPeriod: (period: string) => void; setReviewer: (name: string) => void
 }
 const HrContext = createContext<Ctx | null>(null)
 export function useHr() { const ctx = useContext(HrContext); if (!ctx) throw new Error('useHr outside provider'); return ctx }
-const editableKeys = ['master', 'overrides', 'decisions', 'resolutions', 'policy'] as const
+const editableKeys = ['master', 'overrides', 'decisions', 'resolutions', 'dayReviews', 'policy', 'period'] as const
 
 export function HrDataProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const [state, setState] = useState<Workspace>(emptyWorkspace), [ready, setReady] = useState(false)
   const [revision, setRevision] = useState(0), [saveStatus, setSaveStatus] = useState<Ctx['saveStatus']>('loading'), [saveError, setSaveError] = useState('')
-  const [retry, setRetry] = useState(0), [period, setPeriod] = useState('')
+  const [retry, setRetry] = useState(0), [period, setLocalPeriod] = useState('')
+  const [serverMonthlyPackage, setServerMonthlyPackage] = useState<MonthlyPackage>()
   const base = useRef<Workspace>(emptyWorkspace()), inFlight = useRef(false), current = useRef(state)
   current.current = state
   const apply = useCallback((r: WorkspaceResponse) => { base.current = r.state; current.current = r.state; setState(r.state); setRevision(r.revision); setReady(true); setSaveStatus('saved'); setSaveError('') }, [])
@@ -93,7 +97,17 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
   const recordRoster = useMemo(() => files.some(f => f.recordReviews?.length) ? buildRoster(files, state.master, state.overrides, state.decisions, true) : roster, [files, state.master, state.overrides, state.decisions, roster])
   const periods = useMemo(() => [...new Set(files.flatMap(f => [...f.evidence.map(e => e.date.slice(0, 7)), ...f.assignments.flatMap(a => eachDay(a.start, a.end).map(d => d.slice(0, 7))) ]))].sort().reverse(), [files])
   const activePeriod = period || state.period || periods[0] || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date()).slice(0, 7)
-  const recon = useMemo(() => reconcile(files, roster, monthBounds(activePeriod), state.policy, state.resolutions), [files, roster, activePeriod, state.policy, state.resolutions])
+  const recon = useMemo(() => reconcile(files, roster, monthBounds(activePeriod), state.policy, state.resolutions, undefined, state.dayReviews), [files, roster, activePeriod, state.policy, state.resolutions, state.dayReviews])
+  const localMonthlyPackage = useMemo(() => inspectMonthlyPackage(files, activePeriod), [files, activePeriod])
+  const officeScoped = !!user.offices?.length
+  useEffect(() => {
+    if (!officeScoped) { setServerMonthlyPackage(undefined); return }
+    let active = true
+    setServerMonthlyPackage(undefined)
+    void api<{ package: MonthlyPackage }>(`/monthly-package?period=${encodeURIComponent(activePeriod)}`).then(result => { if (active) setServerMonthlyPackage(result.package) }).catch(() => { if (active) setServerMonthlyPackage(undefined) })
+    return () => { active = false }
+  }, [officeScoped, activePeriod, revision, ready])
+  const monthlyPackage = officeScoped ? serverMonthlyPackage ?? localMonthlyPackage : localMonthlyPackage
   const effectiveResolutions = useMemo(() => state.resolutions.filter(r => recon.issues.some(i => i.id === r.issueId && i.signature === r.signature)), [state.resolutions, recon])
   const serverAction = async (path: string, body: Record<string, unknown>, expectedRevision = revision) => {
     if (inFlight.current || editableKeys.some(k => JSON.stringify(current.current[k]) !== JSON.stringify(base.current[k]))) throw new Error('Tunggu sampai perubahan tersimpan, lalu ulangi tindakan')
@@ -106,7 +120,7 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
     ...state, files, reviewer: user.name, resolutions: effectiveResolutions, ready, revision, saveStatus, saveError,
     retrySave: () => { setSaveError(''); setRetry(n => n + 1) }, reload,
     backup: () => downloadJson(`KPPU_HR_backup_r${revision}.json`, { application: 'kppu-hr', exportedAt: new Date().toISOString(), revision, state }),
-    roster, recordRoster, recon, periods: [...new Set([activePeriod, ...periods])], activePeriod,
+    roster, recordRoster, recon, periods: [...new Set([activePeriod, ...periods])], activePeriod, monthlyPackage,
     previewFiles: async (files, dateOrder) => {
       const previews: Preview[] = [], results: ImportResult[] = []
       for (const file of files) {
@@ -127,13 +141,18 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
     updateEmployee: (id, p) => patch(s => ({ overrides: { ...s.overrides, [id]: { ...s.overrides[id], ...p } } })),
     decide: (key, employeeId) => patch(s => ({ decisions: [...s.decisions.filter(d => d.key !== key), { key, employeeId, reviewer: user.name, at: new Date().toISOString() }] })),
     undoDecision: key => patch(s => ({ decisions: s.decisions.filter(d => d.key !== key) })),
+    reviewDay: input => patch(s => {
+      const review: DayReview = { ...input, reviewer: user.name, actorId: user.id, at: new Date().toISOString() }
+      return { dayReviews: [...s.dayReviews.filter(r => r.employeeId !== input.employeeId || r.date !== input.date), review] }
+    }),
+    unreviewDay: (employeeId, date) => patch(s => ({ dayReviews: s.dayReviews.filter(r => r.employeeId !== employeeId || r.date !== date) })),
     resolve: (ids, decision, note) => {
       if (note.trim().length < 3) { setSaveError('Catatan keputusan wajib diisi minimal 3 karakter'); return }
       patch(s => ({ resolutions: [...s.resolutions.filter(r => !ids.includes(r.issueId)), ...ids.map(issueId => ({ issueId, decision, note, reviewer: user.name, at: new Date().toISOString(), signature: recon.issues.find(i => i.id === issueId)?.signature }))] }))
     },
     unresolve: ids => patch(s => ({ resolutions: s.resolutions.filter(r => !ids.includes(r.issueId)) })),
     setPolicy: p => patch(s => ({ policy: enforcePolicy({ ...s.policy, ...p }) })),
-    setPeriod, setReviewer: () => {},
+    setPeriod: next => { setLocalPeriod(next); patch(() => ({ period: next })) }, setReviewer: () => {},
   }
   return <HrContext.Provider value={value}>{children}</HrContext.Provider>
 }

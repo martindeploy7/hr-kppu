@@ -36,7 +36,7 @@ export function previewRecordReview(state: Workspace, revision: number, sourceId
   target.revision = (target.revision ?? 1) + 1
   const calculate = (workspace: Workspace) => {
     const own = scopeWorkspace(workspace, actor)
-    return reconcile(own.files, buildRoster(own.files, own.master, own.overrides, own.decisions), period, own.policy, own.resolutions)
+    return reconcile(own.files, buildRoster(own.files, own.master, own.overrides, own.decisions), period, own.policy, own.resolutions, undefined, own.dayReviews)
   }
   const before = calculate(state), after = calculate(next)
   const byId = new Map(after.months.map(m => [m.employee.id, m]))

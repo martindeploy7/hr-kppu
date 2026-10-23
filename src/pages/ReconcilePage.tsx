@@ -4,7 +4,7 @@ import { CheckCircle2, ChevronRight, ClipboardCheck, RotateCcw, Search, UploadCl
 import { useHr } from '../state/HrData.tsx'
 import type { Issue, IssueType, Resolution, Severity } from '../engine/types.ts'
 import { ISSUE_LABEL, STATUS_LABEL, type DayRecord, type EmployeeMonth } from '../engine/reconcile.ts'
-import { addDays, dayName, eachDay, formatID, isWeekend, monthBounds } from '../engine/dates.ts'
+import { addDays, dayName, eachDay, formatID, isWeekend, monthBounds, monthLabel } from '../engine/dates.ts'
 import { fmt } from '../lib/format.ts'
 import { DayDetail } from '../components/DayDetail.tsx'
 import { Drawer, Empty, Note, PageHeader, Panel, Seg, SeverityPill, StatusChip, STATUS_SHORT } from '../components/ui.tsx'
@@ -26,7 +26,7 @@ const ACTIONS: Partial<Record<IssueType, { decision: Resolution['decision']; lab
 
 export function ReconcilePage({ nav, toast, focus }: { nav: Nav; toast: (m: string) => void; focus?: string }) {
   const hr = useHr()
-  const [tab, setTab] = useState<'issues' | 'matrix'>('issues')
+  const [tab, setTab] = useState<'issues' | 'matrix'>('matrix')
   const [state, setState] = useState<'open' | 'resolved' | 'all'>('open')
   const [sev, setSev] = useState<'all' | Severity>('all')
   const [type, setType] = useState<'all' | IssueType>('all')
@@ -50,11 +50,22 @@ export function ReconcilePage({ nav, toast, focus }: { nav: Nav; toast: (m: stri
   const sevCounts = cases.filter(c => !c.resolved).reduce<Record<string, number>>((acc, c) => { acc[c.severity] = (acc[c.severity] ?? 0) + 1; return acc }, {})
   const selected = cases.find(c => c.id === openCase)
 
+  if (!hr.monthlyPackage.ready) return <div className="page">
+    <PageHeader kicker="Langkah 2 · Rekonsiliasi" title="Lengkapi paket bulan ini">Rekonsiliasi baru dibuka setelah sumber absensi bulan yang sama tersedia dan register ST dinyatakan lengkap untuk semua kantor.</PageHeader>
+    <Panel title={`Paket ${monthLabel(hr.activePeriod)} · seluruh KPPU`} sub="Pusat dan Kanwil diproses dalam satu periode. Untuk kantor tanpa ST, buat pernyataan nihil dengan alasan dan konfirmasi kelengkapan register.">
+      <div className="package-checks">
+        <PackageCheck label="Mesin Offline" ready={hr.monthlyPackage.offline.ready} detail={`${hr.monthlyPackage.offline.files} file pada periode ini`} />
+        <PackageCheck label="Mesin Online" ready={hr.monthlyPackage.online.ready} detail={`${hr.monthlyPackage.online.files} file pada periode ini`} />
+        {hr.monthlyPackage.suratTugas.filter(x => !x.ready).map(x => <PackageCheck key={x.office} label={`ST · ${x.office}`} ready={false} detail="Belum ada register lengkap atau pernyataan nihil" />)}
+      </div>
+      <button className="btn primary" onClick={() => nav('import')}><UploadCloud size={15} /> Buka impor sumber</button>
+    </Panel>
+  </div>
   if (!hr.files.length) return <div className="page"><Empty icon={UploadCloud} title="Belum ada data untuk direkonsiliasi" action={<button className="btn primary" onClick={() => nav('import')}>Impor file sumber</button>} /></div>
 
   return <div className="page">
-    <PageHeader kicker="Langkah 3 · Validasi" title="Rekonsiliasi absensi" actions={<Seg label="Tampilan" value={tab} onChange={setTab} options={[{ value: 'issues', label: 'Antrean isu' }, { value: 'matrix', label: 'Matriks harian' }]} />}>
-      Satu pegawai bisa tercatat di beberapa sumber pada hari yang sama. Sistem memilih status paling kuat (cuti → dinas luar → dinas lokal → hadir kantor → WFA) dan menandai benturan yang perlu keputusan manusia. Setiap keputusan disimpan dengan nama reviewer dan catatan.
+    <PageHeader kicker="Langkah 2 · Validasi" title="Rekonsiliasi absensi" actions={<Seg label="Tampilan" value={tab} onChange={setTab} options={[{ value: 'matrix', label: 'Matriks harian' }, { value: 'issues', label: 'Detail isu' }]} />}>
+      Bukti Mesin Offline, Mesin Online, dan ST berkedudukan setara. Pada setiap hari berbukti, admin memilih catatan yang dipakai dan menetapkan status aktivitas; hasil UM muncul bertahap hanya setelah keputusan hari itu sah.
     </PageHeader>
 
     {tab === 'issues' ? <>
@@ -94,11 +105,15 @@ export function ReconcilePage({ nav, toast, focus }: { nav: Nav; toast: (m: stri
         const d = m?.days.find(x => x.date === openDay.date)
         return m && <Drawer wide label="Detail hari" onClose={() => setOpenDay(null)}>
           <div className="drawer-head"><span className="page-kicker">Bukti kehadiran</span><h2>{m.employee.nama}</h2><p>{m.employee.nip || 'Tanpa NIP'} · {m.employee.kantor} · {m.employee.unit}</p></div>
-          {d ? <><DayDetail day={d} />{d.issues.length > 0 && <IssueActions issues={d.issues} toast={toast} />}</> : <p className="muted">Tidak ada catatan pada tanggal ini.</p>}
+          {d ? <><DayDetail day={d} canReview />{d.issues.length > 0 && <IssueActions issues={d.issues} toast={toast} />}</> : <p className="muted">Tidak ada catatan pada tanggal ini.</p>}
         </Drawer>
       })()}
     </AnimatePresence>
   </div>
+}
+
+function PackageCheck({ label, ready, detail }: { label: string; ready: boolean; detail: string }) {
+  return <div className={`package-check ${ready ? 'ready' : 'missing'}`}><span>{ready ? <CheckCircle2 size={16} /> : <UploadCloud size={16} />}</span><div><strong>{label}</strong><small>{detail}</small></div><b>{ready ? 'Siap' : 'Belum lengkap'}</b></div>
 }
 
 function rangeLabel(dates: string[]) {
@@ -135,7 +150,7 @@ function CaseReview({ c, toast, onDone }: { c: Case; toast: (m: string) => void;
     <Note>{c.issues[0].detail}</Note>
     <IssueActions issues={c.issues} toast={toast} onDone={onDone} type={c.type} />
     <h3 className="section-title">Bukti per tanggal ({days.length})</h3>
-    {days.map(d => <DayDetail key={d.date} day={d} />)}
+    {days.map(d => <DayDetail key={d.date} day={d} canReview />)}
   </>
 }
 
@@ -157,23 +172,25 @@ function IssueActions({ issues, toast, onDone, type }: { issues: Issue[]; toast:
 function Matrix({ months, period, onOpen }: { months: EmployeeMonth[]; period: string; onOpen: (emp: string, date: string) => void }) {
   const [office, setOffice] = useState('Semua')
   const [q, setQ] = useState('')
-  const [only, setOnly] = useState<'all' | 'issues' | 'absent'>('all')
+  const [only, setOnly] = useState<'all' | 'attention' | 'flag' | 'not-found'>('attention')
   const [page, setPage] = useState(0)
   useEffect(() => setPage(0), [office, q, only])
   const { start, end } = monthBounds(period)
   const dates = eachDay(start, end)
   const offices = [...new Set(months.map(m => m.employee.kantor))].sort()
-  const rows = months.filter(m => (office === 'Semua' || m.employee.kantor === office) && (!q || `${m.employee.nama} ${m.employee.unit} ${m.employee.nip}`.toLowerCase().includes(q.toLowerCase())) && (only === 'all' || (only === 'issues' ? m.openIssues > 0 : m.absent > 0)))
+  const rows = months.filter(m => (office === 'Semua' || m.employee.kantor === office) && (!q || `${m.employee.nama} ${m.employee.unit} ${m.employee.nip}`.toLowerCase().includes(q.toLowerCase())) && (only === 'all' || (only === 'attention' ? m.flaggedDays + m.notFoundDays > 0 : only === 'flag' ? m.flaggedDays > 0 : m.notFoundDays > 0)))
   const PER = 50
   const view = rows.slice(page * PER, page * PER + PER)
+  const coverage = months.reduce((sum, m) => ({ valid: sum.valid + m.reviewedDays, flag: sum.flag + m.flaggedDays, missing: sum.missing + m.notFoundDays, total: sum.total + m.workdays }), { valid: 0, flag: 0, missing: 0, total: 0 })
   const legend: (keyof typeof STATUS_LABEL)[] = ['hadir', 'hadir-wfa', 'dinas-lokal', 'dinas-luar', 'diklat', 'cuti', 'sakit', 'izin', 'tidak-lengkap', 'tanpa-keterangan', 'tidak-ada-data']
   return <Panel>
     <div className="toolbar">
       <label className="search"><Search size={15} /><input placeholder="Cari pegawai…" value={q} onChange={e => setQ(e.target.value)} /></label>
       <select className="select" value={office} onChange={e => setOffice(e.target.value)} aria-label="Kantor"><option>Semua</option>{offices.map(o => <option key={o}>{o}</option>)}</select>
-      <Seg label="Saring" value={only} onChange={setOnly} options={[{ value: 'all', label: 'Semua' }, { value: 'issues', label: 'Ada isu' }, { value: 'absent', label: 'Ada TK' }]} />
+      <Seg label="Saring" value={only} onChange={setOnly} options={[{ value: 'attention', label: 'Perlu tindakan' }, { value: 'flag', label: 'Flag' }, { value: 'not-found', label: 'Tidak ditemukan' }, { value: 'all', label: 'Semua' }]} />
     </div>
-    <div className="legend">{legend.map(s => <span key={s}><StatusChip status={s} compact /> {STATUS_LABEL[s]}</span>)}<span><i className="dot-issue" /> isu terbuka</span></div>
+    <div className="review-progress"><span><b>{fmt.format(coverage.valid)}</b> valid</span><span><b>{fmt.format(coverage.flag)}</b> flag</span><span><b>{fmt.format(coverage.missing)}</b> tidak ditemukan</span><span><b>{fmt.format(coverage.total)}</b> target hari-orang</span></div>
+    <div className="legend">{legend.map(s => <span key={s}><StatusChip status={s} compact /> {STATUS_LABEL[s]}</span>)}<span><i className="dot-issue" /> isu terbuka</span><span><b>!</b> menunggu keputusan · <b>?</b> tidak ditemukan</span></div>
     <div className="matrix-wrap">
       <table className="matrix">
         <thead><tr><th className="sticky">Pegawai</th>{dates.map(d => <th key={d} className={isWeekend(d) ? 'we' : ''}><span>{dayName(d, true).slice(0, 2)}</span>{Number(d.slice(8))}</th>)}<th>H</th><th>TK</th></tr></thead>
@@ -185,7 +202,9 @@ function Matrix({ months, period, onOpen }: { months: EmployeeMonth[]; period: s
               const d = byDate.get(date)
               if (!d) return <td key={date} className={isWeekend(date) ? 'we' : 'nd'} />
               const issue = d.issues.some(i => !d.resolved.some(r => r.issueId === i.id))
-              return <td key={date} className={isWeekend(date) && d.status === 'hadir' ? 'we' : ''}><button className={`cell st-${d.status}`} onClick={() => onOpen(m.employee.id, date)} title={`${formatID(date)} · ${STATUS_LABEL[d.status]} · ${d.basis}`} aria-label={`${m.employee.nama} ${formatID(date)}: ${STATUS_LABEL[d.status]}`}>{STATUS_SHORT[d.status]}{issue && <i className="dot-issue" />}</button></td>
+              const cell = d.reviewState === 'valid' ? STATUS_SHORT[d.status] : d.reviewState === 'flag' ? '!' : d.reviewState === 'not-found' ? '?' : '·'
+              const reviewLabel = d.reviewState === 'valid' ? 'Valid' : d.reviewState === 'flag' ? 'Flag, menunggu keputusan' : d.reviewState === 'not-found' ? 'Tidak ditemukan' : 'Belum berlangsung'
+              return <td key={date} className={`${isWeekend(date) && d.status === 'hadir' ? 'we' : ''} rv-${d.reviewState}`}><button className={`cell st-${d.status} rv-${d.reviewState}`} onClick={() => onOpen(m.employee.id, date)} title={`${formatID(date)} · ${reviewLabel} · ${STATUS_LABEL[d.status]} · ${d.basis}`} aria-label={`${m.employee.nama} ${formatID(date)}: ${reviewLabel}; ${STATUS_LABEL[d.status]}`}>{cell}{issue && <i className="dot-issue" />}</button></td>
             })}
             <td className="num">{m.present}</td><td className={`num ${m.absent ? 'bad' : ''}`}>{m.absent}</td>
           </tr>

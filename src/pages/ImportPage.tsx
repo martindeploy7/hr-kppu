@@ -4,7 +4,7 @@ import { useAuth } from '../state/Auth.tsx'
 import { useHr, type ImportResult } from '../state/HrData.tsx'
 import type { SourceFile, SourceKind } from '../engine/types.ts'
 import { OFFICES, OFFICE_CITY } from '../engine/ids.ts'
-import { formatID } from '../engine/dates.ts'
+import { formatID, monthBounds, monthLabel } from '../engine/dates.ts'
 import { fmt } from '../lib/format.ts'
 import { Note, PageHeader, Panel } from '../components/ui.tsx'
 import type { Nav } from '../App.tsx'
@@ -13,15 +13,15 @@ import { groupAssignments, importedAssignments, type ImportChange, type ImportIm
 
 type Column = { id: string; label: string; kinds: SourceKind[] }
 const COLUMNS: Column[] = [
-  { id: 'mesin', label: 'Mesin kantor', kinds: ['mesin', 'matriks-kanwil'] },
-  { id: 'daring', label: 'Aplikasi HP', kinds: ['daring'] },
-  { id: 'rekap', label: 'Rekap manual / laporan', kinds: ['jadwal-kanwil', 'laporan-kanwil'] },
-  { id: 'st', label: 'Rekap surat tugas', kinds: ['surat-tugas'] },
+  { id: 'mesin', label: 'Mesin Offline', kinds: ['mesin', 'matriks-kanwil'] },
+  { id: 'daring', label: 'Mesin Online', kinds: ['daring'] },
+  { id: 'st', label: 'Surat Tugas (ST)', kinds: ['surat-tugas'] },
+  { id: 'rekap', label: 'Rekap Kanwil (bukti tambahan)', kinds: ['jadwal-kanwil', 'laporan-kanwil'] },
 ]
 
 const FORMATS: { kind: string; example: string; detail: string }[] = [
   { kind: 'Ekspor mesin absensi (baris per hari)', example: 'Data Rekap absensi_pusat.xls · kanwil 2 … .xls', detail: 'Header "Scan Masuk/Scan Pulang" atau "Clock In/Clock Out". Kolom NIK berisi NIP/NIKA, kolom Pengecualian berisi PD, WFA, Sakit, Cuti. Format tanggal M/D/Y dan D/M/Y dikenali otomatis.' },
-  { kind: 'Presensi daring KPPU (aplikasi HP)', example: 'Data Rekap Absensi_Online_DariHP.xlsx', detail: 'WFO/WFA, lokasi, koordinat masuk/pulang, status Approved/Reject. Mencakup pegawai pusat dan kanwil.' },
+  { kind: 'Mesin Online (aplikasi HP)', example: 'Data Rekap Absensi_Online_DariHP.xlsx', detail: 'WFO/WFA, lokasi, koordinat masuk/pulang, status Approved/Reject. Mencakup pegawai pusat dan kanwil.' },
   { kind: 'Data Transaksi Karyawan (matriks Kanwil)', example: 'Data Rekap Absensi _ Kanwil I …xls', detail: 'Nama(No. mesin) × tanggal dengan sel "07:07-18:03". Header tanggal yang hari/bulannya tertukar diperbaiki otomatis.' },
   { kind: 'Jadwal absen manual (per bulan)', example: 'Data Rekap Penomoran ST _ Kanwil V …xlsx', detail: 'Satu sheet per bulan, kolom Ket / Jam masuk / Jam pulang. Kode DINAS, WFA, SAKIT, "Absen Eror".' },
   { kind: 'Daily Attendance Checking Report', example: 'Rekapitulasi Absen_Kanwil VI …xls', detail: 'Hanya kode harian (PD, WF, S, X, …) tanpa jam; sel kosong = Normal sesuai legenda.' },
@@ -30,12 +30,15 @@ const FORMATS: { kind: string; example: string; detail: string }[] = [
 
 export function ImportPage({ nav, toast }: { nav: Nav; toast: (m: string) => void }) {
   const hr = useHr()
+  const { user } = useAuth()
   const [dateOrder, setDateOrder] = useState<'' | 'DMY' | 'MDY'>('')
   const [busy, setBusy] = useState(false)
   const [drag, setDrag] = useState(false)
   const [results, setResults] = useState<ImportResult[]>([])
   const [previews, setPreviews] = useState<SourceFile[]>([])
   const [open, setOpen] = useState<string | null>(null)
+  const { start: monthStart, end: monthEnd } = monthBounds(hr.activePeriod)
+  const packageOffices = hr.monthlyPackage.suratTugas.filter(item => !user.offices?.length || user.offices.includes(item.office))
 
   const handle = async (list: FileList | File[]) => {
     const files = [...list].filter(f => /\.(xlsx?|xls\.dbf\.xls)$/i.test(f.name) || f.name.toLowerCase().endsWith('.xls'))
@@ -50,13 +53,27 @@ export function ImportPage({ nav, toast }: { nav: Nav; toast: (m: string) => voi
   }
   const onDrop = (e: DragEvent) => { e.preventDefault(); setDrag(false); handle(e.dataTransfer.files) }
 
-  const coverage = (office: string, col: Column) => hr.files.filter(f => col.kinds.includes(f.kind) && (f.office === office || (f.kind === 'daring' && f.evidence.some(e => e.office === office))))
+  const coverage = (office: string, col: Column) => hr.files.filter(f => col.kinds.includes(f.kind) && (f.period ? f.period.start <= monthEnd && f.period.end >= monthStart : f.evidence.some(e => e.date >= monthStart && e.date <= monthEnd) || f.assignments.some(a => a.start <= monthEnd && a.end >= monthStart)) && (f.office === office || f.evidence.some(e => e.office === office) || f.assignments.some(a => a.office === office)))
   const employeesByOffice = (office: string) => hr.roster.employees.filter(e => e.kantor === office).length
+  const declareNil = async (office: string) => {
+    const basis = window.prompt(`Jelaskan konfirmasi register ST ${office} nihil untuk ${monthLabel(hr.activePeriod)} (minimal 10 karakter):`)
+    if (!basis || basis.trim().length < 10) { toast('Alasan pernyataan nihil minimal 10 karakter'); return }
+    try { await hr.declareNilSt(office, hr.activePeriod, basis.trim()); toast(`Kelengkapan ST ${office} disimpan`) }
+    catch (error) { toast((error as Error).message) }
+  }
 
   return <div className="page">
-    <PageHeader kicker="Langkah 1 · Kumpulkan sumber" title="Impor file absensi & surat tugas" actions={hr.files.length > 0 && <button className="btn primary" onClick={() => nav('overview')}>Lihat ringkasan</button>}>
-      Unggah ekspor apa adanya dari mesin, aplikasi HP, kantor wilayah, dan sekretaris. Format dikenali otomatis dari isi file, bukan dari nama file. File dibaca di server. Periksa preview sebelum data masuk ke ruang kerja bersama; sumber asli dan riwayat perubahan disimpan.
+    <PageHeader kicker={`Langkah 1 · Pilih periode dan kumpulkan sumber · ${monthLabel(hr.activePeriod)}`} title="Siapkan paket absensi bulanan" actions={<button className="btn primary" disabled={!hr.monthlyPackage.ready} onClick={() => nav('reconcile')}>Lanjut ke rekonsiliasi</button>}>
+      Satu periode mencakup seluruh pegawai KPPU. Unggah Mesin Offline dan Mesin Online untuk bulan yang dipilih, lalu unggah atau konfirmasi register ST untuk Pusat dan setiap Kanwil. Format file dibaca dari isinya; periksa preview sebelum menyimpan.
     </PageHeader>
+
+    <Panel title={`Kelengkapan paket · ${monthLabel(hr.activePeriod)}`} sub="Paket membuka rekonsiliasi. Status hari dan hak uang makan tetap menunggu keputusan admin.">
+      <div className="package-checks">
+        {[{ label: 'Mesin Offline', ready: hr.monthlyPackage.offline.ready, files: hr.monthlyPackage.offline.files }, { label: 'Mesin Online', ready: hr.monthlyPackage.online.ready, files: hr.monthlyPackage.online.files }].map(item => <div key={item.label} className={`package-check ${item.ready ? 'ready' : 'missing'}`}><span>{item.ready ? <CheckCircle2 size={16} /> : <UploadCloud size={16} />}</span><div><strong>{item.label}</strong><small>{item.files} file pada bulan ini</small></div><b>{item.ready ? 'Siap' : 'Belum ada'}</b></div>)}
+        {packageOffices.map(item => <div key={item.office} className={`package-check ${item.ready ? 'ready' : 'missing'}`}><span>{item.ready ? <CheckCircle2 size={16} /> : <UploadCloud size={16} />}</span><div><strong>ST · {item.office}</strong><small>{item.declaredNil ? 'Pernyataan nihil tercatat' : item.ready ? `${item.files} register lengkap sampai akhir bulan` : 'Unggah register dan konfirmasi kelengkapannya'}</small></div>{item.ready ? <b>Siap</b> : <>{['admin', 'hr'].includes(user.role) && <button className="btn secondary" onClick={() => void declareNil(item.office)}>Pernyataan nihil</button>}<b>Belum</b></>}</div>)}
+      </div>
+      <p className="muted small">Kantor yang tidak memiliki ST tetap perlu konfirmasi nihil. Keputusan nihil disimpan dengan alasan dan nama akun.</p>
+    </Panel>
 
     <label className="select-label">Format tanggal mesin <select className="select" value={dateOrder} onChange={e => setDateOrder(e.target.value as typeof dateOrder)}><option value="">Deteksi otomatis (tahan jika ambigu)</option><option value="DMY">DD/MM/YYYY</option><option value="MDY">MM/DD/YYYY</option></select></label>
     <label className={`dropzone-lg ${drag ? 'drag' : ''}`} onDragOver={e => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)} onDrop={onDrop}>
@@ -71,19 +88,19 @@ export function ImportPage({ nav, toast }: { nav: Nav; toast: (m: string) => voi
       {results.map(r => <div key={r.name} className={r.ok ? 'ok' : 'fail'}>{r.ok ? <CheckCircle2 size={15} /> : <XCircle size={15} />}<strong>{r.name}</strong><span>{r.message}</span></div>)}
     </div>}
 
-    <Panel title="Cakupan sumber per kantor" sub="Kantor tanpa mesin atau rekap hanya terpantau dari aplikasi HP: hari tanpa presensi daring tidak bisa dibedakan antara tidak hadir dan tidak tercatat.">
+    <Panel title="Cakupan sumber per kantor" sub="Kantor tanpa mesin offline atau rekap hanya terpantau dari mesin online: hari tanpa presensi daring tidak bisa dibedakan antara tidak hadir dan tidak tercatat.">
       <div className="table-wrap">
         <table className="coverage">
           <thead><tr><th>Kantor</th>{COLUMNS.map(c => <th key={c.id}>{c.label}</th>)}<th>Pegawai</th></tr></thead>
           <tbody>{OFFICES.map(office => {
             const cells = COLUMNS.map(c => coverage(office, c))
-            const onlyHp = cells[1].length > 0 && !cells[0].length && !cells[2].length
+            const onlyOnline = cells[1].length > 0 && !cells[0].length && !cells[3].length
             return <tr key={office}>
               <th scope="row"><strong>{office}</strong><small>{OFFICE_CITY[office]}</small></th>
               {cells.map((files, i) => <td key={i} className={files.length ? 'has' : 'gap'}>
                 {files.length ? <><CheckCircle2 size={14} /> <span>{COLUMNS[i].id === 'daring' ? `${fmt.format(new Set(files.flatMap(f => f.evidence.filter(e => e.office === office).map(e => e.name))).size)} pengguna` : files.map(f => f.period ? `${formatID(f.period.start, { short: true, year: false })}–${formatID(f.period.end, { short: true })}` : f.fileName).join(', ')}</span></> : <span className="gap-text">Belum ada</span>}
               </td>)}
-              <td>{employeesByOffice(office) || '—'}{onlyHp && <span className="cov-flag" title="Hanya dari aplikasi HP">hanya HP</span>}</td>
+              <td>{employeesByOffice(office) || '—'}{onlyOnline && <span className="cov-flag" title="Hanya dari mesin online">hanya online</span>}</td>
             </tr>
           })}</tbody>
         </table>

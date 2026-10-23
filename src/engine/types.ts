@@ -160,12 +160,26 @@ export type DayStatus =
   | 'hadir' | 'hadir-wfa' | 'dinas-lokal' | 'dinas-luar' | 'diklat' | 'cuti' | 'sakit' | 'izin'
   | 'tanpa-keterangan' | 'tidak-lengkap' | 'libur' | 'tidak-ada-data' | 'belum-berlangsung'
 
+export type ValidatedDayStatus = Exclude<DayStatus, 'tidak-lengkap' | 'libur' | 'tidak-ada-data' | 'belum-berlangsung'>
+export type DayReview = {
+  employeeId: string
+  date: ISODate
+  status: ValidatedDayStatus
+  evidenceIds: string[]
+  assignmentIds: string[]
+  note: string
+  reviewer: string
+  actorId: string
+  at: string
+  signature: string
+}
+
 export type Severity = 'tinggi' | 'sedang' | 'rendah'
 
 export type IssueType =
   | 'dinas-vs-scan-kantor' | 'cuti-vs-hadir' | 'st-tumpang-tindih' | 'pd-tanpa-st' | 'daring-ditolak'
   | 'scan-tidak-lengkap' | 'wfo-di-luar-kantor' | 'jam-duplikat' | 'jam-manual' | 'jadwal-tidak-sesuai'
-  | 'hadir-hari-libur' | 'wfa-saat-dinas' | 'st-tanpa-nomor' | 'scan-berbeda'
+  | 'hadir-hari-libur' | 'wfa-saat-dinas' | 'st-tanpa-nomor' | 'scan-berbeda' | 'status-berbeda'
 
 export type Issue = {
   id: string

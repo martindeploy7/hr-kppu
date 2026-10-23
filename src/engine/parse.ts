@@ -33,7 +33,7 @@ function detectPartialDates(evidence: Evidence[]): string[] {
 
 export const KIND_LABEL: Record<SourceKind, string> = {
   mesin: 'Mesin absensi (ekspor harian)',
-  daring: 'Presensi daring (aplikasi HP)',
+  daring: 'Mesin Online',
   'matriks-kanwil': 'Transaksi mesin Kanwil (matriks)',
   'jadwal-kanwil': 'Jadwal absen manual Kanwil',
   'laporan-kanwil': 'Laporan kode harian Kanwil',

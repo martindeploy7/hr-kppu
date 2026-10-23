@@ -132,8 +132,8 @@ function reviewImpact(before: Workspace, after: Workspace, actor: User, touched:
   const touchedSet = touched
   for (const month of months) {
     const period = monthBounds(month)
-    const oldCalc = reconcile(oldScope.files, oldRoster, period, oldScope.policy, oldScope.resolutions)
-    const newCalc = reconcile(newScope.files, newRoster, period, newScope.policy, newScope.resolutions)
+    const oldCalc = reconcile(oldScope.files, oldRoster, period, oldScope.policy, oldScope.resolutions, undefined, oldScope.dayReviews)
+    const newCalc = reconcile(newScope.files, newRoster, period, newScope.policy, newScope.resolutions, undefined, newScope.dayReviews)
     const oldMonths = new Map(oldCalc.months.map(m => [m.employee.id, m])), newMonths = new Map(newCalc.months.map(m => [m.employee.id, m]))
     const ids = new Set([...oldMonths.keys(), ...newMonths.keys()])
     for (const id of ids) {

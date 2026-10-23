@@ -6,7 +6,6 @@ import {
 } from 'lucide-react'
 import { AuthProvider, useAuth } from './state/Auth.tsx'
 import { HrDataProvider, useHr } from './state/HrData.tsx'
-import { monthLabel } from './engine/dates.ts'
 const AttendanceOverview = lazy(() => import('./pages/AttendanceOverview.tsx').then(m => ({ default: m.AttendanceOverview })))
 const ImportPage = lazy(() => import('./pages/ImportPage.tsx').then(m => ({ default: m.ImportPage })))
 const ReconcilePage = lazy(() => import('./pages/ReconcilePage.tsx').then(m => ({ default: m.ReconcilePage })))
@@ -50,7 +49,7 @@ function Shell() {
   const [menu, setMenu] = useState(false)
   const [toast, setToast] = useState('')
   useEffect(() => { if (!toast) return; const t = window.setTimeout(() => setToast(''), 3200); return () => clearTimeout(t) }, [toast])
-  useEffect(() => { if (hr.ready && !hr.files.length && ['admin', 'hr'].includes(user.role)) setPage('import') }, [hr.ready]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (hr.ready && !hr.monthlyPackage.ready && ['admin', 'hr'].includes(user.role)) setPage('import') }, [hr.ready, hr.monthlyPackage.ready, user.role])
 
   const nav: Nav = (p, f) => { setPage(p); setFocus(f); setMenu(false); window.scrollTo({ top: 0 }) }
   const openIssues = hr.recon.issues.filter(i => i.severity !== 'rendah' && !hr.resolutions.some(r => r.issueId === i.id)).length
@@ -85,10 +84,8 @@ function Shell() {
         <button className="mobile-menu" aria-label={menu ? 'Tutup menu' : 'Buka menu'} aria-expanded={menu} aria-controls="primary-navigation" onClick={() => setMenu(v => !v)}>{menu ? <X size={20} /> : <Menu size={20} />}</button>
         <div><p>Sistem Absensi Terintegrasi KPPU</p><h1>{title}</h1></div>
         <div className="top-actions">
-          {hr.periods.length > 0 && <label className="period-pick"><span>Periode</span>
-            <select value={hr.activePeriod} onChange={e => hr.setPeriod(e.target.value)} aria-label="Periode rekap">
-              {hr.periods.map(p => <option key={p} value={p}>{monthLabel(p)}</option>)}
-            </select>
+          {hr.ready && <label className="period-pick"><span>Periode KPPU</span>
+            <input type="month" value={hr.activePeriod} onChange={e => { if (e.target.value) hr.setPeriod(e.target.value) }} aria-label="Pilih bulan penghitungan uang makan" />
           </label>}
           <label className="reviewer-pick" title="Aktor keputusan mengikuti akun yang masuk"><span>Reviewer</span><span>{user.name} · {user.role}</span></label>
         </div>

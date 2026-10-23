@@ -37,7 +37,7 @@ export type Roster = {
 }
 
 export const SOURCE_LABEL: Record<SourceKind, string> = {
-  daring: 'Presensi daring', mesin: 'Mesin absensi', 'matriks-kanwil': 'Matriks mesin Kanwil',
+  daring: 'Mesin Online', mesin: 'Mesin Offline', 'matriks-kanwil': 'Mesin Offline Kanwil',
   'jadwal-kanwil': 'Jadwal manual Kanwil', 'laporan-kanwil': 'Laporan kode Kanwil', 'surat-tugas': 'Surat tugas',
 }
 

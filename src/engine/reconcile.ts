@@ -1,10 +1,12 @@
-import type { Assignment, DayStatus, Employee, Evidence, ISODate, Issue, IssueType, Resolution, Severity, SourceFile, SourceKind } from './types.ts'
+import type { Assignment, DayReview, DayStatus, Employee, Evidence, ISODate, Issue, IssueType, Resolution, Severity, SourceFile, SourceKind } from './types.ts'
 import type { Roster } from './roster.ts'
 import { eachDay, formatID, isWeekend, toMinutes } from './dates.ts'
 import { enforcePolicy, golGroup, type GolGroup, type MealPolicy } from './policy.ts'
-import { nameKey } from './names.ts'
 import { DAY_CODE_LABEL } from './parsers/common.ts'
 import { effectiveSource } from './recordReviews.ts'
+import { dayReviewKey, dayReviewProblem, daySourceSignature, stableStringify, unresolvedIdentityEvidence } from './dayReview.ts'
+import { nameKey } from './names.ts'
+import { sourceRecordState } from './recordReviews.ts'
 
 export type MealState = 'eligible' | 'held' | 'excluded'
 
@@ -13,6 +15,10 @@ export type DayRecord = {
   date: ISODate
   workday: boolean
   covered: boolean
+  reviewState: 'valid' | 'flag' | 'not-found' | 'future'
+  reviewSignature: string
+  decision?: DayReview
+  reviewError?: string
   evidence: Evidence[]
   assignments: Assignment[]
   status: DayStatus
@@ -33,6 +39,10 @@ export type EmployeeMonth = {
   employee: Employee
   days: DayRecord[]
   workdays: number
+  reviewedDays: number
+  flaggedDays: number
+  notFoundDays: number
+  futureDays: number
   present: number
   wfa: number
   dutyOut: number
@@ -56,6 +66,7 @@ export type EmployeeMonth = {
   netto: number
   openIssues: number
   amountPendingDays: number
+  nettoReady: boolean
 }
 
 export type Reconciliation = {
@@ -88,6 +99,7 @@ export const ISSUE_LABEL: Record<IssueType, string> = {
   'hadir-hari-libur': 'Absen di hari libur',
   'wfa-saat-dinas': 'Presensi WFA saat dinas',
   'st-tanpa-nomor': 'Penugasan tanpa nomor ST',
+  'status-berbeda': 'Status harian berbeda antar sumber',
 }
 
 const OFFICE_KINDS: SourceKind[] = ['mesin', 'matriks-kanwil', 'jadwal-kanwil', 'laporan-kanwil']
@@ -113,14 +125,16 @@ export function locationCentroids(files: SourceFile[]): Record<string, [number, 
   return out
 }
 
-export function reconcile(files: SourceFile[], roster: Roster, period: { start: ISODate; end: ISODate }, policy: MealPolicy, resolutions: Resolution[], asOf = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date())): Reconciliation {
-  files = files.filter(f => f.active !== false).map(effectiveSource)
+export function reconcile(files: SourceFile[], roster: Roster, period: { start: ISODate; end: ISODate }, policy: MealPolicy, resolutions: Resolution[], asOf = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date()), dayReviews: DayReview[] = []): Reconciliation {
+  const sourceFiles = files.filter(f => f.active !== false)
+  files = sourceFiles.map(effectiveSource)
   policy = enforcePolicy(policy)
   const holidays = new Set(policy.holidays)
   const days = eachDay(period.start, period.end)
   const workdays = days.filter(d => !isWeekend(d) && !holidays.has(d))
   const centroids = locationCentroids(files)
   const resolutionMap = new Map(resolutions.map(r => [r.issueId, r]))
+  const dayReviewMap = new Map(dayReviews.map(r => [dayReviewKey(r.employeeId, r.date), r]))
   const partial = new Set(files.flatMap(f => (f.partialDates ?? []).map(d => `${f.id}|${d}`)))
 
   const evByEmp = new Map<string, Evidence[]>()
@@ -155,6 +169,21 @@ export function reconcile(files: SourceFile[], roster: Roster, period: { start: 
     }
   }
 
+  const rawRowsByOfficeDate = new Map<string, { file: SourceFile; kind: 'evidence' | 'assignment'; id: string; name: string; office: string; date?: ISODate; start?: ISODate; end?: ISODate; ids?: Evidence['ids']; nip?: string }[]>()
+  const addRawRow = (key: string, row: { file: SourceFile; kind: 'evidence' | 'assignment'; id: string; name: string; office: string; date?: ISODate; start?: ISODate; end?: ISODate; ids?: Evidence['ids']; nip?: string }) => {
+    const list = rawRowsByOfficeDate.get(key) ?? []
+    list.push(row); rawRowsByOfficeDate.set(key, list)
+  }
+  for (const file of sourceFiles) {
+    for (const evidence of file.evidence) if (evidence.date >= period.start && evidence.date <= period.end) addRawRow(`${evidence.office}|${evidence.date}`, { file, kind: 'evidence', id: evidence.id, name: evidence.name, office: evidence.office, date: evidence.date, ids: evidence.ids })
+    for (const assignment of file.assignments) {
+      const start = assignment.start > period.start ? assignment.start : period.start
+      const end = assignment.end < period.end ? assignment.end : period.end
+      if (start > end) continue
+      for (const date of eachDay(start, end)) addRawRow(`${assignment.office}|${date}`, { file, kind: 'assignment', id: assignment.id, name: assignment.name, office: assignment.office, start: assignment.start, end: assignment.end, nip: assignment.nip })
+    }
+  }
+
   const unresolvedAssignments = files.flatMap(f => f.assignments).filter(a => !roster.assignmentLink.has(a.id))
   const months: EmployeeMonth[] = []
   const allIssues: Issue[] = []
@@ -172,13 +201,33 @@ export function reconcile(files: SourceFile[], roster: Roster, period: { start: 
       if (!workday && !dayEv.some(hasPresence)) continue
       const covered = spans.some(s => date >= s.start && date <= s.end) || dayEv.length > 0
       const isPartial = dayEv.some(e => partial.has(`${e.fileId}|${date}`))
-      const rec = evaluateDay(employee, date, workday, covered, isPartial ? dayEv.filter(e => !(e.code === 'X' && partial.has(`${e.fileId}|${date}`))) : dayEv, daySt, sts, officesWithRegister, centroids, policy, resolutionMap, isPartial)
-      if (rec.meal.state === 'eligible' && unresolvedAssignments.some(a => a.office === employee.kantor && a.start <= date && a.end >= date)) rec.meal = { state: 'held', amount: 0, reason: 'Peserta ST pada kantor/tanggal ini belum terpetakan; selesaikan pencocokan identitas' }
-      if (dayEv.some(e => e.identityPending && !roster.identity.some(i => i.context === 'absensi' && i.method === 'manual' && i.employeeId === employee.id && i.office === e.office && nameKey(i.name) === nameKey(e.name)))) rec.meal = { state: 'held', amount: 0, reason: 'Identifier numerik belum terverifikasi; perbaiki/mapping sumber' }
+      const identityContext = roster.identity.filter(i => i.employeeId === employee.id).map(i => JSON.stringify(i)).sort()
+      const recordStates = (rawRowsByOfficeDate.get(`${employee.kantor}|${date}`) ?? []).filter(row => {
+        if (row.kind === 'evidence') {
+          const ids = row.ids ?? {}
+          const aliases = employee.aliases ?? []
+          const numericMatch = (!!employee.nip && ids.nip === employee.nip) || (!!employee.nika && ids.nika === employee.nika) || aliases.some(a => (a.kind === 'nip' && a.value === ids.nip) || (a.kind === 'nika' && a.value === ids.nika) || (a.kind === 'mesin' && a.value === ids.mesin) || (a.kind === 'app' && a.value === ids.appId))
+          return numericMatch || nameKey(row.name) === nameKey(employee.nama)
+        }
+        return (!!employee.nip && row.nip === employee.nip) || nameKey(row.name) === nameKey(employee.nama)
+      }).map(row => {
+        const reviews = row.file.recordReviews?.filter(review => review.kind === row.kind && review.recordId === row.id) ?? []
+        return `${row.kind}:${row.file.id}:${row.id}:${sourceRecordState(row.file, row.kind, row.id)}:${reviews.map(stableStringify).join(',')}`
+      }).sort()
+      const reviewSignature = daySourceSignature(employee, date, dayEv, daySt, { covered, partial: isPartial, identity: identityContext, recordStates })
+      const proposedReview = dayReviewMap.get(dayReviewKey(employee.id, date))
+      const reviewError = proposedReview && proposedReview.signature === reviewSignature ? dayReviewProblem(proposedReview, dayEv, daySt) : undefined
+      const dayReview = proposedReview?.signature === reviewSignature && !reviewError ? proposedReview : undefined
+      const visibleEvidence = isPartial ? dayEv.filter(e => !(e.code === 'X' && partial.has(`${e.fileId}|${date}`))) : dayEv
+      const selectedEvidence = dayReview ? visibleEvidence.filter(e => dayReview.evidenceIds.includes(e.id)) : visibleEvidence
+      const selectedAssignments = dayReview ? daySt.filter(a => dayReview.assignmentIds.includes(a.id)) : daySt
+      const rec = evaluateDay(employee, date, workday, covered, selectedEvidence, selectedAssignments, sts, officesWithRegister, centroids, policy, resolutionMap, isPartial, reviewSignature, dayReview, dayEv, daySt, reviewError)
+      if (rec.meal.state === 'eligible' && unresolvedAssignments.some(a => a.office === employee.kantor && a.start <= date && a.end >= date)) { rec.meal = { state: 'held', amount: 0, reason: 'Peserta ST pada kantor/tanggal ini belum terpetakan; selesaikan pencocokan identitas' }; rec.reviewState = 'flag' }
+      if (unresolvedIdentityEvidence(selectedEvidence, employee.id, roster.identity).length) { rec.meal = { state: 'held', amount: 0, reason: 'Identifier numerik belum terverifikasi; perbaiki/mapping sumber' }; rec.reviewState = 'flag' }
       if (date > asOf) {
         rec.status = 'belum-berlangsung'; rec.basis = 'Tanggal setelah waktu analisis'
         rec.meal = { state: 'held', amount: 0, reason: 'Tanggal belum berlangsung' }
-        rec.issues = []; rec.resolved = []
+        rec.issues = []; rec.resolved = []; rec.reviewState = 'future'; rec.decision = undefined
       }
       records.push(rec)
       allIssues.push(...rec.issues)
@@ -201,7 +250,7 @@ const hasTimes = (e: Evidence) => !!(e.clockIn || e.clockOut)
 const hasPresence = (e: Evidence) => hasTimes(e) || !!e.present
 const LEAVE = new Set(['S', 'C', 'CB', 'I'])
 
-function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covered: boolean, evs: Evidence[], sts: Assignment[], periodSts: Assignment[], registers: Set<string>, centroids: Record<string, [number, number]>, policy: MealPolicy, resolutions: Map<string, Resolution>, partialDay = false): DayRecord {
+function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covered: boolean, evs: Evidence[], sts: Assignment[], periodSts: Assignment[], registers: Set<string>, centroids: Record<string, [number, number]>, policy: MealPolicy, resolutions: Map<string, Resolution>, partialDay = false, reviewSignature = '', dayReview?: DayReview, rawEvidence = evs, rawAssignments = sts, reviewError?: string): DayRecord {
   const issues: Issue[] = []
   const add = (type: IssueType, severity: Severity, detail: string, blocksMeal: boolean, evidenceIds = evs.map(e => e.id), assignmentIds = sts.map(a => a.id)) =>
     issues.push({ id: `${employee.id}|${date}|${type}`, type, severity, employeeId: employee.id, date, title: ISSUE_LABEL[type], detail, evidenceIds, assignmentIds, blocksMeal })
@@ -215,13 +264,16 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   const stOut = sts.filter(a => !a.local), stLocal = sts.filter(a => a.local)
   const presenceEv = [...officeEv, ...daringWfo, ...remoteEv]
 
-  // Satu pasangan berasal dari satu bukti, bukan min masuk/max pulang lintas sumber.
+  // Do not take the first source. A time is usable only when the selected set has one unambiguous value.
   const paired = presenceEv.filter(e => e.clockIn && e.clockOut && e.clockOut >= e.clockIn)
-  const selected = paired[0] ?? presenceEv[0]
-  const clockIn = selected?.clockIn, clockOut = selected?.clockOut
+  const unique = (values: (string | undefined)[]) => [...new Set(values.filter((value): value is string => !!value))]
+  const clockIns = unique(presenceEv.map(e => e.clockIn)), clockOuts = unique(presenceEv.map(e => e.clockOut))
+  const clockIn = clockIns.length === 1 ? clockIns[0] : undefined
+  const clockOut = clockOuts.length === 1 ? clockOuts[0] : undefined
   const timeKnown = !!(clockIn || clockOut)
-  const complete = !!(clockIn && clockOut && clockOut >= clockIn)
-  const official = evs.find(e => e.kind === 'mesin' && e.schedule && !e.notes?.includes('jadwal-puasa'))?.schedule ?? evs.find(e => e.schedule && e.kind !== 'mesin')?.schedule ?? defaultSchedule(date)
+  const complete = !!(clockIn && clockOut && clockOut >= clockIn && paired.some(e => e.clockIn === clockIn && e.clockOut === clockOut) && new Set(paired.map(e => `${e.clockIn}|${e.clockOut}`)).size === 1)
+  const schedules = [...new Map(evs.filter(e => e.schedule && !e.notes?.includes('jadwal-puasa')).map(e => [JSON.stringify(e.schedule), e.schedule!])).values()]
+  const official = schedules.length === 1 ? schedules[0] : defaultSchedule(date)
   const lateMin = clockIn ? Math.max(0, Math.ceil(toMinutes(clockIn)! - 8 * 60)) : 0
   const earlyMin = clockOut && clockIn ? Math.max(0, Math.ceil(toMinutes(official.end)! - toMinutes(clockOut)!)) : 0
   const overtimeMin = Math.max(0, ...evs.map(e => e.overtimeMin ?? 0))
@@ -232,22 +284,37 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
 
   let status: DayStatus
   let basis: string
+  const candidates = new Set<DayStatus>()
+  for (const code of codes) if (LEAVE.has(code)) candidates.add(code === 'S' ? 'sakit' : code === 'I' ? 'izin' : 'cuti')
+  if (pdCode || stOut.length) candidates.add('dinas-luar')
+  if (codes.has('DIKLAT') || codes.has('KO')) candidates.add('diklat')
+  if (codes.has('DL') || stLocal.length) candidates.add('dinas-lokal')
+  if (officePresence) candidates.add(complete ? 'hadir' : 'tidak-lengkap')
+  if (remoteEv.length) candidates.add(complete ? 'hadir-wfa' : 'tidak-lengkap')
+  if (codes.has('WFA') && !remoteEv.length || rejected.length || codes.has('T')) candidates.add('tidak-lengkap')
+  if (candidates.size > 1) add('status-berbeda', 'tinggi', `Status berbeda antar-bukti: ${[...candidates].map(s => STATUS_LABEL[s]).join(', ')}. Admin perlu memilih catatan dan status harian yang berlaku.`, true)
   if (!workday) { status = presenceEv.length ? 'hadir' : 'libur'; basis = presenceEv.length ? 'Ada absen pada hari libur' : 'Hari libur' }
-  else if (leaveCode) { status = leaveCode === 'S' ? 'sakit' : leaveCode === 'I' ? 'izin' : 'cuti'; basis = DAY_CODE_LABEL[leaveCode as 'S'] + ' (sumber absensi)' }
-  else if (pdCode || stOut.length) { status = 'dinas-luar'; basis = pdCode && stOut.length ? `Kode PD + ST ${stOut[0].letterNo ?? 'tanpa nomor'}` : pdCode ? 'Kode perjalanan dinas di mesin/rekap' : `ST ${stOut[0].letterNo ?? 'tanpa nomor'} (${stOut[0].destination ?? 'tujuan tidak tercatat'})` }
-  else if (codes.has('DIKLAT') || codes.has('KO')) { status = 'diklat'; basis = codes.has('KO') ? 'Konsinyering' : 'Diklat' }
-  else if (codes.has('DL') || stLocal.length) { status = 'dinas-lokal'; basis = stLocal.length ? `ST lokal ${stLocal[0].letterNo ?? ''}`.trim() : 'Dinas dalam kota (≤ 8 jam dihitung hadir)' }
-  else if (officePresence) { status = complete ? 'hadir' : 'tidak-lengkap'; basis = describePresence(officeEv, daringWfo) }
-  else if (remoteEv.length) { status = complete ? 'hadir-wfa' : 'tidak-lengkap'; basis = 'Presensi WFA' + (remoteEv[0].kind === 'daring' ? ' via aplikasi' : ' (rekap Kanwil)') }
-  else if (codes.has('WFA')) { status = 'tidak-lengkap'; basis = 'Jadwal WFA tercatat, tetapi tidak ada presensi daring yang disetujui' }
-  else if (rejected.length) { status = 'tidak-lengkap'; basis = 'Presensi daring ditolak (Reject)' }
-  else if (codes.has('T')) { status = 'tidak-lengkap'; basis = `Keterangan "${evs.find(e => e.code === 'T')?.codeLabel}" perlu diperjelas` }
+  else if (candidates.size > 1) { status = 'tidak-lengkap'; basis = 'Sumber mencatat status berbeda; menunggu keputusan admin' }
+  else if (candidates.size === 1) {
+    const candidate = [...candidates][0]
+    status = candidate
+    basis = candidate === 'dinas-luar' ? (pdCode ? 'Kode perjalanan dinas pada bukti terpilih' : `ST ${stOut[0]?.letterNo ?? 'tanpa nomor'} (${stOut[0]?.destination ?? 'tujuan tidak tercatat'})`)
+      : candidate === 'dinas-lokal' ? (stLocal.length ? `ST lokal ${stLocal[0].letterNo ?? ''}`.trim() : 'Dinas dalam kota pada bukti terpilih')
+      : candidate === 'diklat' ? (codes.has('KO') ? 'Konsinyering' : 'Diklat')
+      : candidate === 'hadir' ? describePresence(officeEv, daringWfo)
+      : candidate === 'hadir-wfa' ? 'Presensi WFA pada bukti terpilih'
+      : candidate === 'tidak-lengkap' ? (partialDay ? 'Data mesin tanggal ini belum lengkap saat diekspor' : 'Presensi atau keterangan belum lengkap')
+      : `${DAY_CODE_LABEL[leaveCode as 'S'] ?? STATUS_LABEL[candidate]} (bukti absensi)`
+    if ((candidate === 'hadir' || candidate === 'hadir-wfa') && !complete) status = 'tidak-lengkap'
+  }
   else if (partialDay) { status = 'tidak-ada-data'; basis = 'Data mesin tanggal ini belum lengkap saat diekspor' }
-  else if (covered && codes.has('X')) { status = 'tanpa-keterangan'; basis = codes.has('X') ? 'Mesin mencatat Absent tanpa pengecualian' : 'Tidak ada scan maupun keterangan' }
-  else { status = 'tidak-ada-data'; basis = 'Sumber absensi pegawai ini tidak mencakup tanggal ini' }
+  else if (covered && codes.has('X')) { status = 'tanpa-keterangan'; basis = 'Bukti absensi mencatat Absent tanpa pengecualian; menunggu keputusan admin' }
+  else { status = 'tidak-ada-data'; basis = 'Belum ditemukan bukti absensi atau keterangan pada tanggal ini' }
+  if (dayReview) { status = dayReview.status; basis = `Ditetapkan ${dayReview.reviewer}: ${STATUS_LABEL[dayReview.status]}` }
 
   // ---- deteksi isu ----
-  if (new Set(paired.map(e => `${e.clockIn}|${e.clockOut}`)).size > 1) add('scan-berbeda', 'tinggi', 'Pasangan jam berbeda; koreksi sumber sebelum mengesahkan kehadiran.', true)
+  if (new Set(paired.map(e => `${e.clockIn}|${e.clockOut}`)).size > 1 || clockIns.length > 1 || clockOuts.length > 1) add('scan-berbeda', 'tinggi', 'Jam masuk/pulang berbeda antar-bukti terpilih; pilih bukti absensi yang berlaku.', true)
+  if (schedules.length > 1) add('jadwal-tidak-sesuai', 'sedang', 'Jadwal berbeda antar-bukti terpilih; pilih sumber jadwal yang berlaku sebelum menghitung pulang cepat.', true)
   const scanAtOffice = officeEv.some(hasTimes) || daringWfo.length > 0
   if ((pdCode || stOut.length) && scanAtOffice) {
     const edge = stOut.some(a => a.start === date || a.end === date)
@@ -290,18 +357,21 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   const resolved: Resolution[] = []
   let finalStatus = status, finalBasis = basis
   for (const issue of issues) {
-    issue.signature = JSON.stringify({ employee: [employee.id, employee.kantor, employee.workStatusPeriods?.filter(s => s.start <= date && s.end >= date)], date, workday, partialDay, evs: [...new Set(evs.map(({ id, fileId, ref, ...e }) => JSON.stringify(e)))].sort(), sts: [...new Set(sts.map(({ id, fileId, ref, dateRef, ...a }) => JSON.stringify(a)))].sort() })
+    issue.signature = stableStringify({ employee: [employee.id, employee.kantor, employee.workStatusPeriods?.filter(s => s.start <= date && s.end >= date)], date, workday, partialDay, evs: [...new Set(evs.map(({ id, fileId, ref, ...e }) => stableStringify(e)))].sort(), sts: [...new Set(sts.map(({ id, fileId, ref, dateRef, ...a }) => stableStringify(a)))].sort() })
     const r = resolutions.get(issue.id)
     if (!r || r.signature !== issue.signature) continue
     resolved.push(r)
-    if (r.decision === 'akui-hadir' && !sts.length && !pdCode && !codes.has('DL')) { finalStatus = complete ? (remoteEv.length && !officePresence ? 'hadir-wfa' : 'hadir') : 'tidak-lengkap'; finalBasis = `Diputuskan HR: hadir (${r.reviewer})` }
-    if (r.decision === 'akui-dinas') { finalStatus = 'dinas-luar'; finalBasis = `Diputuskan HR: dinas (${r.reviewer})` }
-    if (r.decision === 'tidak-hadir') { finalStatus = 'tanpa-keterangan'; finalBasis = `Diputuskan HR: tidak sah (${r.reviewer})` }
+    if (!dayReview && r.decision === 'akui-hadir' && !sts.length && !pdCode && !codes.has('DL')) { finalStatus = complete ? (remoteEv.length && !officePresence ? 'hadir-wfa' : 'hadir') : 'tidak-lengkap'; finalBasis = `Diputuskan HR: hadir (${r.reviewer})` }
+    if (!dayReview && r.decision === 'akui-dinas') { finalStatus = 'dinas-luar'; finalBasis = `Diputuskan HR: dinas (${r.reviewer})` }
+    if (!dayReview && r.decision === 'tidak-hadir') { finalStatus = 'tanpa-keterangan'; finalBasis = `Diputuskan HR: tidak sah (${r.reviewer})` }
   }
   const open = issues.filter(i => !resolved.some(r => r.issueId === i.id))
   if (partialDay && finalStatus === 'tidak-lengkap' && clockIn && !clockOut) { finalStatus = remoteEv.length && !officePresence ? 'hadir-wfa' : 'hadir'; finalBasis = `${finalBasis} — jam pulang belum tersinkron (ekspor belum lengkap)` }
   const meal = partialDay && workday && (['tidak-lengkap', 'tidak-ada-data'].includes(finalStatus) || (['hadir', 'hadir-wfa'].includes(finalStatus) && !clockOut && timeKnown)) ? { state: 'held' as const, reason: 'Ditahan: data mesin belum lengkap, tunggu ekspor ulang', amount: 0 } : mealFor(employee, date, finalStatus, workday, complete, timeKnown, clockIn, lateMin, earlyMin, open, policy)
-  return { employeeId: employee.id, date, workday, covered, evidence: evs, assignments: sts, status: finalStatus, basis: finalBasis, clockIn, clockOut, lateMin, earlyMin, overtimeMin, complete, timeKnown, issues, resolved, meal }
+  const reviewState = !workday ? (rawEvidence.length || rawAssignments.length ? 'flag' : 'not-found') : dayReview ? (open.length ? 'flag' : 'valid') : rawEvidence.length || rawAssignments.length ? 'flag' : 'not-found'
+  const reviewHeld = workday && !dayReview
+  const finalMeal = reviewHeld ? { state: 'held' as const, reason: reviewError ? `Keputusan perlu diperbarui: ${reviewError}` : rawEvidence.length || rawAssignments.length ? 'Menunggu admin memilih bukti dan menetapkan status hari' : 'Belum ditemukan data; pastikan hari ini sebelum mengesahkan status', amount: 0 } : meal
+  return { employeeId: employee.id, date, workday, covered, reviewState, reviewSignature, decision: dayReview, reviewError, evidence: rawEvidence, assignments: rawAssignments, status: finalStatus, basis: finalBasis, clockIn, clockOut, lateMin, earlyMin, overtimeMin, complete, timeKnown, issues, resolved, meal: finalMeal }
 }
 
 function describePresence(office: Evidence[], wfo: Evidence[]) {
@@ -358,34 +428,38 @@ function mealFor(employee: Employee, date: ISODate, status: DayStatus, workday: 
   const ready = policy.parametersApproved === true && (effectiveRates.length === 1 || (!assumed && !employee.rateHistory?.length))
   const rate = effectiveRates.length === 1 ? effectiveRates[0].rate : policy.rates[group]
   const taxPct = effectiveRates.length === 1 ? effectiveRates[0].pph : policy.pph[group]
-  return { state: 'eligible', reason: ready ? 'Hadir tepat waktu dan lengkap' : 'Hari memenuhi syarat; nominal pending: golongan/tarif atau parameter belum disahkan', amount: ready ? rate : 0, amountReady: ready, taxPct: ready ? taxPct : undefined }
+  return { state: 'eligible', reason: ready ? 'Hadir tepat waktu dan lengkap' : 'Hari memenuhi syarat; nominal pending: golongan/tarif atau parameter belum disahkan', amount: ready ? rate : 0, amountReady: ready, taxPct: ready && policy.taxParametersApproved ? taxPct : undefined }
 }
 
 function summarize(employee: Employee, days: DayRecord[], workdayCount: number, policy: MealPolicy): EmployeeMonth {
   const wd = days.filter(d => d.workday)
-  const count = (s: DayStatus[]) => wd.filter(d => s.includes(d.status)).length
+  const count = (s: DayStatus[]) => wd.filter(d => d.reviewState === 'valid' && s.includes(d.status)).length
   const { group, assumed } = golGroup(employee.golongan, employee.statusKepegawaian, policy.defaultGroup)
   const mealDays = wd.filter(d => d.meal.state === 'eligible').length
   const rate = policy.rates[group]
   const bruto = wd.reduce((sum, d) => sum + d.meal.amount, 0)
   const pphPct = policy.pph[group]
-  const pph = Math.round(wd.reduce((sum, d) => sum + d.meal.amount * (d.meal.taxPct ?? 0) / 100, 0))
+  const pph = policy.taxParametersApproved ? Math.round(wd.reduce((sum, d) => sum + d.meal.amount * (d.meal.taxPct ?? 0) / 100, 0)) : 0
   return {
     employee, days, workdays: workdayCount,
+    reviewedDays: wd.filter(d => d.reviewState === 'valid').length,
+    flaggedDays: wd.filter(d => d.reviewState === 'flag').length,
+    notFoundDays: wd.filter(d => d.reviewState === 'not-found').length,
+    futureDays: wd.filter(d => d.reviewState === 'future').length,
     present: count(['hadir', 'hadir-wfa', 'dinas-lokal']),
     wfa: count(['hadir-wfa']),
     dutyOut: count(['dinas-luar']), dutyLocal: count(['dinas-lokal']),
     leave: count(['cuti', 'sakit', 'izin']),
     absent: count(['tanpa-keterangan']),
-    incomplete: count(['tidak-lengkap']),
-    noData: count(['tidak-ada-data']) + Math.max(0, workdayCount - wd.length),
-    lateDays: wd.filter(d => d.lateMin > 0 && ['hadir', 'hadir-wfa', 'tidak-lengkap'].includes(d.status)).length,
-    lateMinutes: wd.reduce((s, d) => s + (['hadir', 'hadir-wfa', 'tidak-lengkap'].includes(d.status) ? d.lateMin : 0), 0),
-    earlyDays: wd.filter(d => d.earlyMin > 0 && ['hadir', 'hadir-wfa'].includes(d.status)).length,
-    overtimeMinutes: days.reduce((s, d) => s + d.overtimeMin, 0),
+    incomplete: wd.filter(d => d.reviewState === 'flag').length,
+    noData: wd.filter(d => d.reviewState === 'not-found').length + Math.max(0, workdayCount - wd.length),
+    lateDays: wd.filter(d => d.reviewState === 'valid' && d.lateMin > 0).length,
+    lateMinutes: wd.reduce((s, d) => s + (d.reviewState === 'valid' ? d.lateMin : 0), 0),
+    earlyDays: wd.filter(d => d.reviewState === 'valid' && d.earlyMin > 0).length,
+    overtimeMinutes: days.reduce((s, d) => s + (d.reviewState === 'valid' ? d.overtimeMin : 0), 0),
     mealDays, heldDays: wd.filter(d => d.meal.state === 'held').length,
     amountPendingDays: wd.filter(d => d.meal.state === 'eligible' && !d.meal.amountReady).length,
-    group, groupAssumed: assumed, rate, bruto, pphPct, pph, netto: bruto - pph,
+    group, groupAssumed: assumed, rate, bruto, pphPct, pph, netto: policy.taxParametersApproved ? bruto - pph : 0, nettoReady: policy.taxParametersApproved === true,
     openIssues: days.reduce((s, d) => s + d.issues.filter(i => !d.resolved.some(r => r.issueId === i.id)).length, 0),
   }
 }

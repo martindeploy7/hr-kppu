@@ -31,16 +31,20 @@ export const employeeSchema = z.object({
 })
 const group = z.enum(['I', 'II', 'III', 'IV'])
 export const policySchema = z.object({
-  parametersApproved: z.boolean().optional(), arrivalBoundary: z.enum(['exclusive', 'inclusive']).optional(), requireComplete: z.boolean(), requireOnTime: z.boolean(), lateToleranceMin: z.number().min(0).max(120),
+  parametersApproved: z.boolean().optional(), taxParametersApproved: z.boolean().optional(), arrivalBoundary: z.enum(['exclusive', 'inclusive']).optional(), requireComplete: z.boolean(), requireOnTime: z.boolean(), lateToleranceMin: z.number().min(0).max(120),
   requireNoEarlyLeave: z.boolean(), countWfa: z.boolean(), countLocalDuty: z.boolean(), holdOnIssues: z.boolean(), includeNonAsn: z.boolean(),
   rates: z.record(group, z.number().int().min(0).max(10000000)), pph: z.record(group, z.number().min(0).max(100)),
   defaultGroup: group, holidays: z.array(date).max(1000), ramadan: range({}), wfoRadiusKm: z.number().positive().max(100),
 })
 export const resolutionSchema = z.object({ issueId: text, decision: z.enum(['akui-hadir', 'akui-dinas', 'tidak-hadir', 'valid']), note: text, reviewer: text, at: z.iso.datetime(), signature: z.string().max(200000).optional() })
+const dayReviewSchema = z.object({
+  employeeId: identifierKey, date, status: z.enum(['hadir', 'hadir-wfa', 'dinas-lokal', 'dinas-luar', 'diklat', 'cuti', 'sakit', 'izin', 'tanpa-keterangan']),
+  evidenceIds: z.array(text).max(100), assignmentIds: z.array(text).max(100), note: text.min(3), reviewer: text, actorId: text, at: z.iso.datetime(), signature: z.string().min(1).max(200000),
+}).strict()
 const decisionSchema = z.object({ key: text, employeeId: text.nullable(), reviewer: text, at: z.iso.datetime() })
 export const workspaceEditSchema = z.object({
   expectedRevision: z.number().int().nonnegative(),
-  patch: z.object({ master: z.array(employeeSchema).max(10000).optional(), overrides: z.record(identifierKey, employeeSchema.partial()).optional(), decisions: z.array(decisionSchema).optional(), resolutions: z.array(resolutionSchema).optional(), policy: policySchema.optional(), period: z.string().regex(/^$|^\d{4}-(0[1-9]|1[0-2])$/).optional() }).strict(),
+  patch: z.object({ master: z.array(employeeSchema).max(10000).optional(), overrides: z.record(identifierKey, employeeSchema.partial()).optional(), decisions: z.array(decisionSchema).optional(), resolutions: z.array(resolutionSchema).optional(), dayReviews: z.array(dayReviewSchema).max(300000).optional(), policy: policySchema.optional(), period: z.string().regex(/^$|^\d{4}-(0[1-9]|1[0-2])$/).optional() }).strict(),
   reason: text.min(3),
 }).strict()
 const time = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/)
@@ -71,9 +75,17 @@ const sourceSchema = z.object({
 })
 export const workspaceSchema = z.object({
   version: z.union([z.literal(1), z.literal(2)]), files: z.array(sourceSchema).max(2000), master: z.array(employeeSchema).max(10000),
-  overrides: z.record(identifierKey, employeeSchema.partial()), decisions: z.array(decisionSchema), resolutions: z.array(resolutionSchema), policy: policySchema, reviewer: text, period: z.string().regex(/^$|^\d{4}-(0[1-9]|1[0-2])$/),
+  overrides: z.record(identifierKey, employeeSchema.partial()), decisions: z.array(decisionSchema), resolutions: z.array(resolutionSchema), dayReviews: z.array(dayReviewSchema).max(300000).default([]), policy: policySchema, reviewer: text, period: z.string().regex(/^$|^\d{4}-(0[1-9]|1[0-2])$/),
 }).superRefine((workspace, ctx) => {
   const ids = new Set<string>()
+  const dayKeys = new Set<string>()
+  for (const [i, review] of workspace.dayReviews.entries()) {
+    const key = `${review.employeeId}|${review.date}`
+    if (dayKeys.has(key)) ctx.addIssue({ code: 'custom', path: ['dayReviews', i], message: 'Hanya boleh ada satu keputusan per pegawai dan tanggal' })
+    dayKeys.add(key)
+    if (new Set(review.evidenceIds).size !== review.evidenceIds.length) ctx.addIssue({ code: 'custom', path: ['dayReviews', i, 'evidenceIds'], message: 'Pilihan bukti absensi memiliki ID berulang' })
+    if (new Set(review.assignmentIds).size !== review.assignmentIds.length) ctx.addIssue({ code: 'custom', path: ['dayReviews', i, 'assignmentIds'], message: 'Pilihan ST memiliki ID berulang' })
+  }
   const sourceIds = new Set(workspace.files.map(f => f.id))
   for (const [i, file] of workspace.files.entries()) {
     const evidenceIds = new Set(file.evidence.map(e => e.id)), assignmentIds = new Set(file.assignments.map(a => a.id))

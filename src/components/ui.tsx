@@ -10,7 +10,7 @@ export const STATUS_SHORT: Record<DayStatus, string> = {
 }
 
 export const SOURCE_SHORT: Record<SourceKind, string> = {
-  mesin: 'Mesin', daring: 'HP', 'matriks-kanwil': 'Mesin Kanwil', 'jadwal-kanwil': 'Rekap manual', 'laporan-kanwil': 'Laporan kode', 'surat-tugas': 'Surat tugas',
+  mesin: 'Mesin Offline', daring: 'Mesin Online', 'matriks-kanwil': 'Mesin Kanwil', 'jadwal-kanwil': 'Rekap manual', 'laporan-kanwil': 'Laporan kode', 'surat-tugas': 'ST',
 }
 
 export function PageHeader({ kicker, title, children, actions }: { kicker?: string; title: string; children?: ReactNode; actions?: ReactNode }) {

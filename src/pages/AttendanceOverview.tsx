@@ -15,6 +15,8 @@ const SERIES = [
   { key: 'dinas', label: 'Dinas (luar & lokal)', color: '#1baf7a' },
   { key: 'cuti', label: 'Cuti / sakit / izin', color: '#eda100' },
   { key: 'tk', label: 'Tanpa ket. / tidak lengkap', color: '#e87ba4' },
+  { key: 'flag', label: 'Menunggu keputusan', color: '#d2a23a' },
+  { key: 'notFound', label: 'Tidak ditemukan', color: '#9aa3ab' },
 ] as const
 
 export function AttendanceOverview({ nav }: { nav: Nav }) {
@@ -24,10 +26,13 @@ export function AttendanceOverview({ nav }: { nav: Nav }) {
   const months = useMemo(() => hr.recon.months.filter(m => office === 'Semua' || m.employee.kantor === office), [hr.recon.months, office])
 
   const daily = useMemo(() => hr.recon.workdays.map(date => {
-    const row = { date, label: `${dayName(date, true)} ${Number(date.slice(8))}`, kantor: 0, wfa: 0, dinas: 0, cuti: 0, tk: 0 }
+    const row = { date, label: `${dayName(date, true)} ${Number(date.slice(8))}`, kantor: 0, wfa: 0, dinas: 0, cuti: 0, tk: 0, flag: 0, notFound: 0 }
     for (const m of months) {
       const d = m.days.find(x => x.date === date)
       if (!d) continue
+      if (d.reviewState === 'flag') { row.flag++; continue }
+      if (d.reviewState === 'not-found') { row.notFound++; continue }
+      if (d.reviewState !== 'valid') continue
       if (d.status === 'hadir') row.kantor++
       else if (d.status === 'hadir-wfa') row.wfa++
       else if (d.status === 'dinas-luar' || d.status === 'dinas-lokal' || d.status === 'diklat') row.dinas++
@@ -40,9 +45,10 @@ export function AttendanceOverview({ nav }: { nav: Nav }) {
   if (!hr.files.length) return <div className="page"><Empty icon={UploadCloud} title="Belum ada data absensi" action={<button className="btn primary" onClick={() => nav('import')}>Impor file sumber</button>}>Unggah ekspor mesin, presensi HP, rekap Kanwil, dan rekap surat tugas untuk melihat ringkasan kehadiran.</Empty></div>
 
   const sum = (fn: (m: EmployeeMonth) => number) => months.reduce((s, m) => s + fn(m), 0)
-  const covered = sum(m => m.workdays - m.noData)
+  const covered = sum(m => m.reviewedDays)
   const present = sum(m => m.present)
-  const open = hr.recon.issues.filter(i => i.severity !== 'rendah' && !hr.resolutions.some(r => r.issueId === i.id) && months.some(m => m.employee.id === i.employeeId))
+  const openIssues = hr.recon.issues.filter(i => !hr.resolutions.some(r => r.issueId === i.id) && months.some(m => m.employee.id === i.employeeId))
+  const open = openIssues.length + sum(m => m.flaggedDays + m.notFoundDays)
   const officesPresent = OFFICES.filter(o => hr.recon.months.some(m => m.employee.kantor === o))
 
   const units = groupUnits(months)
@@ -54,15 +60,15 @@ export function AttendanceOverview({ nav }: { nav: Nav }) {
 
   return <div className="page">
     <PageHeader kicker={`Periode ${monthLabel(hr.activePeriod)} · ${hr.recon.workdays.length} hari kerja`} title="Ringkasan kehadiran" actions={<select className="select" value={office} onChange={e => setOffice(e.target.value)} aria-label="Filter kantor"><option>Semua</option>{officesPresent.map(o => <option key={o}>{o}</option>)}</select>}>
-      Status harian adalah hasil gabungan seluruh sumber setelah rekonsiliasi. Isu yang belum ditinjau tetap ditampilkan apa adanya.
+      Grafik menghitung aktivitas yang sudah disahkan. Hari berflag dan hari tanpa bukti ditampilkan terpisah supaya data sementara tidak terlihat sebagai keputusan final.
     </PageHeader>
 
     <div className="kpi-row">
       <Kpi icon={UsersRound} label="Pegawai terpantau" value={fmt.format(months.length)} note={`${officesPresent.length} kantor · ${months.filter(m => !m.employee.nip).length} tanpa NIP`} tone="navy" />
-      <Kpi icon={CalendarCheck2} label="Hadir atau bertugas" value={`${pct(present + sum(m => m.dutyOut), covered)}%`} note={`Hadir ${fmt.format(present)} + dinas ${fmt.format(sum(m => m.dutyOut))} dari ${fmt.format(covered)} hari-orang tercatat`} tone="green" />
+      <Kpi icon={CalendarCheck2} label="Hadir atau bertugas (valid)" value={`${pct(present + sum(m => m.dutyOut), covered)}%`} note={`Hadir ${fmt.format(present)} + dinas ${fmt.format(sum(m => m.dutyOut))} dari ${fmt.format(covered)} hari valid`} tone="green" />
       <Kpi icon={MapPinned} label="Hari perjalanan dinas" value={fmt.format(sum(m => m.dutyOut))} note={`+ ${fmt.format(sum(m => m.dutyLocal))} hari dinas lokal`} />
       <Kpi icon={UserX} label="Tanpa keterangan" value={fmt.format(sum(m => m.absent))} note={`${months.filter(m => m.absent > 0).length} pegawai · ${fmt.format(sum(m => m.incomplete))} hari bukti tidak lengkap`} tone="red" />
-      <Kpi icon={AlertTriangle} label="Isu perlu ditinjau" value={fmt.format(open.length)} note={<button className="link" onClick={() => nav('reconcile')}>Buka antrean <ArrowRight size={12} /></button>} tone="gold" />
+      <Kpi icon={AlertTriangle} label="Hari / isu perlu ditinjau" value={fmt.format(open)} note={<button className="link" onClick={() => nav('reconcile')}>Buka matriks <ArrowRight size={12} /></button>} tone="gold" />
     </div>
 
     <Panel title="Komposisi kehadiran per hari kerja" sub="Jumlah pegawai per status. Hari tanpa sumber untuk pegawai tertentu tidak dihitung." aside={<Seg label="Tampilan" value={view} onChange={setView} options={[{ value: 'chart', label: 'Grafik' }, { value: 'table', label: 'Tabel' }]} />}>
@@ -118,7 +124,7 @@ function groupUnits(months: EmployeeMonth[]) {
   for (const m of months) { const k = `${m.employee.kantor}|${m.employee.unit || 'Unit belum diisi'}`; map.set(k, [...(map.get(k) ?? []), m]) }
   return [...map.entries()].map(([k, list]) => {
     const [office, unit] = k.split('|')
-    const covered = list.reduce((s, m) => s + m.workdays - m.noData, 0)
+    const covered = list.reduce((s, m) => s + m.reviewedDays, 0)
     return { office, unit: unit.replace(/ - Sekretaris Jenderal$/, ''), count: list.length, rate: pct(list.reduce((s, m) => s + m.present + m.dutyOut, 0), covered), late: list.reduce((s, m) => s + m.lateDays, 0), absent: list.reduce((s, m) => s + m.absent, 0), duty: list.reduce((s, m) => s + m.dutyOut, 0) }
   }).sort((a, b) => a.rate - b.rate)
 }

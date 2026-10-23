@@ -16,6 +16,8 @@ import { readSheets } from '../src/lib/xlsx.ts'
 import { parseWorkbook, withOffice } from '../src/engine/parse.ts'
 import { buildRoster } from '../src/engine/roster.ts'
 import { reconcile } from '../src/engine/reconcile.ts'
+import { dayReviewKey, dayReviewProblem, stableStringify, unresolvedIdentityEvidence } from '../src/engine/dayReview.ts'
+import { inspectMonthlyPackage } from '../src/engine/monthlyFlow.ts'
 import { monthBounds } from '../src/engine/dates.ts'
 import { createUser } from './create-user.ts'
 import { decisionOwned, globalAccess, officeAllowed, requireOffice, sourceAllowed, scopeWorkspace } from './scope.ts'
@@ -111,14 +113,14 @@ export function createApp(db: Database, config: { origin: string; production: bo
   const read = async () => {
     await db.insert(workspaces).values({ id: 'default', state: emptyWorkspace() }).onConflictDoNothing()
     const [w] = await db.select().from(workspaces).where(eq(workspaces.id, 'default'))
-    return { ...w, state: { ...w.state, policy: enforcePolicy(w.state.policy) } }
+    return { ...w, state: { ...w.state, dayReviews: w.state.dayReviews ?? [], policy: enforcePolicy(w.state.policy) } }
   }
   const change = async (expectedRevision: number, actor: User, action: string, reason: string, mutate: (state: Workspace, tx: Database) => Promise<Workspace> | Workspace) => {
     await read()
     return db.transaction(async tx => {
       const [w] = await tx.select().from(workspaces).where(eq(workspaces.id, 'default')).for('update')
       if (w.revision !== expectedRevision) throw new HTTPException(409, { message: 'Data berubah oleh admin lain. Simpan backup pekerjaan, lalu muat ulang data server.' })
-      const currentState = { ...w.state, policy: enforcePolicy(w.state.policy) }
+      const currentState = { ...w.state, dayReviews: w.state.dayReviews ?? [], policy: enforcePolicy(w.state.policy) }
       const next = await mutate(structuredClone(currentState), tx as unknown as Database)
       next.policy = enforcePolicy(next.policy)
       const revision = w.revision + 1
@@ -127,6 +129,9 @@ export function createApp(db: Database, config: { origin: string; production: bo
       const priorReviews = new Map(w.state.files.flatMap(f => (f.recordReviews ?? []).map(r => [r.id, { sourceId: f.id, review: r }] as const)))
       const currentReviews = new Map(next.files.flatMap(f => (f.recordReviews ?? []).map(r => [r.id, { sourceId: f.id, review: r }] as const)))
       const recordReviewChanges = [...new Set([...priorReviews.keys(), ...currentReviews.keys()])].flatMap(id => JSON.stringify(priorReviews.get(id)) === JSON.stringify(currentReviews.get(id)) ? [] : [{ id, sourceId: currentReviews.get(id)?.sourceId ?? priorReviews.get(id)?.sourceId, before: priorReviews.get(id)?.review, after: currentReviews.get(id)?.review }])
+      const priorDayReviews = new Map((w.state.dayReviews ?? []).map(r => [dayReviewKey(r.employeeId, r.date), r]))
+      const currentDayReviews = new Map((next.dayReviews ?? []).map(r => [dayReviewKey(r.employeeId, r.date), r]))
+      const dayReviewChanges = [...new Set([...priorDayReviews.keys(), ...currentDayReviews.keys()])].flatMap(key => JSON.stringify(priorDayReviews.get(key)) === JSON.stringify(currentDayReviews.get(key)) ? [] : [{ key, before: priorDayReviews.get(key), after: currentDayReviews.get(key) }])
       const priorSources = new Map(w.state.files.map(f => [f.id, f])), currentSources = new Map(next.files.map(f => [f.id, f]))
       const assignmentScopeChanges = [...new Set([...priorSources.keys(), ...currentSources.keys()])].flatMap(id => {
         const before = priorSources.get(id), after = currentSources.get(id), beforeScope = before?.assignmentImport, afterScope = after?.assignmentImport
@@ -142,16 +147,21 @@ export function createApp(db: Database, config: { origin: string; production: bo
         return [{ sourceId: id, selectedAdded: [...afterSelected].filter(x => !beforeSelected.has(x)), selectedRemoved: [...beforeSelected].filter(x => !afterSelected.has(x)), importMode: after?.importCommit?.mode, importConfirmation: after?.importCommit?.confirmation }]
       })
       const sourceSummary = (f: Workspace['files'][number]) => ({ id: f.id, active: f.active, hash: f.hash, revision: f.revision, recordReviewCount: f.recordReviews?.length ?? 0, evidenceSelectedCount: f.evidenceImport?.selectedIds?.length, assignmentSelectedCount: f.assignmentImport?.selectedIds?.length, assignmentSupersessionCount: f.assignmentImport?.supersessions?.length ?? 0, importMode: f.importCommit?.mode, importConfirmation: f.importCommit?.confirmation })
-      await tx.insert(auditEvents).values({ id: randomUUID(), actorId: actor.id, action, revision, reason, details: { checksum: digest(JSON.stringify(next)), changed, recordReviewChanges, assignmentScopeChanges, evidenceScopeChanges, restorePoint: action === 'workspace.restore' ? w.state : undefined, before: Object.fromEntries(changed.filter(k => k !== 'files').map(k => [k, w.state[k as keyof Workspace]])), after: Object.fromEntries(changed.filter(k => k !== 'files').map(k => [k, next[k as keyof Workspace]])), sourcesBefore: w.state.files.map(sourceSummary), sourcesAfter: next.files.map(sourceSummary) } })
+      await tx.insert(auditEvents).values({ id: randomUUID(), actorId: actor.id, action, revision, reason, details: { checksum: digest(JSON.stringify(next)), changed, recordReviewChanges, dayReviewChanges, dayReviewCountBefore: w.state.dayReviews?.length ?? 0, dayReviewCountAfter: next.dayReviews?.length ?? 0, assignmentScopeChanges, evidenceScopeChanges, restorePoint: action === 'workspace.restore' ? w.state : undefined, before: Object.fromEntries(changed.filter(k => k !== 'files' && k !== 'dayReviews').map(k => [k, w.state[k as keyof Workspace]])), after: Object.fromEntries(changed.filter(k => k !== 'files' && k !== 'dayReviews').map(k => [k, next[k as keyof Workspace]])), sourcesBefore: w.state.files.map(sourceSummary), sourcesAfter: next.files.map(sourceSummary) } })
       return { state: scopeWorkspace(next, actor), revision }
     })
   }
   app.get('/api/workspace', async c => { const w = await read(); return c.json({ state: scopeWorkspace(w.state, c.get('user')), revision: w.revision }) })
+  app.get('/api/monthly-package', async c => {
+    const { period } = z.object({ period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/) }).parse({ period: c.req.query('period') })
+    const w = await read()
+    return c.json({ package: inspectMonthlyPackage(w.state.files, period) })
+  })
   app.get('/api/workspace/revision', async c => { const [w] = await db.select({ revision: workspaces.revision }).from(workspaces).where(eq(workspaces.id, 'default')); return c.json({ revision: w?.revision ?? 0 }) })
   app.put('/api/workspace', async c => {
     const { expectedRevision, patch, reason } = workspaceEditSchema.parse(await c.req.json())
     const actor = c.get('user')
-    const allowed: Record<string, string[]> = { master: ['admin', 'hr'], overrides: ['admin', 'hr', 'finance'], decisions: ['admin', 'hr'], resolutions: ['admin', 'hr', 'reviewer'], policy: ['admin', 'finance'], period: ['admin', 'hr', 'reviewer', 'finance'] }
+      const allowed: Record<string, string[]> = { master: ['admin', 'hr'], overrides: ['admin', 'hr', 'finance'], decisions: ['admin', 'hr'], resolutions: ['admin', 'hr', 'reviewer'], dayReviews: ['admin', 'hr', 'reviewer'], policy: ['admin', 'finance'], period: ['admin', 'hr', 'reviewer', 'finance'] }
     if (Object.keys(patch).some(k => !allowed[k].includes(actor.role))) throw new HTTPException(403, { message: 'Peran akun tidak dapat mengubah bagian data ini' })
     return c.json(await change(expectedRevision, actor, 'workspace.update', reason, state => {
       if (!globalAccess(actor)) {
@@ -179,6 +189,10 @@ export function createApp(db: Database, config: { origin: string; production: bo
           if (patch.resolutions.some(r => !allowedIds.has(r.issueId.split('|')[0]))) throw new HTTPException(403)
           patch.resolutions = [...state.resolutions.filter(r => !allowedIds.has(r.issueId.split('|')[0])), ...patch.resolutions]
         }
+        if (patch.dayReviews) {
+          if (patch.dayReviews.some(r => !allowedIds.has(r.employeeId))) throw new HTTPException(403)
+          patch.dayReviews = [...state.dayReviews.filter(r => !allowedIds.has(r.employeeId)), ...patch.dayReviews]
+        }
       }
       if (patch.master && actor.role !== 'admin' && patch.master.some(e => !sameValue(e.rateHistory, state.master.find(old => old.id === e.id)?.rateHistory))) throw new HTTPException(403, { message: 'Tarif efektif hanya dapat diubah Keuangan/admin' })
       if (patch.overrides && actor.role !== 'admin') {
@@ -199,9 +213,27 @@ export function createApp(db: Database, config: { origin: string; production: bo
           if (r.note.trim().length < 3) throw new HTTPException(400, { message: 'Catatan review wajib diisi minimal 3 karakter' })
           const period = r.issueId.split('|')[1]?.slice(0, 7)
           if (!period || !/^\d{4}-\d{2}$/.test(period)) throw new HTTPException(400, { message: 'Kasus review tidak valid' })
-          const issue = reconcile(state.files, roster, monthBounds(period), state.policy, []).issues.find(i => i.id === r.issueId)
+          const issue = reconcile(state.files, roster, monthBounds(period), state.policy, [], undefined, state.dayReviews).issues.find(i => i.id === r.issueId)
           if (!issue || !r.signature || issue.signature !== r.signature) throw new HTTPException(409, { message: 'Bukti kasus telah berubah; tinjau ulang sebelum memutuskan' })
           return { ...r, reviewer: actor.name, at: new Date().toISOString() }
+        })
+      }
+      if (patch.dayReviews) {
+        const previous = new Map(state.dayReviews.map(r => [dayReviewKey(r.employeeId, r.date), r]))
+        const roster = buildRoster(state.files, state.master, state.overrides, state.decisions)
+        const calculations = new Map<string, ReturnType<typeof reconcile>>()
+        patch.dayReviews = patch.dayReviews.map(review => {
+          const key = dayReviewKey(review.employeeId, review.date)
+          if (stableStringify(review) === stableStringify(previous.get(key))) return review
+          const period = review.date.slice(0, 7)
+          let calculation = calculations.get(period)
+          if (!calculation) { calculation = reconcile(state.files, roster, monthBounds(period), state.policy, state.resolutions, undefined, state.dayReviews); calculations.set(period, calculation) }
+          const day = calculation.months.find(m => m.employee.id === review.employeeId)?.days.find(d => d.date === review.date)
+          if (!day || day.reviewSignature !== review.signature) throw new HTTPException(409, { message: 'Bukti hari ini berubah; muat ulang dan tinjau ulang sebelum menyimpan' })
+          const problem = dayReviewProblem(review, day.evidence, day.assignments)
+          if (problem) throw new HTTPException(400, { message: problem })
+          if (unresolvedIdentityEvidence(day.evidence.filter(e => review.evidenceIds.includes(e.id)), review.employeeId, roster.identity).length) throw new HTTPException(409, { message: 'Pencocokan identitas bukti terpilih belum diselesaikan; selesaikan identitas terlebih dahulu' })
+          return { ...review, reviewer: actor.name, actorId: actor.id, at: new Date().toISOString() }
         })
       }
       if (patch.decisions) patch.decisions = patch.decisions.map(d => state.decisions.some(old => JSON.stringify(old) === JSON.stringify(d)) ? d : { ...d, reviewer: actor.name, at: new Date().toISOString() })
@@ -303,7 +335,7 @@ export function createApp(db: Database, config: { origin: string; production: bo
   app.get('/api/calculations/:period', async c => {
     const period = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).parse(c.req.param('period')), w = await read()
     const state = scopeWorkspace(w.state, c.get('user'))
-    return c.json({ revision: w.revision, calculation: reconcile(state.files, buildRoster(state.files, state.master, state.overrides, state.decisions), monthBounds(period), state.policy, state.resolutions) })
+    return c.json({ revision: w.revision, calculation: reconcile(state.files, buildRoster(state.files, state.master, state.overrides, state.decisions), monthBounds(period), state.policy, state.resolutions, undefined, state.dayReviews) })
   })
   app.get('/api/backup', async c => { const w = await read(); c.header('Content-Disposition', 'attachment; filename="kppu-hr-backup.json"'); return c.json({ application: 'kppu-hr', exportedAt: new Date().toISOString(), revision: w.revision, state: scopeWorkspace(w.state, c.get('user')) }) })
   app.post('/api/backup/preview', async c => {

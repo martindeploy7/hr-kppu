@@ -6,12 +6,13 @@ import { useHr } from '../state/HrData.tsx'
 import { SourceChip, StatusChip } from './ui.tsx'
 import { RecordReview } from './RecordReview.tsx'
 import { recordDisposition } from '../engine/recordReviews.ts'
+import { DayReviewEditor } from './DayReviewEditor.tsx'
 
 const NOTE_LABEL: Record<string, string> = {
   'jadwal-puasa': 'jadwal puasa', 'jam-sama-hari-sebelumnya': 'jam identik hari sebelumnya', 'jam-manual-absen-error': 'jam diketik manual', 'tanpa-jam': 'tanpa jam',
 }
 
-export function DayDetail({ day, showMeal = true }: { day: DayRecord; showMeal?: boolean }) {
+export function DayDetail({ day, showMeal = true, canReview = false }: { day: DayRecord; showMeal?: boolean; canReview?: boolean }) {
   const hr = useHr()
   const fileName = (id: string) => hr.files.find(f => f.id === id)?.fileName ?? 'sumber tidak aktif'
   const excludedEvidence = hr.files.flatMap(f => f.evidence.filter(e => e.date === day.date && hr.recordRoster.evidenceLink.get(e.id) === day.employeeId && recordDisposition(f, 'evidence', e.id)?.disposition === 'excluded'))
@@ -44,6 +45,7 @@ export function DayDetail({ day, showMeal = true }: { day: DayRecord; showMeal?:
       <FileText size={14} />
       <div><strong>ST {a.letterNo ?? '(tanpa nomor)'}{a.local ? ' · lokal' : ''}</strong><span>{a.rawDate} → {a.destination ?? 'tujuan tidak tercatat'}</span><small>Ditulis "{a.name}" · {a.unit ?? a.office} · {a.ref}</small>{hr.files.find(f => f.id === a.fileId) && <RecordReview file={hr.files.find(f => f.id === a.fileId)!} kind="assignment" recordId={a.id} />}</div>
     </div>)}</div>}
+    {canReview && <DayReviewEditor key={`${day.employeeId}|${day.date}`} day={day} />}
     <div className="day-facts">
       <span>Masuk <b>{day.clockIn ?? '—'}</b></span><span>Pulang <b>{day.clockOut ?? '—'}</b></span>
       {day.lateMin > 0 && <span>Terlambat <b>{day.lateMin} mnt</b></span>}

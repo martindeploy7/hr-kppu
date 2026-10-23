@@ -8,7 +8,7 @@ type Submission = { id: string; period: string; office: string; status: 'submitt
 const money = (n: number) => n.toLocaleString('id-ID')
 export function SubmissionPanel() {
   const hr = useHr(), { user } = useAuth()
-  const [items, setItems] = useState<Submission[]>([]), [office, setOffice] = useState(user.offices?.[0] ?? 'Semua'), [note, setNote] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false)
+  const [items, setItems] = useState<Submission[]>([]), [note, setNote] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [detail, setDetail] = useState<(Submission & { snapshot: MealSnapshot }) | null>(null)
   const id = useRef(crypto.randomUUID())
   const load = async () => setItems((await api<{ submissions: Submission[] }>('/meal-submissions')).submissions)
@@ -22,7 +22,7 @@ export function SubmissionPanel() {
     try {
       const correcting = action === 'correct'
       const path = s && !correcting ? `/meal-submissions/${s.id}/${action}` : '/meal-submissions'
-      const body = correcting && s ? { id: id.current, office: s.office, period: s.period, expectedRevision: hr.revision, supersedesId: s.id, reason: note } : s ? { expectedRevision: s.revision, reason: note } : { id: id.current, office, period: hr.activePeriod, expectedRevision: hr.revision }
+      const body = correcting && s ? { id: id.current, office: s.office, period: s.period, expectedRevision: hr.revision, supersedesId: s.id, reason: note } : s ? { expectedRevision: s.revision, reason: note } : { id: id.current, office: 'Semua', period: hr.activePeriod, expectedRevision: hr.revision }
       const response = await api<{ submission: Submission & { snapshot: MealSnapshot } }>(path, { method: 'POST', body: JSON.stringify(body) })
       if (!s || correcting) id.current = crypto.randomUUID()
       setDetail(response.submission); await load()
@@ -30,11 +30,15 @@ export function SubmissionPanel() {
   }
   const correction = detail?.snapshot.correction
   const delta = correction?.delta.reduce((s, d) => s + d.after.netto - d.before.netto, 0) ?? 0
-  return <Panel title="Pengajuan & snapshot periode" sub="SDM mengajukan; akun Keuangan yang berbeda menyetujui dan mengunci. Koreksi menjadi versi pengganti dengan persetujuan ulang. Snapshot sebelumnya tetap diarsipkan.">
-    <div className="toolbar"><label>Kantor pengajuan <select className="select" value={office} onChange={e => setOffice(e.target.value)}>{!user.offices?.length && <option>Semua</option>}{[...new Set(hr.roster.employees.map(e => e.kantor))].filter(Boolean).map(o => <option key={o}>{o}</option>)}</select></label>
-      {['admin', 'hr'].includes(user.role) && <button className="btn primary" disabled={busy || hr.saveStatus !== 'saved'} onClick={() => action()}>Ajukan {hr.activePeriod}</button>}
+  const packageReady = hr.monthlyPackage.ready
+  const calculationReady = hr.policy.parametersApproved && hr.policy.taxParametersApproved && hr.recon.months.length > 0 && hr.recon.months.every(m => !m.heldDays && !m.amountPendingDays && !m.openIssues)
+  return <Panel title="Pengajuan & snapshot periode KPPU" sub="Satu pengajuan mencakup Pusat dan seluruh Kanwil untuk bulan yang dipilih. SDM mengajukan; akun Keuangan yang berbeda menyetujui dan mengunci.">
+    <div className="toolbar"><strong>Cakupan: seluruh KPPU · {hr.activePeriod}</strong>
+      {['admin', 'hr'].includes(user.role) && !user.offices?.length && <button className="btn primary" disabled={busy || hr.saveStatus !== 'saved' || !packageReady || !calculationReady} onClick={() => action()}>Ajukan {hr.activePeriod}</button>}
       <button className="btn secondary" disabled={busy} onClick={() => void load().catch(e => setError(e.message))}>Muat pengajuan</button>
     </div>
+    {!packageReady && <p className="muted">Paket sumber bulan {hr.activePeriod} belum lengkap. Selesaikan impor Mesin Offline, Mesin Online, dan cakupan ST tiap kantor terlebih dahulu.</p>}
+    {packageReady && !calculationReady && <p className="muted">Pengajuan dibuka setelah setiap hari kerja memiliki keputusan, tidak ada isu terbuka, parameter uang makan dan parameter PPh/netto disahkan, serta tarif siap.</p>}
     <label className="inline-num">Catatan tindakan <input value={note} onChange={e => setNote(e.target.value)} placeholder="Alasan tindakan; koreksi minimal 10 karakter" maxLength={2000} /></label>
     {error && <p role="alert" className="form-error">{error}</p>}
     <div className="table-wrap"><table className="data"><thead><tr><th>Periode</th><th>Kantor</th><th>Versi & status</th><th>Pengaju</th><th>Data r</th><th>Tindakan</th></tr></thead><tbody>{items.map(s => <tr key={s.id}><td>{s.period}</td><td>{s.office}</td><td>v{s.version} · {s.supersededBy ? 'arsip digantikan' : s.status}{s.correctionId && !s.supersededBy && <p className="muted">Usulan koreksi sedang diproses</p>}</td><td>{s.creator}</td><td>{s.workspaceRevision}</td><td>
@@ -43,7 +47,7 @@ export function SubmissionPanel() {
       {['admin', 'finance'].includes(user.role) && s.createdBy !== user.id && s.status === 'submitted' && <button className="link" disabled={busy || note.trim().length < 3} onClick={() => action(s, 'approve')}>Setujui</button>}
       {['admin', 'finance'].includes(user.role) && s.createdBy !== user.id && s.status === 'approved' && <button className="link" disabled={busy || note.trim().length < 3} onClick={() => action(s, 'lock')}>Kunci</button>}
       {(['admin', 'finance'].includes(user.role) || (user.role === 'hr' && s.createdBy === user.id)) && ['submitted', 'approved'].includes(s.status) && <button className="link" disabled={busy || note.trim().length < 3} onClick={() => action(s, 'cancel')}>Batalkan pengajuan</button>}
-      {['admin', 'hr'].includes(user.role) && s.status === 'locked' && !s.correctionId && <button className="link" disabled={busy || note.trim().length < 10 || hr.saveStatus !== 'saved'} onClick={() => action(s, 'correct')}>Ajukan koreksi v{s.version + 1}</button>}
+      {['admin', 'hr'].includes(user.role) && s.office === 'Semua' && s.status === 'locked' && !s.correctionId && <button className="link" disabled={busy || note.trim().length < 10 || hr.saveStatus !== 'saved'} onClick={() => action(s, 'correct')}>Ajukan koreksi v{s.version + 1}</button>}
     </td></tr>)}</tbody></table></div>
     {!items.length && <p className="muted">Belum ada pengajuan. Lengkapi seluruh bukti, review, tarif dan coverage ST sebelum mengajukan.</p>}
     {detail && <section className="import-preview" aria-label="Rincian snapshot pengajuan">

@@ -1,11 +1,11 @@
-import type { Employee, MatchDecision, Resolution, SourceFile } from '../src/engine/types.ts'
+import type { DayReview, Employee, MatchDecision, Resolution, SourceFile } from '../src/engine/types.ts'
 import { DEFAULT_POLICY, type MealPolicy } from '../src/engine/policy.ts'
 
 export type Workspace = {
   version: 2; files: SourceFile[]; master: Employee[]; overrides: Record<string, Partial<Employee>>
-  decisions: MatchDecision[]; resolutions: Resolution[]; policy: MealPolicy; reviewer: string; period: string
+  decisions: MatchDecision[]; resolutions: Resolution[]; dayReviews: DayReview[]; policy: MealPolicy; reviewer: string; period: string
 }
-export const emptyWorkspace = (): Workspace => ({ version: 2, files: [], master: [], overrides: {}, decisions: [], resolutions: [], policy: { ...DEFAULT_POLICY }, reviewer: '', period: '' })
+export const emptyWorkspace = (): Workspace => ({ version: 2, files: [], master: [], overrides: {}, decisions: [], resolutions: [], dayReviews: [], policy: { ...DEFAULT_POLICY }, reviewer: '', period: '' })
 export const roles = ['admin', 'hr', 'reviewer', 'finance', 'viewer'] as const
 export type Role = typeof roles[number]
 export type User = { id: string; email: string; name: string; role: Role; offices?: string[] | null }

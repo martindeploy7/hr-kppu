@@ -5,12 +5,14 @@ import { connect } from '../server/db.ts'
 import { migrateDatabase } from '../server/migrate.ts'
 import { createApp } from '../server/app.ts'
 import { createUser } from '../server/create-user.ts'
-import { eachDay, isWeekend } from '../src/engine/dates.ts'
+import { eachDay, isWeekend, monthBounds } from '../src/engine/dates.ts'
 import { emptyWorkspace } from '../shared/workspace.ts'
 import { DEFAULT_POLICY } from '../src/engine/policy.ts'
 import { blankEmployee } from '../src/engine/roster.ts'
 import { groupAssignments } from '../shared/imports.ts'
 import { buildRoster } from '../src/engine/roster.ts'
+import { reconcile } from '../src/engine/reconcile.ts'
+import { OFFICES } from '../src/engine/ids.ts'
 import { sourceRecordState } from '../src/engine/recordReviews.ts'
 import { users, auditEvents } from '../server/schema.ts'
 import * as XLSX from 'xlsx'
@@ -21,6 +23,32 @@ const connection=connect(URL), app=createApp(connection.db,{origin:'http://kppu.
 const password=randomBytes(24).toString('hex'), cookies:Record<string,string>={}
 const request=(path:string,method='GET',body?:unknown,role='admin',origin='http://kppu.test')=>app.request(`http://kppu.test/api${path}`,{method,headers:{origin,cookie:cookies[role]??'','content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)})
 const workspace=async()=>await (await request('/workspace')).json()
+function reviewAllWorkdays(state:any, period:string, asOf='2026-10-20') {
+ const bounds=monthBounds(period), roster=buildRoster(state.files,state.master,state.overrides,state.decisions)
+ const calculation=reconcile(state.files,roster,bounds,state.policy,[],asOf,[])
+ state.dayReviews=calculation.months.flatMap(month=>month.days.filter(day=>day.workday).map(day=>{
+  const assignment=day.assignments[0], evidence=day.evidence.find((item:any)=>item.code)||day.evidence.find((item:any)=>item.clockIn&&item.clockOut)
+  let status='tanpa-keterangan', evidenceIds:string[]=[], assignmentIds:string[]=[]
+  if(assignment){status=assignment.local?'dinas-lokal':'dinas-luar';assignmentIds=[assignment.id]}
+  else if(evidence?.code){status=({PD:'dinas-luar',DL:'dinas-lokal',DIKLAT:'diklat',KO:'diklat',S:'sakit',C:'cuti',CB:'cuti',I:'izin'} as Record<string,string>)[evidence.code]??'tanpa-keterangan';evidenceIds=[evidence.id]}
+  else if(evidence?.clockIn&&evidence?.clockOut){status=evidence.mode==='WFA'?'hadir-wfa':'hadir';evidenceIds=[evidence.id]}
+  return {employeeId:month.employee.id,date:day.date,status,evidenceIds,assignmentIds,note:'Keputusan admin pada fixture integrasi',reviewer:'Admin fixture',actorId:'fixture-admin',at:'2026-10-20T00:00:00Z',signature:day.reviewSignature}
+ }))
+}
+function monthPackage(state:any,period:string,evidenceRows:any[]) {
+ const bounds=monthBounds(period), stamp='2026-10-20T00:00:00Z', offlineId=`offline-${period}`, onlineId=`online-${period}`
+ const offline=evidenceRows.map((row:any)=>({...row,id:`off-${row.id}`,fileId:offlineId,kind:'mesin',office:row.office??'Pusat'}))
+ const online=evidenceRows.map((row:any)=>({...row,id:`on-${row.id}`,fileId:onlineId,kind:'daring',office:row.office??'Pusat',mode:'WFO',approved:true}))
+ const source=(id:string,kind:any,office:string,evidence:any[],declaration?:any)=>({id,fileName:`Synthetic ${id}`,kind,label:'Synthetic test fixture',office,importedAt:stamp,period:bounds,completeThrough:bounds.end,evidence,assignments:[],warnings:[],stats:{rows:evidence.length,people:new Set(evidence.map(e=>e.name)).size},...(declaration?{declaration}:{})})
+ state.files=[source(offlineId,'mesin','Pusat',offline),source(onlineId,'daring','Semua kantor',online),...OFFICES.filter(office=>office!=='Pusat').map(office=>source(`st-${office}-${period}`,'surat-tugas',office,[],{actorId:'fixture-admin',basis:'Register ST nihil pada fixture integrasi',at:stamp}))]
+}
+function dayReviewFor(state:any,period:string,employeeId:string,date:string,status:string,evidenceIds:string[],assignmentIds:string[]) {
+ const bounds=monthBounds(period),roster=buildRoster(state.files,state.master,state.overrides,state.decisions)
+ const calculation=reconcile(state.files,roster,bounds,state.policy,[],`${period}-30`,state.dayReviews)
+ const day=calculation.months.find((month:any)=>month.employee.id===employeeId)?.days.find((item:any)=>item.date===date)
+ if(!day) throw new Error(`Missing day ${employeeId} ${date}`)
+ return {employeeId,date,status,evidenceIds,assignmentIds,note:'Keputusan diperbarui setelah perubahan sumber',reviewer:'Admin fixture',actorId:'fixture-admin',at:'2026-10-20T00:00:00Z',signature:day.reviewSignature}
+}
 beforeAll(async()=>{
  const base=postgres('postgres://kppu:kppu-local@127.0.0.1:5544/postgres')
  try{const exists=await base`select 1 from pg_database where datname='kppu_test'`;if(!exists.length)await base.unsafe('create database kppu_test')}finally{await base.end()}
@@ -156,13 +184,13 @@ describe('Authenticated PostgreSQL API',()=>{
  })
  test('complete period submits once, requires another finance actor, freezes snapshot and exports matching totals',async()=>{
   const before=await workspace(),state=emptyWorkspace(),person={...blankEmployee('snapshot-person'),nama:'Snapshot Uji',nip:'198001012020011001',kantor:'Pusat',statusKepegawaian:'PNS' as const,golongan:'III/a'}
-  state.master=[person];state.policy={...DEFAULT_POLICY,parametersApproved:true,arrivalBoundary:'inclusive',holidays:[]}
-  const evidence=eachDay('2026-09-01','2026-09-30').filter(d=>!isWeekend(d)).map(date=>({id:`e-${date}`,fileId:'synthetic-attendance',kind:'mesin' as const,office:'Pusat',name:person.nama,ids:{nip:person.nip},date,clockIn:'08:00',clockOut:new Date(`${date}T00:00:00Z`).getUTCDay()===5?'16:30':'16:00',ref:`synthetic ${date}`}))
-  state.files=[{id:'synthetic-attendance',fileName:'Synthetic fixture',kind:'mesin',label:'Synthetic',office:'Pusat',importedAt:'2026-10-19T00:00:00Z',period:{start:'2026-09-01',end:'2026-09-30'},completeThrough:'2026-09-30',evidence,assignments:[],warnings:[],stats:{rows:evidence.length,people:1}}]
+  state.master=[person];state.policy={...DEFAULT_POLICY,parametersApproved:true,taxParametersApproved:true,arrivalBoundary:'inclusive',pph:{...DEFAULT_POLICY.pph,III:5},holidays:[]}
+  const evidence=eachDay('2026-09-01','2026-09-30').filter(d=>!isWeekend(d)).map(date=>({id:`e-${date}`,fileId:'pending',kind:'mesin' as const,office:'Pusat',name:person.nama,ids:{nip:person.nip},date,clockIn:'08:00',clockOut:new Date(`${date}T00:00:00Z`).getUTCDay()===5?'16:30':'16:00',ref:`synthetic ${date}`}))
+  monthPackage(state,'2026-09',evidence);reviewAllWorkdays(state,'2026-09')
   expect((await request('/backup/restore','POST',{expectedRevision:before.revision,state,reason:'Synthetic complete September fixture'})).status).toBe(200)
   let current=await workspace();expect((await request('/coverage/nil-st','POST',{expectedRevision:current.revision,office:'Pusat',period:'2026-09',basis:'Synthetic nil statement confirmed by HR test'})).status).toBe(200)
-  current=await workspace();const id=randomUUID(),body={id,period:'2026-09',office:'Pusat',expectedRevision:current.revision}
-  const submit=await request('/meal-submissions','POST',body);expect(submit.status).toBe(200);const s=(await submit.json()).submission;expect(s.snapshot.months[0]).toMatchObject({mealDays:22,bruto:814000,pph:40700,netto:773300})
+  current=await workspace();const id=randomUUID(),body={id,period:'2026-09',office:'Semua',expectedRevision:current.revision}
+  const submit=await request('/meal-submissions','POST',body);expect(submit.status,await submit.clone().text()).toBe(200);const s=(await submit.json()).submission;expect(s.snapshot.months[0]).toMatchObject({mealDays:22,bruto:814000,pph:40700,netto:773300})
   expect((await request('/meal-submissions','POST',body)).status).toBe(200)
   expect((await request('/meal-submissions','POST',{...body,id:randomUUID()})).status).toBe(409)
   expect((await request(`/meal-submissions/${id}/approve`,'POST',{expectedRevision:1,reason:'Self approval rejected'})).status).toBe(403)
@@ -182,11 +210,12 @@ describe('Authenticated PostgreSQL API',()=>{
   const source=state.files.find((f:any)=>f.evidence.length),originalEvidence=structuredClone(source.evidence)
   source.evidence[0].clockIn='09:00'
   source.evidence.push(...originalEvidence.map((e:any)=>({...e,id:`new-${e.id}`,name:newPerson.nama,ids:{nip:newPerson.nip}})))
+  reviewAllWorkdays(state,parent.period)
   expect((await request('/backup/restore','POST',{expectedRevision:w.revision,state,reason:'Koreksi fixture: satu hari dicabut, pegawai tambahan'})).status).toBe(200)
   w=await workspace()
   const body={id:randomUUID(),period:parent.period,office:parent.office,supersedesId:parent.id,expectedRevision:w.revision,reason:'Koreksi bukti hadir dan pegawai dengan dokumen pendukung'}
   expect((await request('/meal-submissions','POST',{...body,reason:undefined})).status).toBe(400)
-  expect((await request('/meal-submissions','POST',{...body,office:'Kanwil I'})).status).toBe(409)
+  expect((await request('/meal-submissions','POST',{...body,office:'Kanwil I'})).status).toBe(400)
   expect((await request('/meal-submissions','POST',body,'viewer')).status).toBe(403)
   let response=await request('/meal-submissions','POST',body);expect(response.status).toBe(200)
   const proposed=(await response.json()).submission
@@ -235,13 +264,16 @@ describe('Authenticated PostgreSQL API',()=>{
  })
  test('fully withdrawn entitlement can be corrected to zero while preserving prior versions',async()=>{
   const original=await workspace(),items=(await(await request('/meal-submissions')).json()).submissions,parent=items.find((s:any)=>s.status==='locked'&&!s.correctionId)
-  const state=emptyWorkspace();state.policy={...original.state.policy,parametersApproved:true,arrivalBoundary:'inclusive'}
-  state.files=original.state.files.filter((f:any)=>f.kind==='surat-tugas')
+  const state=emptyWorkspace();state.policy={...original.state.policy,parametersApproved:true,taxParametersApproved:true,arrivalBoundary:'inclusive'};state.master=original.state.master;state.overrides=original.state.overrides;state.decisions=original.state.decisions
+  const person=state.master[0],withdrawn=[{id:'withdrawn-leave',fileId:'pending',office:'Pusat',name:person.nama,ids:{nip:person.nip},date:'2026-09-01',code:'C',ref:'synthetic leave withdrawal'}]
+  monthPackage(state,'2026-09',withdrawn)
+  state.files.push({id:'st-Pusat-2026-09',fileName:'Synthetic Pusat nil ST',kind:'surat-tugas',label:'Synthetic nil declaration',office:'Pusat',importedAt:'2026-10-20T00:00:00Z',period:monthBounds('2026-09'),completeThrough:monthBounds('2026-09').end,evidence:[],assignments:[],warnings:[],stats:{rows:0,people:0},declaration:{actorId:'fixture-admin',basis:'Register ST nihil pada fixture koreksi',at:'2026-10-20T00:00:00Z'}})
+  reviewAllWorkdays(state,'2026-09')
   expect((await request('/backup/restore','POST',{expectedRevision:original.revision,state,reason:'Synthetic correction removes all previously claimed employees'})).status).toBe(200)
   let w=await workspace();const id=randomUUID()
   const response=await request('/meal-submissions','POST',{id,period:parent.period,office:parent.office,supersedesId:parent.id,expectedRevision:w.revision,reason:'Semua hak versi sebelumnya dicabut berdasarkan dokumen koreksi'})
   expect(response.status).toBe(200);const s=(await response.json()).submission
-  expect(s.snapshot.months).toHaveLength(0)
+  expect(s.snapshot.months).toHaveLength(2);expect(s.snapshot.months.every((m:any)=>m.mealDays===0&&m.bruto===0)).toBe(true)
   expect(s.snapshot.correction.delta.reduce((n:number,d:any)=>n+d.after.netto-d.before.netto,0)).toBe(-1715700)
   expect((await request(`/meal-submissions/${id}/approve`,'POST',{expectedRevision:1,reason:'Finance verifies total withdrawal'},'finance')).status).toBe(200)
   expect((await request(`/meal-submissions/${id}/lock`,'POST',{expectedRevision:2,reason:'Finance locks zero replacement'},'finance')).status).toBe(200)
@@ -255,7 +287,7 @@ describe('Authenticated PostgreSQL API',()=>{
   expect((await request('/workspace','PUT',{expectedRevision:before.revision,patch:{master:[...before.state.master,p]},reason:'Additional office test'})).status).toBe(200)
   await createUser(connection.db,'office-one@kppu.test','Office One',password,'hr',['Kanwil I'])
   const login=await request('/auth/login','POST',{email:'office-one@kppu.test',password});cookies.officeOne=login.headers.get('set-cookie')!.split(';')[0]
-  const scoped=await (await request('/workspace','GET',undefined,'officeOne')).json();expect(scoped.state.master.map((e:any)=>e.id)).toEqual(['other-office-person']);expect(scoped.state.files).toHaveLength(0)
+  const scoped=await (await request('/workspace','GET',undefined,'officeOne')).json();expect(scoped.state.master.map((e:any)=>e.id)).toEqual(['other-office-person']);expect(scoped.state.files).toHaveLength(1);expect(scoped.state.files[0]).toMatchObject({kind:'surat-tugas',office:'Kanwil I'})
   const reject=await request('/workspace','PUT',{expectedRevision:scoped.revision,patch:{overrides:{'snapshot-person':{nama:'Unauthorized'}}},reason:'Cross office rejected'},'officeOne');expect(reject.status).toBe(403)
   const update=await request('/workspace','PUT',{expectedRevision:scoped.revision,patch:{master:[{...p,jabatan:'Updated own office'}]},reason:'Own office update'},'officeOne');expect(update.status).toBe(200)
   const global=await workspace();expect(global.state.master.some((e:any)=>e.id==='snapshot-person')).toBe(true);expect(global.state.master.find((e:any)=>e.id===p.id).jabatan).toBe('Updated own office')
@@ -270,7 +302,9 @@ describe('Authenticated PostgreSQL API',()=>{
  })
  test('record review previews impact, keeps participants separate and audits cancellation/reinstatement',async()=>{
   const original=await workspace(),state=structuredClone(original.state),people=state.master.filter((p:any)=>p.kantor==='Pusat'),id='review-st-source'
-  state.files.push({id,fileName:'Synthetic participant review',kind:'surat-tugas',label:'Synthetic',office:'Pusat',importedAt:'2026-10-20T00:00:00Z',period:{start:'2026-09-02',end:'2026-09-02'},evidence:[],assignments:people.map((p:any,i:number)=>({id:`review-st-${i}`,fileId:id,office:'Pusat',name:p.nama,nip:p.nip,start:'2026-09-02',end:'2026-09-02',rawDate:'2 September 2026',letterNo:'Synthetic/1',local:true,ref:`Sheet1 A${i+2}`})),warnings:[],stats:{rows:people.length,people:people.length}})
+  if(people.length<2){const extra={...blankEmployee('review-extra-person'),nama:'Peserta ST Uji Tambahan',nip:'198001012020011777',kantor:'Pusat',statusKepegawaian:'PNS' as const,golongan:'III/a'};state.master.push(extra);people.push(extra)}
+  state.files.push({id,fileName:'Synthetic participant review',kind:'surat-tugas',label:'Synthetic',office:'Pusat',importedAt:'2026-10-20T00:00:00Z',period:{start:'2026-09-02',end:'2026-09-02'},completeThrough:'2026-09-30',evidence:[],assignments:people.map((p:any,i:number)=>({id:`review-st-${i}`,fileId:id,office:'Pusat',name:p.nama,nip:p.nip,start:'2026-09-02',end:'2026-09-02',rawDate:'2 September 2026',letterNo:'Synthetic/1',local:true,ref:`Sheet1 A${i+2}`})),warnings:[],stats:{rows:people.length,people:people.length}})
+  reviewAllWorkdays(state,'2026-09')
   expect((await request('/backup/restore','POST',{expectedRevision:original.revision,state,reason:'Synthetic multi-participant ST review fixture'})).status).toBe(200)
   let w=await workspace(),body={id:randomUUID(),expectedRevision:w.revision,kind:'assignment',recordId:'review-st-0',disposition:'excluded',reason:'Pembatalan peserta pertama dikonfirmasi dokumen revisi'}
   const path=`/sources/${id}/record-review`
@@ -280,7 +314,7 @@ describe('Authenticated PostgreSQL API',()=>{
   expect((await request(path+'/preview','POST',{...body,reason:'short'})).status).toBe(400)
   expect((await request(path,'POST',body)).status).toBe(400)
   const response=await request(path+'/preview','POST',body);expect(response.status).toBe(200);const preview=await response.json()
-  expect(preview.affected).toHaveLength(1);expect(preview.affected[0]).toMatchObject({employeeId:people[0].id,before:{mealState:'excluded'},after:{mealState:'eligible',amount:42000}})
+  expect(preview.affected).toHaveLength(1);expect(preview.affected[0]).toMatchObject({employeeId:people[0].id,before:{mealState:'excluded'},after:{mealState:'held',amount:0}})
   expect((await workspace()).revision).toBe(w.revision)
   expect((await request(path,'POST',{...body,confirmedImpact:'0'.repeat(64)})).status).toBe(409)
   const changed=await request('/workspace','PUT',{expectedRevision:w.revision,patch:{period:'2026-09'},reason:'Concurrent change invalidates preview'});expect(changed.status).toBe(200)
@@ -290,20 +324,27 @@ describe('Authenticated PostgreSQL API',()=>{
   expect((await request(path,'POST',{...body,confirmedImpact:fresh.checksum})).status).toBe(200)
   w=await workspace();const source=w.state.files.find((f:any)=>f.id===id)
   expect(source.assignments).toHaveLength(2);expect(source.recordReviews).toHaveLength(1);expect(source.recordReviews[0].reviewer).toBe('admin Test')
+  const currentCalculation=(await(await request('/calculations/2026-09')).json()).calculation
+  const firstDay=currentCalculation.months.find((m:any)=>m.employee.id===people[0].id)!.days.find((d:any)=>d.date==='2026-09-02')!,chosen=firstDay.evidence.find((e:any)=>e.kind==='mesin')!
+  const refreshed={...dayReviewFor(w.state,'2026-09',people[0].id,'2026-09-02','hadir',[chosen.id],[]),signature:firstDay.reviewSignature}
+  reviewAllWorkdays(w.state,'2026-09')
+  const dayReviews=[...w.state.dayReviews.filter((r:any)=>r.employeeId!==people[0].id||r.date!=='2026-09-02'),refreshed]
+  const reviewSave=await request('/workspace','PUT',{expectedRevision:w.revision,patch:{dayReviews},reason:'Tinjau ulang hari setelah catatan ST dikeluarkan'});expect(reviewSave.status,await reviewSave.clone().text()).toBe(200)
+  w=await workspace()
   const calculation=(await(await request('/calculations/2026-09')).json()).calculation
   expect(calculation.months.find((m:any)=>m.employee.id===people[0].id).days.find((d:any)=>d.date==='2026-09-02').meal.state).toBe('eligible')
   expect(calculation.months.find((m:any)=>m.employee.id===people[1].id).days.find((d:any)=>d.date==='2026-09-02').meal.state).toBe('excluded')
   const events=await connection.db.select().from(auditEvents),event=events.find(e=>e.action==='source.record-review')!
   expect((event.details as any).recordReviewChanges[0]).toMatchObject({sourceId:id,after:{recordId:'review-st-0',reviewer:'admin Test'}})
-  const head=(await(await request('/meal-submissions')).json()).submissions.find((s:any)=>s.status==='locked'&&!s.correctionId&&s.office==='Pusat'),proposalId=randomUUID()
-  const proposal=await request('/meal-submissions','POST',{id:proposalId,period:'2026-09',office:'Pusat',supersedesId:head.id,expectedRevision:w.revision,reason:'Snapshot koreksi menyertakan dasar keputusan peserta ST'})
-  expect(proposal.status).toBe(200);expect((await proposal.json()).submission.snapshot.sources.find((f:any)=>f.id===id).recordReviews).toHaveLength(1)
+  const head=(await(await request('/meal-submissions')).json()).submissions.find((s:any)=>s.status==='locked'&&!s.correctionId&&s.office==='Semua'),proposalId=randomUUID()
+  const proposal=await request('/meal-submissions','POST',{id:proposalId,period:'2026-09',office:'Semua',supersedesId:head.id,expectedRevision:w.revision,reason:'Snapshot koreksi menyertakan dasar keputusan peserta ST'})
+  expect(proposal.status,await proposal.clone().text()).toBe(200);expect((await proposal.json()).submission.snapshot.sources.find((f:any)=>f.id===id).recordReviews).toHaveLength(1)
   const exported=XLSX.read(await(await request(`/meal-submissions/${proposalId}/export`)).arrayBuffer());expect(exported.Sheets['Review Sumber']).toBeDefined()
   expect(exported.Sheets['Review Sumber'].F2.v).toBe(body.reason)
   expect((await request(`/meal-submissions/${proposalId}/cancel`,'POST',{expectedRevision:1,reason:'Cancel synthetic review snapshot after export verification'})).status).toBe(200)
   body={...body,id:randomUUID(),expectedRevision:w.revision,disposition:'active',reason:'Peserta diaktifkan kembali berdasarkan dokumen sah'}
   const reactivation=await(await request(path+'/preview','POST',body)).json()
-  expect(reactivation.affected[0].after.mealState).toBe('excluded')
+  expect(reactivation.affected[0].after.mealState).toBe('held')
   expect((await request(path,'POST',{...body,confirmedImpact:reactivation.checksum})).status).toBe(200)
   w=await workspace();expect(w.state.files.find((f:any)=>f.id===id).recordReviews).toHaveLength(2)
   expect((await request('/backup/restore','POST',{expectedRevision:w.revision,state:original.state,reason:'Restore shared fixture after record review integration test'})).status).toBe(200)
