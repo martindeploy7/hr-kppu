@@ -13,7 +13,7 @@ import { monthBounds } from '../src/engine/dates.ts'
 import { loadXlsx } from '../src/lib/xlsx.ts'
 import { globalAccess, requireOffice } from './scope.ts'
 import { reviewsForRecords } from '../src/engine/recordReviews.ts'
-import { inspectMonthlyPackage } from '../src/engine/monthlyFlow.ts'
+import { createCoverageLookup, inspectMonthlyPackage } from '../src/engine/monthlyFlow.ts'
 import { mealDelta, type MealSnapshot } from '../shared/submissions.ts'
 const claimsOf = (snapshot: MealSnapshot) => snapshot.months.flatMap(m => m.days.filter(d => d.meal.state === 'eligible').map(d => ({ key: `${m.employee.nip || m.employee.nika || m.employee.id}|${d.date}`, employeeId: m.employee.id, date: d.date })))
 const ancestorsOf = async (tx: Pick<Database, 'execute'>, id: string) => {
@@ -43,7 +43,7 @@ export function registerSubmissions(app: Hono<{ Variables: { user: User; session
       { name: 'Nominatif', rows: [[`NOMINATIF ${replacement ? 'ARSIP DIGANTIKAN' : s.status.toUpperCase()} v${s.version} — ${s.period} — ${s.office}`], ['Snapshot', s.id, 'Checksum', s.checksum], ['Nama', 'NIP', 'NIKA', 'Kantor', 'Unit', 'Hari UM', 'Bruto', 'PPh', 'Netto'], ...data.months.map(m => [m.employee.nama, m.employee.nip, m.employee.nika, m.employee.kantor, m.employee.unit, m.mealDays, m.bruto, m.pph, m.netto])] },
       { name: 'Rincian Harian', rows: [['Nama', 'NIP', 'Tanggal', 'Status', 'Masuk', 'Pulang', 'Hak UM', 'Alasan', 'Nominal', 'PPh % efektif', 'Bukti', 'ST'], ...data.months.flatMap(m => m.days.map(d => [m.employee.nama, m.employee.nip, d.date, d.status, d.clockIn ?? '', d.clockOut ?? '', d.meal.state, d.meal.reason, d.meal.amount, d.meal.taxPct ?? '', d.evidenceIds.join(';'), d.assignmentIds.join(';')]))] },
       { name: 'Parameter', rows: [['Versi kalkulasi', data.calculationVersion], ['Versi pengajuan', s.version], ['Menggantikan', s.supersedesId ?? 'Versi awal'], ['Digantikan oleh', replacement?.id ?? 'Belum digantikan'], ['Alasan koreksi', s.correctionReason ?? ''], ['Revisi workspace', data.workspaceRevision], ['Snapshot dibuat', data.generatedAt], ['Pengaju', s.createdBy], ['Penyetuju', s.approvedBy ?? 'Belum disetujui'], ['Status', s.status], ['Parameter', JSON.stringify(data.policy)], ['Pemakaian', 'Nominatif adalah versi pengganti penuh. Selisih adalah referensi koreksi terhadap versi sebelumnya; bukan instruksi pembayaran tambahan otomatis.']] },
-      { name: 'Sumber', rows: [['ID', 'File', 'SHA-256', 'Revisi', 'Lengkap sampai'], ...data.sources.map(f => [f.id, f.name, f.hash ?? 'legacy', f.revision ?? 1, f.completeThrough ?? 'Belum dikonfirmasi'])] },
+      { name: 'Sumber', rows: [['ID', 'File', 'SHA-256', 'Revisi', 'Cakupan yang dikonfirmasi'], ...data.sources.map(f => [f.id, f.name, f.hash ?? 'legacy', f.revision ?? 1, f.coverageDeclarations?.map(d => `${d.start}–${d.end} · ${d.status} · ${d.basis} · ${d.actorId}`).join('; ') || 'Belum dikonfirmasi'])] },
     ]
     if (data.months.some(m => m.days.some(d => d.decision))) sheets.push({ name: 'Review Harian', rows: [['Nama', 'NIP', 'Kantor', 'Tanggal', 'Status disahkan', 'Bukti absensi terpilih', 'ST terpilih', 'Alasan', 'Reviewer', 'Aktor', 'Waktu'], ...data.months.flatMap(m => m.days.flatMap(d => d.decision ? [[m.employee.nama, m.employee.nip, m.employee.kantor, d.date, d.decision.status, d.decision.evidenceIds.join('; '), d.decision.assignmentIds.join('; '), d.decision.note, d.decision.reviewer, d.decision.actorId, d.decision.at]] : []))] })
     if (data.sources.some(f => f.recordReviews?.length)) sheets.push({ name: 'Review Sumber', rows: [['Sumber', 'ID keputusan', 'Jenis', 'ID catatan', 'Status', 'Alasan', 'Reviewer', 'Aktor', 'Waktu'], ...data.sources.flatMap(f => (f.recordReviews ?? []).map(r => [f.id, r.id, r.kind, r.recordId, r.disposition, r.reason, r.reviewer, r.actorId, r.at]))] })
@@ -53,7 +53,7 @@ export function registerSubmissions(app: Hono<{ Variables: { user: User; session
     return c.body(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }))
   })
   app.post('/api/meal-submissions', async c => {
-    const actor = c.get('user'); if (!['admin', 'hr'].includes(actor.role)) throw new HTTPException(403)
+    const actor = c.get('user'); if (actor.role !== 'superadmin') throw new HTTPException(403)
     const v = z.object({ id: z.uuid(), supersedesId: z.uuid().optional(), reason: z.string().trim().min(10).max(2000).optional(), period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), office: z.string().min(1).max(100), expectedRevision: z.number().int().nonnegative() }).parse(await c.req.json())
     requireOffice(actor, v.office)
     if (v.office !== 'Semua') throw new HTTPException(400, { message: 'Pengajuan uang makan memakai satu cakupan seluruh KPPU' })
@@ -73,18 +73,16 @@ export function registerSubmissions(app: Hono<{ Variables: { user: User; session
       if (overlap.length) throw new HTTPException(409, { message: 'Scope periode ini sudah diajukan. Koreksi membutuhkan versi/adjustment tersendiri.' })
       const state = { ...w.state, policy: enforcePolicy(w.state.policy) }, bounds = monthBounds(v.period), roster = buildRoster(state.files, state.master, state.overrides, state.decisions)
       if (!inspectMonthlyPackage(state.files, v.period).ready) throw new HTTPException(422, { message: 'Pengajuan ditahan: paket Mesin Offline, Mesin Online, dan ST seluruh kantor belum lengkap untuk bulan ini' })
-      const calculation = reconcile(state.files, roster, bounds, state.policy, state.resolutions, undefined, state.dayReviews)
+      const calculation = reconcile(state.files, roster, bounds, state.policy, state.resolutions, undefined, state.dayReviews, createCoverageLookup(state.files))
       const months = calculation.months.filter(m => v.office === 'Semua' || m.employee.kantor === v.office)
-      if ((!months.length && !parent) || !state.policy.parametersApproved || !state.policy.taxParametersApproved || months.some(m => m.heldDays || m.amountPendingDays || m.openIssues)) throw new HTTPException(422, { message: 'Pengajuan ditahan: lengkapi bukti, mapping, review, serta pengesahan parameter uang makan dan PPh/netto terlebih dahulu' })
-      const offices = new Set([...months, ...(parent?.snapshot.months ?? [])].map(m => m.employee.kantor))
-      if ([...offices].some(office => !state.files.some(f => f.active !== false && f.kind === 'surat-tugas' && f.office === office && (f.completeThrough ?? '') >= bounds.end))) throw new HTTPException(422, { message: 'Kelengkapan register ST sampai akhir periode belum dikonfirmasi untuk semua kantor dalam pengajuan' })
+      if ((!months.length && !parent) || !state.policy.parametersApproved || !state.policy.taxParametersApproved || months.some(m => m.heldDays || m.amountPendingDays || m.openClashes)) throw new HTTPException(422, { message: 'Pengajuan ditahan: lengkapi bukti, mapping, review, serta pengesahan parameter uang makan dan PPh/netto terlebih dahulu' })
       if (roster.conflicts.some(i => i.employeeIds.some(id => months.some(m => m.employee.id === id)))) throw new HTTPException(422, { message: 'Konflik identitas harus selesai sebelum pengajuan' })
       const eligible = months.flatMap(m => m.days.filter(d => d.meal.state === 'eligible').map(d => ({ key: `${m.employee.nip || m.employee.nika || m.employee.id}|${d.date}`, employeeId: m.employee.id, date: d.date })))
       if (new Set(eligible.map(d => d.key)).size !== eligible.length) throw new HTTPException(422, { message: 'Identitas ganda menghasilkan hak employee-date yang sama' })
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext('kppu-meal-claims'))`)
       const existingClaims = eligible.length ? await tx.select().from(mealClaimedDays).where(inArray(mealClaimedDays.key, eligible.map(d => d.key))) : []
       if (existingClaims.some(d => !ancestors.includes(d.submissionId))) throw new HTTPException(409, { message: 'Hari pegawai sudah masuk pengajuan lain; pengajuan ganda ditolak' })
-      const snapshot: MealSnapshot = { calculationVersion: '2.1.0', generatedAt: new Date().toISOString(), period: v.period, office: v.office, workspaceRevision: w.revision, policy: state.policy, sources: state.files.filter(f => f.active !== false && (v.office === 'Semua' || f.office === v.office || f.evidence.some(e => e.office === v.office) || f.assignments.some(a => a.office === v.office))).map(f => ({ id: f.id, hash: f.hash, name: f.fileName, revision: f.revision, completeThrough: f.completeThrough, recordReviews: reviewsForRecords(f, new Set(f.evidence.filter(e => v.office === 'Semua' || e.office === v.office).map(e => e.id)), new Set(f.assignments.filter(a => v.office === 'Semua' || a.office === v.office).map(a => a.id))) })), months: months.map(m => ({ employee: m.employee, mealDays: m.mealDays, bruto: m.bruto, pph: m.pph, netto: m.netto, days: m.days.map(d => ({ date: d.date, status: d.status, reviewState: d.reviewState, reviewSignature: d.reviewSignature, decision: d.decision, clockIn: d.clockIn, clockOut: d.clockOut, meal: d.meal, evidenceIds: d.evidence.map(e => e.id), assignmentIds: d.assignments.map(a => a.id) })) })) }
+      const snapshot: MealSnapshot = { calculationVersion: '2.2.0', generatedAt: new Date().toISOString(), period: v.period, office: v.office, workspaceRevision: w.revision, policy: state.policy, sources: state.files.filter(f => f.active !== false && (v.office === 'Semua' || f.office === v.office || f.evidence.some(e => e.office === v.office) || f.assignments.some(a => a.office === v.office))).map(f => ({ id: f.id, hash: f.hash, name: f.fileName, revision: f.revision, completeThrough: f.completeThrough, coverageDeclarations: f.coverageDeclarations, recordReviews: reviewsForRecords(f, new Set(f.evidence.filter(e => v.office === 'Semua' || e.office === v.office).map(e => e.id)), new Set(f.assignments.filter(a => v.office === 'Semua' || a.office === v.office).map(a => a.id))) })), months: months.map(m => ({ employee: m.employee, mealDays: m.mealDays, bruto: m.bruto, pph: m.pph, netto: m.netto, days: m.days.map(d => ({ date: d.date, status: d.status, reviewState: d.reviewState, reviewSignature: d.reviewSignature, decision: d.decision, clockIn: d.clockIn, clockOut: d.clockOut, meal: d.meal, evidenceIds: d.evidence.map(e => e.id), assignmentIds: d.assignments.map(a => a.id) })) })) }
       if (parent) snapshot.correction = { parentId: parent.id, parentChecksum: parent.checksum, reason: v.reason!, delta: mealDelta(parent.snapshot, snapshot) }
       const checksum = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex')
       const [submission] = await tx.insert(mealSubmissions).values({ id: v.id, period: v.period, office: v.office, workspaceRevision: w.revision, snapshot, checksum, createdBy: actor.id, supersedesId: parent?.id, version: parent ? parent.version + 1 : 1, correctionReason: parent ? v.reason : undefined }).returning()
@@ -97,7 +95,7 @@ export function registerSubmissions(app: Hono<{ Variables: { user: User; session
   app.post('/api/meal-submissions/:id/:action', async c => {
     const actor = c.get('user')
     const action = z.enum(['approve', 'lock', 'cancel']).parse(c.req.param('action'))
-    if (!(action === 'cancel' ? ['admin', 'hr', 'finance'] : ['admin', 'finance']).includes(actor.role)) throw new HTTPException(403)
+    if (actor.role !== 'superadmin') throw new HTTPException(403)
     const v = z.object({ expectedRevision: z.number().int().positive(), reason: z.string().trim().min(3).max(2000) }).parse(await c.req.json())
     return c.json(await db.transaction(async tx => {
       const [workspace] = await tx.select().from(workspaces).where(eq(workspaces.id, 'default')).for('update')
@@ -106,7 +104,6 @@ export function registerSubmissions(app: Hono<{ Variables: { user: User; session
       requireOffice(actor, s.office)
       if (action === 'cancel') {
         if (s.revision !== v.expectedRevision || s.status === 'locked' || s.status === 'cancelled') throw new HTTPException(409, { message: 'Pengajuan locked tidak dapat dibatalkan; perlu adjustment terpisah' })
-        if (actor.role === 'hr' && s.createdBy !== actor.id) throw new HTTPException(403)
         const [submission] = await tx.update(mealSubmissions).set({ revision: s.revision + 1, status: 'cancelled' }).where(eq(mealSubmissions.id, s.id)).returning()
         await tx.delete(mealClaimedDays).where(eq(mealClaimedDays.submissionId, s.id))
         await tx.insert(auditEvents).values({ id: randomUUID(), actorId: actor.id, action: 'meal.cancel', revision: s.workspaceRevision, reason: v.reason, details: { submissionId: s.id, checksum: s.checksum } })

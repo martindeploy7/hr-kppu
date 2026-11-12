@@ -52,6 +52,9 @@ export type ImportTarget = { sourceId: string; registerKey: string }
 export type ImportSelection = { incomingKey: string; targets: ImportTarget[] }
 export type ImportProposal = {
   uploadId: string; expectedRevision: number; office: string; mode: ImportMode; replaces?: string; completeThrough?: string
+  resolveUnmappedOffice?: boolean
+  range?: { start: string; end: string }
+  coverage?: { start: string; end: string; status: 'complete' | 'partial'; basis: string }
   selections?: ImportSelection[]; reason?: string; completeSnapshot?: boolean; offset?: number; limit?: number
 }
 export type ImportCounts = { added: number; changed: number; removed: number; ambiguous: number; duplicate: number; unchanged: number }

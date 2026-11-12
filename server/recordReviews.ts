@@ -6,12 +6,13 @@ import type { RecordReviewPreview, ReviewDay } from '../shared/recordReviews.ts'
 import { sourceRecordState } from '../src/engine/recordReviews.ts'
 import { buildRoster } from '../src/engine/roster.ts'
 import { reconcile, type DayRecord } from '../src/engine/reconcile.ts'
+import { createCoverageLookup } from '../src/engine/monthlyFlow.ts'
 import { requireOffice, scopeWorkspace } from './scope.ts'
 
 export const recordReviewInput = z.object({ id: z.uuid(), expectedRevision: z.number().int().nonnegative(), kind: z.enum(['evidence', 'assignment']), recordId: z.string().min(1).max(2000), disposition: z.enum(['excluded', 'active']), reason: z.string().trim().min(10).max(2000), confirmedImpact: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict()
 export type RecordReviewInput = z.infer<typeof recordReviewInput>
 export function previewRecordReview(state: Workspace, revision: number, sourceId: string, input: RecordReviewInput, actor: User) {
-  if (!['admin', 'hr'].includes(actor.role)) throw new HTTPException(403)
+  if (!['superadmin', 'admin'].includes(actor.role)) throw new HTTPException(403)
   if (input.expectedRevision !== revision) throw new HTTPException(409, { message: 'Data berubah; muat ulang dan tinjau dampak kembali' })
   const file = state.files.find(f => f.id === sourceId && f.active !== false)
   if (!file) throw new HTTPException(404)
@@ -36,7 +37,7 @@ export function previewRecordReview(state: Workspace, revision: number, sourceId
   target.revision = (target.revision ?? 1) + 1
   const calculate = (workspace: Workspace) => {
     const own = scopeWorkspace(workspace, actor)
-    return reconcile(own.files, buildRoster(own.files, own.master, own.overrides, own.decisions), period, own.policy, own.resolutions, undefined, own.dayReviews)
+    return reconcile(own.files, buildRoster(own.files, own.master, own.overrides, own.decisions), period, own.policy, own.resolutions, undefined, own.dayReviews, createCoverageLookup(own.files))
   }
   const before = calculate(state), after = calculate(next)
   const byId = new Map(after.months.map(m => [m.employee.id, m]))

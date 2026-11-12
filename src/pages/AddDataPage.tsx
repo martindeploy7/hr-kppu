@@ -18,7 +18,8 @@ export function AddDataPage({ toast }: { toast: (m: string) => void }) {
   const [fileName, setFileName] = useState(''), [busy, setBusy] = useState(false), [page, setPage] = useState(0), [confirmed, setConfirmed] = useState(false)
   const plan = useMemo(() => previewMasterImport(preview, hr.roster.employees, allowedOffices), [preview, hr.roster.employees, user.offices])
   useEffect(() => setConfirmed(false), [preview, hr.revision])
-  const [form, setForm] = useState<Partial<Employee>>({ kantor: defaultOffice, statusKepegawaian: 'Belum diketahui' })
+  const emptyForm: Partial<Employee> = { kantor: defaultOffice, statusKepegawaian: 'Belum diketahui', peringkatJabatan: '', jenisJabatan: '', tanggalMulaiKerja: '', tanggalPensiun: '', tanggalPengunduranDiri: '' }
+  const [form, setForm] = useState<Partial<Employee>>(emptyForm)
 
   const onFile = async (ev: ChangeEvent<HTMLInputElement>) => {
     const file = ev.target.files?.[0]; if (!file) return
@@ -42,19 +43,19 @@ export function AddDataPage({ toast }: { toast: (m: string) => void }) {
     if (result.invalid) { toast(result.entries[0].errors.join(' · ')); return }
     if (!result.rows.length) { toast('Tidak ada perubahan data'); return }
     try {
-      const r = hr.upsertMaster(result.rows); setForm({ kantor: defaultOffice, statusKepegawaian: 'Belum diketahui' })
+      const r = hr.upsertMaster(result.rows); setForm(emptyForm)
       toast(r.updated ? 'Perubahan pegawai disiapkan; periksa status penyimpanan' : 'Pegawai baru disiapkan; periksa status penyimpanan')
     } catch (e) { toast((e as Error).message) }
   }
   const template = () => downloadWorkbook('Template_Master_Pegawai_KPPU.xlsx', [
     { name: 'Master Pegawai', rows: [COLUMNS.map(c => c.header), COLUMNS.map(c => c.example)], widths: COLUMNS.map(c => Math.max(14, c.header.length + 2)) },
-    { name: 'Petunjuk', rows: [['Kolom', 'Keterangan'], ['NIP', 'Kunci utama pencocokan (18 digit, simpan sebagai teks).'], ['NIKA', 'Dipakai bila NIP belum ada (mis. data mesin Kanwil).'], ['Golongan', 'PNS: III/b dsb. PPPK: I–XVII. Menentukan tarif & PPh uang makan.'], ['Kantor', OFFICES.join(', ')], ['Baris yang NIP/NIKA-nya sudah ada', 'akan MEMPERBARUI data pegawai tersebut, bukan membuat duplikat.']], widths: [34, 80] },
+    { name: 'Petunjuk', rows: [['Kolom', 'Keterangan'], ['NIP', 'Kunci utama pencocokan (18 digit, simpan sebagai teks).'], ['NIKA', 'Dipakai bila NIP belum ada (mis. data mesin Kanwil).'], ['Golongan', 'PNS: III/b dsb. PPPK: I–XVII. Menentukan tarif & PPh uang makan.'], ['Peringkat Jabatan', 'Diisi sesuai data resmi penetapan peringkat jabatan.'], ['Jenis Jabatan', 'Tulis Fungsional untuk memasukkan jabatan ke kelompok jabatan fungsional.'], ['Tanggal Pensiun', 'Tanggal resmi dari sumber kepegawaian. Tidak dihitung dari usia.'], ['Tanggal Pengunduran Diri', 'Tanggal resmi pengunduran diri. Status Nonaktif saja tidak dihitung sebagai pengunduran diri.'], ['Kantor', OFFICES.join(', ')], ['Baris yang NIP/NIKA-nya sudah ada', 'akan MEMPERBARUI data pegawai tersebut, bukan membuat duplikat.']], widths: [34, 80] },
   ])
   const field = (k: keyof Employee, label: string, type = 'text') => <label><span>{label}</span><input type={type} value={String(form[k] ?? '')} onChange={e => setForm({ ...form, [k]: e.target.value })} /></label>
 
   return <div className="page">
     <PageHeader title="Tambah & lengkapi data pegawai" actions={<Seg label="Mode" value={tab} onChange={setTab} options={[{ value: 'bulk', label: 'Bulk import' }, { value: 'manual', label: 'Input manual' }]} />}>
-      Pegawai sudah terbentuk dari sumber absensi. Halaman ini untuk melengkapi field yang tidak ada di absensi (golongan, jabatan, agama, WhatsApp) atau menambah pegawai baru.
+      Pegawai sudah terbentuk dari sumber absensi. Lengkapi master pegawai untuk melihat sebaran pendidikan dan jabatan serta tanggal pegawai baru, pensiun, atau mengundurkan diri.
     </PageHeader>
     {tab === 'bulk' ? <section className="panel">
       <div className="bulk-top"><div className="upload-icon"><UploadCloud /></div><div><h3>Bulk import master pegawai</h3><p>Excel atau CSV; semua sheet master dikenali. Pencocokan memakai NIP/NIKA. Nama tidak menggabungkan pegawai.</p></div><button className="btn secondary" onClick={template}><Download size={16} /> Download template</button></div>
@@ -64,7 +65,7 @@ export function AddDataPage({ toast }: { toast: (m: string) => void }) {
         {preview.notices.map((notice, i) => <Note key={i}>{notice}</Note>)}
         {plan.invalid > 0 && <Note>{plan.invalid} baris bermasalah. Tidak ada baris disimpan. Perbaiki seluruh masalah di file lalu unggah ulang.</Note>}
         <div className="table-wrap"><table className="data"><thead><tr><th>Sumber</th><th>Nama / NIP / NIKA</th><th>Hasil & perubahan</th></tr></thead>
-          <tbody>{plan.entries.slice(page * 20, (page + 1) * 20).map((entry, i) => <tr key={`${page}-${i}`}><td>{entry.ref}</td><td>{entry.value.nama || entry.target || '—'}<div className="mono">{entry.value.nip || 'Tanpa NIP'}</div><div>{entry.value.nika}</div></td><td>
+          <tbody>{plan.entries.slice(page * 20, (page + 1) * 20).map((entry, i) => <tr key={`${page}-${i}`}><td>{entry.ref}</td><td>{entry.value.nama || entry.target || 'Nama belum diisi'}<div className="mono">{entry.value.nip || 'Tanpa NIP'}</div><div>{entry.value.nika || 'NIKA belum diisi'}</div></td><td>
             <span className={`tag ${entry.errors.length ? 'warn' : 'ok'}`}>{entry.action === 'gabung' ? 'digabung dalam batch' : entry.action === 'tetap' ? 'tidak berubah' : entry.action}</span>
             {entry.errors.map((error, j) => <p key={j}>{error}</p>)}
             {entry.changes.length > 0 && <details><summary>{entry.changes.length} field {entry.action === 'baru' ? 'terisi' : 'berubah'}{entry.target ? ` · ${entry.target}` : ''}</summary><ul>{entry.changes.map(change => <li key={change.field}><strong>{change.field}:</strong> {change.before || 'kosong'} → {change.after}</li>)}</ul></details>}
@@ -77,14 +78,15 @@ export function AddDataPage({ toast }: { toast: (m: string) => void }) {
     </section> : <form className="panel form-card" onSubmit={submit}>
       <div className="form-section"><div className="form-title"><CircleUserRound /><div><h3>Identitas</h3><p>NIP dipakai sebagai kunci; tanggal lahir & jenis kelamin dibaca otomatis dari NIP bila kosong.</p></div></div>
         <div className="form-grid">{field('nama', 'Nama lengkap')}{field('nip', 'NIP (18 digit)')}{field('nika', 'NIKA')}{field('tanggalLahir', 'Tanggal lahir', 'date')}{field('tempatLahir', 'Tempat lahir')}
-          <label><span>Agama</span><select value={form.agama ?? ''} onChange={e => setForm({ ...form, agama: e.target.value as Employee['agama'] })}><option value="">—</option>{['Islam', 'Kristen', 'Katolik', 'Hindu', 'Buddha', 'Konghucu', 'Lainnya'].map(x => <option key={x}>{x}</option>)}</select></label>
+          <label><span>Agama</span><select value={form.agama ?? ''} onChange={e => setForm({ ...form, agama: e.target.value as Employee['agama'] })}><option value="">Pilih agama</option>{['Islam', 'Kristen', 'Katolik', 'Hindu', 'Buddha', 'Konghucu', 'Lainnya'].map(x => <option key={x}>{x}</option>)}</select></label>
           {field('nomorWhatsApp', 'Nomor WhatsApp')}{field('email', 'Email', 'email')}</div></div>
       <div className="form-section"><div className="form-title"><BriefcaseBusiness /><div><h3>Kepegawaian</h3><p>Golongan menentukan tarif & PPh uang makan.</p></div></div>
         <div className="form-grid">
           <label><span>Kantor</span><select value={form.kantor} onChange={e => setForm({ ...form, kantor: e.target.value })}>{allowedOffices.map(o => <option key={o}>{o}</option>)}</select></label>
           {field('unit', 'Unit')}
           <label><span>Status</span><select value={form.statusKepegawaian} onChange={e => setForm({ ...form, statusKepegawaian: e.target.value as Employee['statusKepegawaian'] })}>{['PPPK', 'PNS', 'Non-ASN', 'Belum diketahui'].map(x => <option key={x}>{x}</option>)}</select></label>
-          {field('golongan', 'Golongan')}{field('jabatan', 'Jabatan')}{field('tanggalMulaiKerja', 'Tanggal mulai kerja', 'date')}</div></div>
+          {field('golongan', 'Golongan')}{field('jabatan', 'Jabatan')}{field('peringkatJabatan', 'Peringkat jabatan')}{field('jenisJabatan', 'Jenis jabatan (mis. Fungsional)')}
+          {field('tanggalMulaiKerja', 'Tanggal mulai kerja', 'date')}{field('tanggalPensiun', 'Tanggal pensiun', 'date')}{field('tanggalPengunduranDiri', 'Tanggal pengunduran diri', 'date')}</div></div>
       <div className="form-actions"><span>Perubahan disimpan ke server; periksa status penyimpanan.</span><button className="btn primary" type="submit" disabled={hr.saveStatus !== 'saved'}><Plus size={16} /> Simpan pegawai</button></div>
     </form>}
   </div>

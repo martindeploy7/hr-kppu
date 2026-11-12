@@ -1,132 +1,258 @@
-import { useMemo, useState, type DragEvent } from 'react'
-import { AlertTriangle, CheckCircle2, ChevronDown, FileSpreadsheet, FolderUp, Loader2, Trash2, UploadCloud, XCircle } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, FileSpreadsheet, Globe2, Loader2, Printer, ScrollText, Trash2, UploadCloud, XCircle } from 'lucide-react'
 import { useAuth } from '../state/Auth.tsx'
 import { useHr, type ImportResult } from '../state/HrData.tsx'
 import type { SourceFile, SourceKind } from '../engine/types.ts'
-import { OFFICES, OFFICE_CITY } from '../engine/ids.ts'
-import { formatID, monthBounds, monthLabel } from '../engine/dates.ts'
+import { OFFICES } from '../engine/ids.ts'
+import { formatID, weekRange } from '../engine/dates.ts'
+import { coverageSource, inspectSourceCoverage, type CoverageSource } from '../engine/monthlyFlow.ts'
 import { fmt } from '../lib/format.ts'
-import { Note, PageHeader, Panel } from '../components/ui.tsx'
+import { Note } from '../components/ui.tsx'
 import type { Nav } from '../App.tsx'
 import { SourceRecords } from '../components/SourceRecords.tsx'
-import { groupAssignments, importedAssignments, type ImportChange, type ImportImpactResponse, type ImportMode, type ImportProposal, type ImportTarget } from '../../shared/imports.ts'
-
-type Column = { id: string; label: string; kinds: SourceKind[] }
-const COLUMNS: Column[] = [
-  { id: 'mesin', label: 'Mesin Offline', kinds: ['mesin', 'matriks-kanwil'] },
-  { id: 'daring', label: 'Mesin Online', kinds: ['daring'] },
-  { id: 'st', label: 'Surat Tugas (ST)', kinds: ['surat-tugas'] },
-  { id: 'rekap', label: 'Rekap Kanwil (bukti tambahan)', kinds: ['jadwal-kanwil', 'laporan-kanwil'] },
-]
+import type { ImportProposal } from '../../shared/imports.ts'
+import './setoran.css'
 
 const FORMATS: { kind: string; example: string; detail: string }[] = [
-  { kind: 'Ekspor mesin absensi (baris per hari)', example: 'Data Rekap absensi_pusat.xls · kanwil 2 … .xls', detail: 'Header "Scan Masuk/Scan Pulang" atau "Clock In/Clock Out". Kolom NIK berisi NIP/NIKA, kolom Pengecualian berisi PD, WFA, Sakit, Cuti. Format tanggal M/D/Y dan D/M/Y dikenali otomatis.' },
-  { kind: 'Mesin Online (aplikasi HP)', example: 'Data Rekap Absensi_Online_DariHP.xlsx', detail: 'WFO/WFA, lokasi, koordinat masuk/pulang, status Approved/Reject. Mencakup pegawai pusat dan kanwil.' },
+  { kind: 'Ekspor mesin absensi (baris per hari)', example: 'Data Rekap absensi_pusat.xls · kanwil 2 … .xls', detail: 'Header Scan Masuk/Scan Pulang atau Clock In/Clock Out. Jadwal, scan aktual, durasi sumber, pengecualian, ID mesin, dan unit disimpan terpisah. Format KPPU DD/MM dikenali dari header; tanggal ambigu meminta pilihan.' },
+  { kind: 'Mesin Online (aplikasi HP)', example: 'Data Rekap Absensi_Online_DariHP.xlsx', detail: 'WFO/WFA, kantor dan unit per baris, jadwal tidak ditebak dari Min. Durasi, durasi/status sumber, serta Target/Hasil Pekerjaan WFA. Status Approved, Reject, Pending, dan status tidak dikenal tetap dibedakan.' },
   { kind: 'Data Transaksi Karyawan (matriks Kanwil)', example: 'Data Rekap Absensi _ Kanwil I …xls', detail: 'Nama(No. mesin) × tanggal dengan sel "07:07-18:03". Header tanggal yang hari/bulannya tertukar diperbaiki otomatis.' },
   { kind: 'Jadwal absen manual (per bulan)', example: 'Data Rekap Penomoran ST _ Kanwil V …xlsx', detail: 'Satu sheet per bulan, kolom Ket / Jam masuk / Jam pulang. Kode DINAS, WFA, SAKIT, "Absen Eror".' },
   { kind: 'Daily Attendance Checking Report', example: 'Rekapitulasi Absen_Kanwil VI …xls', detail: 'Hanya kode harian (PD, WF, S, X, …) tanpa jam; sel kosong = Normal sesuai legenda.' },
-  { kind: 'Rekap surat tugas sekretaris', example: 'Kesekjenan, Kedeputian, Kanwil I/II/VI', detail: 'Nomor ST, tanggal ST, nama (dipisah koma/baris baru/blok), tanggal kegiatan teks bebas ("31 Ags-2 Sep 2026"), tujuan.' },
 ]
 
-export function ImportPage({ nav, toast }: { nav: Nav; toast: (m: string) => void }) {
+const sourceLabels: Record<CoverageSource, string> = { offline: 'Mesin Offline', online: 'Mesin Online', 'surat-tugas': 'Surat Tugas (ST)' }
+const coverageLabels: Record<string, string> = { missing: 'Belum diterima', unconfirmed: 'Data ada, cakupan belum dikonfirmasi', partial: 'Parsial', complete: 'Lengkap', nil: 'Nihil terkonfirmasi', 'not-applicable': 'Tidak berlaku' }
+const SOURCE_ICON = { offline: Printer, online: Globe2, 'surat-tugas': ScrollText } as const
+type UploadContext = { office: string; source: CoverageSource; start: string; end: string }
+
+export type UploadRequest = { source: CoverageSource; nonce: number }
+
+export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; toast: (m: string) => void; request?: UploadRequest; clashCount?: number }) {
   const hr = useHr()
   const { user } = useAuth()
+  const demoMode = new URLSearchParams(window.location.search).get('demo') === '1'
   const [dateOrder, setDateOrder] = useState<'' | 'DMY' | 'MDY'>('')
   const [busy, setBusy] = useState(false)
-  const [drag, setDrag] = useState(false)
+  const input = useRef<HTMLInputElement>(null)
+  const uploadDialog = useRef<HTMLDialogElement>(null)
+  const previewSection = useRef<HTMLElement>(null)
+  const [modalTarget, setModalTarget] = useState<UploadContext>()
+  const fileDetails = useRef<HTMLDetailsElement>(null)
+  const uploadTarget = useRef<UploadContext | undefined>(undefined)
+  const [fileFilter, setFileFilter] = useState<{ office: string; source: CoverageSource }>()
   const [results, setResults] = useState<ImportResult[]>([])
-  const [previews, setPreviews] = useState<SourceFile[]>([])
+  const [dragSource, setDragSource] = useState<CoverageSource>()
+  const [naSource, setNaSource] = useState<CoverageSource>()
+  const [naBasis, setNaBasis] = useState('')
   const [open, setOpen] = useState<string | null>(null)
-  const { start: monthStart, end: monthEnd } = monthBounds(hr.activePeriod)
-  const packageOffices = hr.monthlyPackage.suratTugas.filter(item => !user.offices?.length || user.offices.includes(item.office))
+  const selectedRange = hr.weekScope === 'full' ? weekRange(hr.weekSlice.weekStart) : { start: hr.weekSlice.displayStart, end: hr.weekSlice.displayEnd }
+  const offices = user.offices?.length ? user.offices : OFFICES
+  const sourceCoverage = useMemo(() => inspectSourceCoverage(hr.files, selectedRange.start, selectedRange.end), [hr.files, selectedRange.start, selectedRange.end])
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date())
+  const rangeElapsed = selectedRange.end <= today
+  const uploadedFiles = hr.files.filter(file => !file.id.startsWith('manual-st:') && (!fileFilter || coverageSource(file.kind) === fileFilter.source && (fileFilter.office === 'Semua kantor' || file.office === fileFilter.office || file.evidence.some(row => row.office === fileFilter.office) || file.assignments.some(row => row.office === fileFilter.office))))
+
+  useEffect(() => {
+    if (modalTarget && !uploadDialog.current?.open) uploadDialog.current?.showModal()
+  }, [modalTarget])
+  useEffect(() => {
+    if (results.length) previewSection.current?.scrollIntoView({ block: 'start' })
+  }, [results])
+
+  const showSources = (office: string, source: CoverageSource) => {
+    setFileFilter({ office, source })
+    uploadDialog.current?.close()
+    if (fileDetails.current) { fileDetails.current.open = true; fileDetails.current.scrollIntoView({ block: 'start' }) }
+  }
+
+  const selectSource = (office: string, source: CoverageSource) => {
+    const target = { office, source, ...selectedRange }
+    uploadTarget.current = target
+    setModalTarget(target)
+  }
+
+  useEffect(() => {
+    if (request) selectSource('Semua kantor', request.source)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request?.nonce])
+
+  const submitNa = async (source: CoverageSource) => {
+    if (!rangeElapsed) { toast('Konfirmasi hanya dapat dibuat untuk tanggal yang sudah berlangsung'); return }
+    if (naBasis.trim().length < 10) { toast('Alasan minimal 10 karakter'); return }
+    try {
+      if (source === 'surat-tugas') await hr.declareNilSt('Pusat', selectedRange.start, selectedRange.end, naBasis.trim())
+      else await hr.declareNotApplicable('Pusat', source, selectedRange.start, selectedRange.end, naBasis.trim())
+      toast(`${sourceLabels[source]}: tidak ada data pekan ini dicatat`)
+      setNaSource(undefined); setNaBasis('')
+    } catch (error) { toast((error as Error).message) }
+  }
 
   const handle = async (list: FileList | File[]) => {
+    if (user.role !== 'superadmin' || busy) return
+    const target = uploadTarget.current
     const files = [...list].filter(f => /\.(xlsx?|xls\.dbf\.xls)$/i.test(f.name) || f.name.toLowerCase().endsWith('.xls'))
     if (!files.length) { toast('Pilih file Excel (.xls / .xlsx)'); return }
     setBusy(true)
-    const { previews, results: res } = await hr.previewFiles(files, dateOrder || undefined)
-    setPreviews(previews.filter(p => !p.duplicate).map(p => p.file))
-    setResults(res)
-    setBusy(false)
-    const ok = res.filter(r => r.ok).length
-    toast(`${ok} dari ${res.length} file berhasil dibaca`)
-  }
-  const onDrop = (e: DragEvent) => { e.preventDefault(); setDrag(false); handle(e.dataTransfer.files) }
+    try {
+      const { previews: incoming, results: res } = await hr.previewFiles(files, dateOrder || undefined, true)
+      let revision = hr.revision
+      for (const incomingFile of incoming) {
+        const file = incomingFile.file
+        const result = res.find(r => r.name === file.fileName)
+        if (!result || incomingFile.duplicate) continue
+        try {
+          if (!target) throw new Error('Pilih kartu sumber terlebih dahulu.')
+          if (coverageSource(file.kind) !== target.source) throw new Error(`File terdeteksi sebagai ${sourceLabels[coverageSource(file.kind)]}. Pilih kartu sumber yang sesuai.`)
+          // Setoran mingguan: baris di luar pekan disaring di server; upload menandai sumber ini diterima untuk pekan tsb.
+          const coverageEnd = target.end < today ? target.end : today
+          const proposal: ImportProposal = {
+            uploadId: file.id, expectedRevision: revision, office: 'Semua kantor',
+            mode: 'add', resolveUnmappedOffice: false, range: { start: target.start, end: target.end },
+            ...(target.start <= today ? { coverage: { start: target.start, end: coverageEnd, status: 'complete' as const, basis: `Setoran mingguan ${sourceLabels[target.source]} seluruh KPPU melalui unggah file ${file.fileName}` } } : {}),
+            reason: `Setoran ${sourceLabels[target.source]} seluruh KPPU, ${target.start}–${target.end} melalui kartu mingguan`,
+          }
+          const impact = await hr.previewImport(proposal)
+          await hr.commitImport(proposal, impact.checksum)
+          revision++
+          const outside = impact.source.parsedRows - impact.counts.added - impact.counts.duplicate
+          result.message = `${fmt.format(impact.counts.added)} baris baru tersimpan${impact.counts.duplicate ? `, ${fmt.format(impact.counts.duplicate)} duplikat dilewati` : ''}${outside > 0 ? `; ${fmt.format(outside)} baris di luar pekan tidak dipakai` : ''}. Kantor tiap baris dipetakan otomatis.${file.quarantined?.length ? ` ${file.quarantined.length} baris perlu diperiksa di rincian sumber.` : ''}`
+        } catch (error) {
+          result.ok = false
+          result.message = (error as Error).message
+        }
+      }
+      setResults(res)
+      toast(`${res.filter(r => r.ok).length} dari ${res.length} file selesai diproses`)
 
-  const coverage = (office: string, col: Column) => hr.files.filter(f => col.kinds.includes(f.kind) && (f.period ? f.period.start <= monthEnd && f.period.end >= monthStart : f.evidence.some(e => e.date >= monthStart && e.date <= monthEnd) || f.assignments.some(a => a.start <= monthEnd && a.end >= monthStart)) && (f.office === office || f.evidence.some(e => e.office === office) || f.assignments.some(a => a.office === office)))
-  const employeesByOffice = (office: string) => hr.roster.employees.filter(e => e.kantor === office).length
+    } catch (error) { toast((error as Error).message) }
+    finally { setBusy(false) }
+  }
+
   const declareNil = async (office: string) => {
-    const basis = window.prompt(`Jelaskan konfirmasi register ST ${office} nihil untuk ${monthLabel(hr.activePeriod)} (minimal 10 karakter):`)
+    if (!rangeElapsed) { toast('Pernyataan nihil hanya dapat dibuat untuk tanggal yang sudah berlangsung'); return }
+    const basis = window.prompt(`Jelaskan konfirmasi register ST ${office} nihil untuk ${formatID(selectedRange.start)}–${formatID(selectedRange.end)} (minimal 10 karakter):`)
     if (!basis || basis.trim().length < 10) { toast('Alasan pernyataan nihil minimal 10 karakter'); return }
-    try { await hr.declareNilSt(office, hr.activePeriod, basis.trim()); toast(`Kelengkapan ST ${office} disimpan`) }
+    try { await hr.declareNilSt(office, selectedRange.start, selectedRange.end, basis.trim()); toast(`Nihil ST ${office} dicatat untuk rentang terpilih`) }
+    catch (error) { toast((error as Error).message) }
+  }
+  const declareNotApplicable = async (office: string, source: CoverageSource) => {
+    if (!rangeElapsed) { toast('Konfirmasi hanya dapat dibuat untuk tanggal yang sudah berlangsung'); return }
+    const basis = window.prompt(`Jelaskan dasar resmi ${sourceLabels[source]} tidak berlaku untuk ${office}, ${formatID(selectedRange.start)}–${formatID(selectedRange.end)} (minimal 10 karakter):`)
+    if (!basis || basis.trim().length < 10) { toast('Dasar konfirmasi minimal 10 karakter'); return }
+    try { await hr.declareNotApplicable(office, source, selectedRange.start, selectedRange.end, basis.trim()); toast(`${sourceLabels[source]} ditandai tidak berlaku untuk rentang terpilih`) }
+    catch (error) { toast((error as Error).message) }
+  }
+  const declareFileCoverage = async (file: SourceFile, status: 'complete' | 'partial') => {
+    if (!rangeElapsed) { toast('Cakupan hanya dapat dikonfirmasi untuk tanggal yang sudah berlangsung'); return }
+    const basis = window.prompt(`Jelaskan dasar ${status === 'complete' ? 'kelengkapan' : 'parsial'} ${file.fileName} untuk ${formatID(selectedRange.start)}–${formatID(selectedRange.end)} (minimal 10 karakter):`)
+    if (!basis || basis.trim().length < 10) { toast('Dasar cakupan minimal 10 karakter'); return }
+    if (status === 'complete' && !window.confirm(`Konfirmasi cakupan lengkap ${file.fileName} untuk ${file.office}, ${formatID(selectedRange.start)}–${formatID(selectedRange.end)}? Untuk ST, pastikan seluruh register yang diwajibkan sudah tercakup.`)) return
+    try { await hr.declareFileCoverage(file.id, selectedRange.start, selectedRange.end, status, basis.trim()); toast(`Cakupan ${status === 'complete' ? 'lengkap' : 'parsial'} dicatat`) }
     catch (error) { toast((error as Error).message) }
   }
 
-  return <div className="page">
-    <PageHeader kicker={`Langkah 1 · Pilih periode dan kumpulkan sumber · ${monthLabel(hr.activePeriod)}`} title="Siapkan paket absensi bulanan" actions={<button className="btn primary" disabled={!hr.monthlyPackage.ready} onClick={() => nav('reconcile')}>Lanjut ke rekonsiliasi</button>}>
-      Satu periode mencakup seluruh pegawai KPPU. Unggah Mesin Offline dan Mesin Online untuk bulan yang dipilih, lalu unggah atau konfirmasi register ST untuk Pusat dan setiap Kanwil. Format file dibaca dari isinya; periksa preview sebelum menyimpan.
-    </PageHeader>
-
-    <Panel title={`Kelengkapan paket · ${monthLabel(hr.activePeriod)}`} sub="Paket membuka rekonsiliasi. Status hari dan hak uang makan tetap menunggu keputusan admin.">
-      <div className="package-checks">
-        {[{ label: 'Mesin Offline', ready: hr.monthlyPackage.offline.ready, files: hr.monthlyPackage.offline.files }, { label: 'Mesin Online', ready: hr.monthlyPackage.online.ready, files: hr.monthlyPackage.online.files }].map(item => <div key={item.label} className={`package-check ${item.ready ? 'ready' : 'missing'}`}><span>{item.ready ? <CheckCircle2 size={16} /> : <UploadCloud size={16} />}</span><div><strong>{item.label}</strong><small>{item.files} file pada bulan ini</small></div><b>{item.ready ? 'Siap' : 'Belum ada'}</b></div>)}
-        {packageOffices.map(item => <div key={item.office} className={`package-check ${item.ready ? 'ready' : 'missing'}`}><span>{item.ready ? <CheckCircle2 size={16} /> : <UploadCloud size={16} />}</span><div><strong>ST · {item.office}</strong><small>{item.declaredNil ? 'Pernyataan nihil tercatat' : item.ready ? `${item.files} register lengkap sampai akhir bulan` : 'Unggah register dan konfirmasi kelengkapannya'}</small></div>{item.ready ? <b>Siap</b> : <>{['admin', 'hr'].includes(user.role) && <button className="btn secondary" onClick={() => void declareNil(item.office)}>Pernyataan nihil</button>}<b>Belum</b></>}</div>)}
+  return <div className="page setoran-page">
+    <section aria-label="Setoran mingguan" className="office-submissions">
+      <div className="week-head">
+        <h3>Setoran pekan {formatID(selectedRange.start, { short: true })}–{formatID(selectedRange.end, { short: true })}</h3>
+        <p className="setoran-hint">Tiga file untuk seluruh KPPU. Kantor tiap baris dipetakan otomatis. File multi-pekan boleh diunggah; hanya tanggal pekan ini yang dipakai. Seret file ke kartu atau klik tombolnya.</p>
       </div>
-      <p className="muted small">Kantor yang tidak memiliki ST tetap perlu konfirmasi nihil. Keputusan nihil disimpan dengan alasan dan nama akun.</p>
-    </Panel>
-
-    <label className="select-label">Format tanggal mesin <select className="select" value={dateOrder} onChange={e => setDateOrder(e.target.value as typeof dateOrder)}><option value="">Deteksi otomatis (tahan jika ambigu)</option><option value="DMY">DD/MM/YYYY</option><option value="MDY">MM/DD/YYYY</option></select></label>
-    <label className={`dropzone-lg ${drag ? 'drag' : ''}`} onDragOver={e => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)} onDrop={onDrop}>
-      <input type="file" multiple accept=".xls,.xlsx" disabled={busy} onChange={e => { if (e.target.files) void handle(e.target.files); e.target.value = '' }} />
-      <div className="dz-icon">{busy ? <Loader2 className="spin" size={26} /> : <FolderUp size={26} />}</div>
-      <strong>{busy ? 'Membaca file…' : 'Tarik semua file ke sini, atau klik untuk memilih'}</strong>
-      <span>Bisa sekaligus banyak file (.xls / .xlsx). Isi identik dilewati. Penggantian dataset harus dipilih pada preview.</span>
-    </label>
-
-    {previews.map(file => <ImportPreview key={file.id} file={file} onDone={() => setPreviews(p => p.filter(f => f.id !== file.id))} toast={toast} />)}
-    {results.length > 0 && <div className="import-results">
-      {results.map(r => <div key={r.name} className={r.ok ? 'ok' : 'fail'}>{r.ok ? <CheckCircle2 size={15} /> : <XCircle size={15} />}<strong>{r.name}</strong><span>{r.message}</span></div>)}
-    </div>}
-
-    <Panel title="Cakupan sumber per kantor" sub="Kantor tanpa mesin offline atau rekap hanya terpantau dari mesin online: hari tanpa presensi daring tidak bisa dibedakan antara tidak hadir dan tidak tercatat.">
-      <div className="table-wrap">
-        <table className="coverage">
-          <thead><tr><th>Kantor</th>{COLUMNS.map(c => <th key={c.id}>{c.label}</th>)}<th>Pegawai</th></tr></thead>
-          <tbody>{OFFICES.map(office => {
-            const cells = COLUMNS.map(c => coverage(office, c))
-            const onlyOnline = cells[1].length > 0 && !cells[0].length && !cells[3].length
-            return <tr key={office}>
-              <th scope="row"><strong>{office}</strong><small>{OFFICE_CITY[office]}</small></th>
-              {cells.map((files, i) => <td key={i} className={files.length ? 'has' : 'gap'}>
-                {files.length ? <><CheckCircle2 size={14} /> <span>{COLUMNS[i].id === 'daring' ? `${fmt.format(new Set(files.flatMap(f => f.evidence.filter(e => e.office === office).map(e => e.name))).size)} pengguna` : files.map(f => f.period ? `${formatID(f.period.start, { short: true, year: false })}–${formatID(f.period.end, { short: true })}` : f.fileName).join(', ')}</span></> : <span className="gap-text">Belum ada</span>}
-              </td>)}
-              <td>{employeesByOffice(office) || '—'}{onlyOnline && <span className="cov-flag" title="Hanya dari mesin online">hanya online</span>}</td>
-            </tr>
-          })}</tbody>
-        </table>
+      <div className="weekly-upload-cards" role="group" aria-label="Sumber setoran mingguan">
+        {(['offline', 'online', 'surat-tugas'] as CoverageSource[]).map(source => {
+          const item = sourceCoverage.find(entry => entry.source === source)!
+          const label = source === 'offline' ? 'Mesin Offline' : source === 'online' ? 'Mesin Online' : 'Rekap ST'
+          const Icon = SOURCE_ICON[source]
+          const status = item.ready ? (item.state === 'nil' ? 'Nihil pekan ini' : item.state === 'not-applicable' ? 'Tidak ada data pekan ini' : 'Sudah disetor') : item.state === 'missing' ? (rangeElapsed ? 'Belum disetor' : 'Belum waktunya') : item.state === 'partial' ? `Disetor sebagian${item.declaredThrough ? ` s.d. ${formatID(item.declaredThrough, { short: true })}` : ''}` : 'Data ada, belum dinyatakan disetor'
+          const tone = item.ready ? (item.state === 'complete' ? 'ok' : 'info') : item.state === 'missing' ? (rangeElapsed ? 'danger' : 'idle') : 'warn'
+          const canUpload = user.role === 'superadmin'
+          return <div className={`office-source src-${source} ${item.ready ? 'is-ready' : ''} ${dragSource === source ? 'dragging' : ''}`} key={source}
+            onDragOver={e => { if (!canUpload) return; e.preventDefault(); setDragSource(source) }}
+            onDragLeave={() => setDragSource(s => s === source ? undefined : s)}
+            onDrop={e => {
+              e.preventDefault(); setDragSource(undefined)
+              if (!canUpload) return
+              uploadTarget.current = { office: 'Semua kantor', source, ...selectedRange }
+              void handle(e.dataTransfer.files)
+            }}>
+            <div className="src-head"><span className="src-icon"><Icon size={18} /></span><strong>{label}</strong></div>
+            <span className={`tone-chip tone-${tone}`}>{item.ready ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />} {status}</span>
+            <small className="src-meta">{item.files ? `${item.files} file tersimpan` : 'Belum ada file'}</small>
+            <button type="button" className="office-source-main" disabled={busy} onClick={() => selectSource('Semua kantor', source)} aria-label={canUpload ? `Unggah ${sourceLabels[source]}` : `Lihat ${sourceLabels[source]}`}>
+              <UploadCloud size={15} /> <span className="office-source-action">{canUpload ? item.files ? 'Unggah tambahan / koreksi' : 'Pilih file atau seret ke sini' : 'Lihat sumber'}</span>
+            </button>
+            <div className="office-source-extra">
+              {source === 'surat-tugas' && <button type="button" className="link" onClick={() => nav('rekap-st', 'Pusat')}>Isi ST manual</button>}
+              {canUpload && !item.ready && <button type="button" className="link" disabled={busy || !rangeElapsed} onClick={() => { setNaBasis(''); setNaSource(naSource === source ? undefined : source) }}>{source === 'surat-tugas' ? 'Tidak ada ST pekan ini' : 'Tidak ada data pekan ini'}</button>}
+            </div>
+            {naSource === source && <form className="na-form" onSubmit={e => { e.preventDefault(); void submitNa(source) }}>
+              <label>Alasan / dasar (min. 10 karakter)<input className="select" value={naBasis} onChange={e => setNaBasis(e.target.value)} autoFocus /></label>
+              <div><button type="submit" className="btn primary" disabled={busy || naBasis.trim().length < 10}>Simpan</button> <button type="button" className="btn secondary" onClick={() => setNaSource(undefined)}>Batal</button></div>
+            </form>}
+          </div>
+        })}
       </div>
-    </Panel>
+      {sourceCoverage.every(item => item.ready)
+        ? <Note>Setoran pekan ini lengkap. Lanjutkan ke <button type="button" className="link" onClick={() => nav('reconcile')}>Rekonsiliasi</button> untuk memutuskan clash, lalu periksa <button type="button" className="link" onClick={() => nav('meal')}>Uang Makan</button>.</Note>
+        : <Note tone="warn">Uang makan pekan ini final setelah ketiga sumber disetor. Rekonsiliasi sudah bisa dimulai dari data yang masuk.</Note>}
+      {!rangeElapsed && <Note tone="warn">Pekan ini masih berjalan. Setoran dicatat sampai hari ini; tanggal setelahnya belum dihitung.</Note>}
+    </section>
 
-    <Panel title={`File sumber (${hr.files.length})`} sub="Periksa jenis yang terdeteksi dan kantor asal. Peringatan menjelaskan anomali format yang ditemukan saat membaca.">
-      {hr.files.length === 0 ? <p className="muted">Belum ada file. Mulai dengan menarik folder "Rapat Absensi" ke kotak di atas.</p> :
-        <div className="file-list">{[...hr.files].sort(sortFiles).map(f => <FileRow key={f.id} file={f} open={open === f.id} onToggle={() => setOpen(open === f.id ? null : f.id)} onRemove={async () => { try { await hr.removeFile(f.id); toast(`${f.fileName} ditarik dari perhitungan; arsip tetap tersimpan`) } catch (e) { toast((e as Error).message) } }} onOffice={async o => { try { await hr.setFileOffice(f.id, o); toast('Kantor sumber diperbarui di server') } catch (e) { toast((e as Error).message) } }} />)}</div>}
-    </Panel>
+    <dialog ref={uploadDialog} className="setoran-dialog" aria-labelledby="setoran-dialog-title" onClose={() => setModalTarget(undefined)}>
+      {modalTarget && <>
+        <h2 id="setoran-dialog-title">{sourceLabels[modalTarget.source]} · seluruh KPPU</h2>
+        <p className="setoran-dialog-period">{formatID(modalTarget.start)}–{formatID(modalTarget.end)}</p>
+        {user.role === 'superadmin' ? <>
+          <p>Pilih file Excel asli dari sumbernya. Hanya tanggal di pekan ini yang dipakai; kantor tiap baris dipetakan otomatis dari unit di file dan master pegawai.</p>
+          <input ref={input} aria-label="Pilih file absensi" hidden type="file" multiple accept=".xls,.xlsx" disabled={busy} onChange={e => {
+            const files = [...(e.currentTarget.files ?? [])]
+            e.currentTarget.value = ''
+            if (files.length) { uploadDialog.current?.close(); void handle(files) }
+          }} />
+          <button className="btn primary" type="button" autoFocus disabled={busy} onClick={() => input.current?.click()}><UploadCloud size={16} /> Pilih file</button>
+          <small>Excel .xls atau .xlsx · Bisa memilih beberapa file</small>
+          {demoMode && <p className="setoran-hint">Mode demo memakai contoh sintetis dan menyimpan perubahan di browser. Pemilihan file di sini tidak mengunggah data ke server.</p>}
+        </> : <p role="status">Akun Admin dapat melihat sumber dan melakukan rekonsiliasi. Unggah file hanya tersedia untuk Superadmin.</p>}
+        <div className="setoran-dialog-actions">
+          <button className="btn secondary" type="button" onClick={() => showSources(modalTarget.office, modalTarget.source)}>Lihat sumber</button>
+          <button className="btn secondary" type="button" aria-label="Tutup modal setoran" onClick={() => uploadDialog.current?.close()}>Tutup</button>
+        </div>
+      </>}
+    </dialog>
 
-    <Panel title="Format yang dikenali" sub="Dipetakan dari file nyata yang dipakai saat ini. Format baru bisa ditambahkan sebagai parser terpisah.">
+    {user.role === 'superadmin' && <section ref={previewSection} className="setoran-upload" aria-label="Hasil unggahan setoran">
+      {busy && <p role="status"><Loader2 className="spin" size={16} /> Memproses dan menyimpan file…</p>}
+      <p className="setoran-hint">Unggah file pada kartu sumber yang sesuai. Setelah tersimpan, sumber tersebut tercatat sudah disetor untuk pekan ini. Unggah ulang file yang sama untuk pekan lain diperbolehkan; baris ganda dilewati.</p>
+      <details className="setoran-options"><summary>Pengaturan format tanggal</summary>
+        <label className="select-label">Urutan tanggal dalam file<select className="select" value={dateOrder} onChange={e => setDateOrder(e.target.value as typeof dateOrder)}><option value="">Deteksi otomatis; minta konfirmasi jika ambigu</option><option value="DMY">DD/MM/YYYY</option><option value="MDY">MM/DD/YYYY</option></select></label>
+      </details>
+      {results.length > 0 && <div className="import-results" aria-live="polite">
+        {results.map(r => <div key={r.name} className={r.ok ? 'ok' : 'fail'}>{r.ok ? <CheckCircle2 size={15} /> : <XCircle size={15} />}<strong>{r.name}</strong><span>{r.message}</span></div>)}
+      </div>}
+      {results.some(r => r.ok) && <div className="upload-cta"><div><strong>Setoran tersimpan.</strong><span>{clashCount ? `${fmt.format(clashCount)} clash menunggu keputusan di pekan ini.` : 'Tidak ada clash menunggu di pekan ini.'}</span></div><button type="button" className="btn primary" onClick={() => nav('reconcile')}>Lanjut ke rekonsiliasi{clashCount ? ` (${fmt.format(clashCount)} clash)` : ''} <ArrowRight size={15} /></button></div>}
+    </section>}
+
+    <details ref={fileDetails} className="setoran-details"><summary>File sumber ({uploadedFiles.length}){fileFilter ? ` · ${fileFilter.office} · ${sourceLabels[fileFilter.source]}` : ''}</summary>
+      {fileFilter && <button className="btn secondary" onClick={() => setFileFilter(undefined)}>Tampilkan semua sumber</button>}
+      {uploadedFiles.length === 0 ? <p className="muted">{user.role === 'superadmin' ? 'Belum ada file sumber. Unggah file absensi untuk mulai memeriksa data.' : 'Belum ada file sumber. Menunggu unggahan dari Superadmin.'}</p> :
+        <div className="file-list">{[...uploadedFiles].sort(sortFiles).map(f => <FileRow key={f.id} file={f} open={open === f.id} onToggle={() => setOpen(open === f.id ? null : f.id)} onRemove={async () => { try { await hr.removeFile(f.id); toast(`${f.fileName} ditarik dari perhitungan; arsip tetap tersimpan`) } catch (e) { toast((e as Error).message) } }} onOffice={async o => { try { await hr.setFileOffice(f.id, o); toast('Kantor sumber diperbarui di server') } catch (e) { toast((e as Error).message) } }} onCoverage={status => declareFileCoverage(f, status)} coverageRange={selectedRange} />)}</div>}
+    </details>
+
+    <details className="setoran-details">
+      <summary>Format file yang dapat dibaca</summary>
       <div className="format-list">{FORMATS.map(f => <div key={f.kind}><FileSpreadsheet size={17} /><div><strong>{f.kind}</strong><small>{f.example}</small><p>{f.detail}</p></div></div>)}</div>
-      <Note>Saran untuk tahap berikutnya: seragamkan format ekspor Kanwil (saat ini ada 4 bentuk berbeda) atau tarik langsung dari API mesin & aplikasi, agar langkah unggah ini bisa dijadwalkan otomatis.</Note>
-    </Panel>
+    </details>
   </div>
 }
 
 const ORDER: SourceKind[] = ['mesin', 'daring', 'matriks-kanwil', 'jadwal-kanwil', 'laporan-kanwil', 'surat-tugas']
 const sortFiles = (a: SourceFile, b: SourceFile) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) || a.office.localeCompare(b.office)
 
-function FileRow({ file, open, onToggle, onRemove, onOffice }: { file: SourceFile; open: boolean; onToggle: () => void; onRemove: () => Promise<void>; onOffice: (o: string) => Promise<void> }) {
+function FileRow({ file, open, onToggle, onRemove, onOffice, onCoverage, coverageRange }: { file: SourceFile; open: boolean; onToggle: () => void; onRemove: () => Promise<void>; onOffice: (o: string) => Promise<void>; onCoverage: (status: 'complete' | 'partial') => Promise<void>; coverageRange: { start: string; end: string } }) {
   const warn = file.warnings.length + (file.quarantined?.length ?? 0)
   const { user } = useAuth()
   const [busy, setBusy] = useState(false)
-  const editable = ['admin', 'hr'].includes(user.role)
+  const editable = user.role === 'superadmin'
   const perform = async (fn: () => Promise<void>) => { setBusy(true); try { await fn() } finally { setBusy(false) } }
   return <article className={`file-row ${open ? 'open' : ''}`}>
     <div className="file-main">
@@ -146,88 +272,13 @@ function FileRow({ file, open, onToggle, onRemove, onOffice }: { file: SourceFil
     {open && <div className="file-detail">
       {warn ? <ul>{file.warnings.map((w, i) => <li key={`warning-${i}`}>{w}</li>)}{file.quarantined?.map((q, i) => <li key={`quarantine-${i}`}>{q.ref}: {q.reason}</li>)}</ul> : <p>Tidak ada anomali format.</p>}
       {file.summaries && <p className="muted">Laporan juga memuat ringkasan per pegawai (Duty/Actual/Absent/Late) yang dipakai sebagai pembanding.</p>}
+      <section className="file-coverage" aria-label="Deklarasi cakupan sumber">
+        <strong>Deklarasi cakupan · {formatID(coverageRange.start, { short: true })}–{formatID(coverageRange.end, { short: true })}</strong>
+        {(file.coverageDeclarations ?? []).filter(d => d.start <= coverageRange.end && d.end >= coverageRange.start).map((d, i) => <p key={`${d.start}|${d.end}|${i}`}>{coverageLabels[d.status]} · {formatID(d.start)}–{formatID(d.end)} · {d.basis} · {d.at}</p>)}
+        {!(file.coverageDeclarations ?? []).some(d => d.start <= coverageRange.end && d.end >= coverageRange.start) && <p className="muted">Belum ada deklarasi untuk rentang ini.</p>}
+        {editable && <div className="form-actions"><button className="btn secondary" disabled={busy} onClick={() => void perform(() => onCoverage('partial'))}>Tandai parsial</button><button className="btn secondary" disabled={busy} onClick={() => void perform(() => onCoverage('complete'))}>Konfirmasi lengkap</button></div>}
+      </section>
       <SourceRecords file={file} />
     </div>}
   </article>
-}
-
-function ImportPreview({ file, onDone, toast }: { file: SourceFile; onDone: () => void; toast: (s: string) => void }) {
-  const hr = useHr()
-  const { user } = useAuth()
-  const [office, setOffice] = useState(file.office === 'Semua kantor' && user.offices?.length ? user.offices[0] : file.office), [mode, setMode] = useState<ImportMode>('add'), [replaces, setReplaces] = useState(''), [completeThrough, setCompleteThrough] = useState(''), [completeSnapshot, setCompleteSnapshot] = useState(false), [reason, setReason] = useState(''), [busy, setBusy] = useState(false), [loadingImpact, setLoadingImpact] = useState(false), [error, setError] = useState(''), [impact, setImpact] = useState<ImportImpactResponse | null>(null), [impactKey, setImpactKey] = useState(''), [confirmedKey, setConfirmedKey] = useState(''), [page, setPage] = useState(0), [selected, setSelected] = useState<Record<string, { included: boolean; targets: ImportTarget[] }>>({})
-  const incomingGroups = useMemo(() => groupAssignments(file.assignments.map(a => ({ ...a, office }))), [file, office])
-  const existingGroups = useMemo(() => hr.files.filter(f => f.active !== false && f.kind === 'surat-tugas').flatMap(source => groupAssignments(importedAssignments(source).filter(a => a.office === office)).map(group => ({ ...group, sourceId: source.id, fileName: source.fileName, revision: source.revision ?? 1 }))).filter(group => group.replaceable), [hr.files, office])
-  const selections = useMemo(() => incomingGroups.flatMap(group => selected[group.key]?.included ? [{ incomingKey: group.key, targets: selected[group.key].targets }] : []), [incomingGroups, selected])
-  const proposal = useMemo<ImportProposal>(() => ({ uploadId: file.id, expectedRevision: hr.revision, office, mode, ...(mode === 'replace-file' && replaces ? { replaces } : {}), ...(completeThrough ? { completeThrough } : {}), completeSnapshot, ...(mode === 'replace-registers' ? { selections } : {}), reason, offset: page * 50, limit: 50 }), [file.id, hr.revision, office, mode, replaces, completeThrough, completeSnapshot, selections, reason, page])
-  const intentKey = JSON.stringify({ ...proposal, offset: 0, limit: 50 })
-  const impactCurrent = !!impact && impactKey === intentKey
-  const previous = hr.files.find(f => f.id === replaces)
-  const replacingRegisters = mode === 'replace-registers' && selections.some(s => s.targets.length > 0)
-  const officeOptions = user.offices?.length ? [...new Set([file.office, ...user.offices])] : [...new Set([file.office, ...OFFICES])]
-  const requestImpact = async (offset = 0) => {
-    if (mode === 'replace-registers' && !selections.length) return
-    setLoadingImpact(true); setError('')
-    try {
-      const result = await hr.previewImport({ ...proposal, offset, limit: 50 })
-      setImpact(result); setImpactKey(intentKey); setConfirmedKey(''); setPage(Math.floor(offset / 50))
-    } catch (e) { setError((e as Error).message); setImpact(null); setImpactKey('') }
-    finally { setLoadingImpact(false) }
-  }
-  const commit = async () => {
-    if (!impactCurrent || confirmedKey !== intentKey || !impact) return
-    setBusy(true); setError('')
-    try { await hr.commitImport({ ...proposal, offset: 0, limit: 50 }, impact.checksum); toast('Sumber disimpan ke server'); onDone() }
-    catch (e) { setError((e as Error).message) } finally { setBusy(false) }
-  }
-  const chooseAll = () => { setCompleteSnapshot(false); setSelected(Object.fromEntries(incomingGroups.map(g => [g.key, { included: true, targets: selected[g.key]?.targets ?? [] }]))) }
-  const toggleTarget = (incomingKey: string, target: ImportTarget, checked: boolean) => { setCompleteSnapshot(false); setSelected(current => {
-    const existing = current[incomingKey] ?? { included: true, targets: [] }, token = `${target.sourceId}|${target.registerKey}`
-    const targets = checked ? [...existing.targets.filter(t => `${t.sourceId}|${t.registerKey}` !== token), target] : existing.targets.filter(t => `${t.sourceId}|${t.registerKey}` !== token)
-    return { ...current, [incomingKey]: { included: true, targets } }
-  }) }
-  const changeStatus: Record<ImportChange['status'], string> = { added: 'Tambah', changed: 'Berubah', removed: 'Hapus dari scope', ambiguous: 'Pasangan ambigu', duplicate: 'Duplikat' }
-  const sourceValue = (value?: ImportChange['before']) => value ? <>{value.name}<br /><small>{value.office}{value.start ? ` · ${value.start}${value.end !== value.start ? `–${value.end}` : ''}` : ''}</small><br /><small>{value.detail} · {value.ref}</small></> : '—'
-  return <Panel title={`Preview: ${file.fileName}`} sub={`${file.label} · ${file.stats.rows} baris · ${file.stats.people} nama · ${file.quarantined?.length ?? 0} karantina`}>
-    <p>{file.period ? `${file.period.start} — ${file.period.end}` : 'Periode tidak ditemukan'} · Parser {file.parserVersion} · SHA-256 {file.hash?.slice(0, 12)}</p>
-    <div className="import-preview-fields">
-      <label>Kantor sumber<select value={office} onChange={e => { setOffice(e.target.value); setReplaces(''); setSelected({}); setCompleteSnapshot(false) }}>{officeOptions.map(o => <option key={o}>{o}</option>)}</select></label>
-      <label>Perlakuan data<select value={mode} onChange={e => { setMode(e.target.value as ImportMode); setConfirmedKey(''); setCompleteSnapshot(false); setPage(0) }}><option value="add">Tambahkan seluruh sumber</option><option value="replace-file">Ganti seluruh dataset</option>{file.kind === 'surat-tugas' && <option value="replace-registers">Pilih register ST</option>}</select></label>
-      {mode === 'replace-file' && <label>Dataset yang diganti<select value={replaces} onChange={e => { setReplaces(e.target.value); setConfirmedKey(''); setCompleteSnapshot(false) }}><option value="">Pilih dataset lama</option>{hr.files.filter(f => f.active !== false && f.kind === file.kind && f.office === (file.kind === 'daring' ? file.office : office)).map(f => <option key={f.id} value={f.id}>{f.fileName} (revisi {f.revision ?? 1})</option>)}</select></label>}
-      <label>Lengkap sampai (hanya jika dikonfirmasi)<input type="date" min={file.period?.start} value={completeThrough} onChange={e => setCompleteThrough(e.target.value)} /></label>
-    </div>
-    {mode === 'replace-file' && previous && <><Note tone="warn">Seluruh sumber lama ({previous.stats.rows} baris) akan dinonaktifkan. Gunakan ini hanya untuk snapshot lengkap; perubahan parsial tidak boleh menghapus baris yang tidak muncul.</Note><label className="review-confirm"><input type="checkbox" checked={completeSnapshot} onChange={e => setCompleteSnapshot(e.target.checked)} /> Saya memastikan workbook baru merupakan snapshot lengkap untuk seluruh dataset lama yang dipilih.</label></>}
-    {mode === 'replace-registers' && <section className="import-registers" aria-label="Pilih register surat tugas">
-      <div className="form-actions"><strong>Pilih scope yang akan diimpor</strong><button className="btn secondary" type="button" onClick={chooseAll}>Pilih semua register</button></div>
-      <p>Hanya register yang dicentang masuk ke kalkulasi. Nomor dan unit yang tidak terbaca hanya dapat ditambahkan; sistem tidak menebak register lama yang harus diganti.</p>
-      {incomingGroups.map(group => <article className="import-register" key={group.key}>
-        <label className="review-confirm"><input type="checkbox" checked={!!selected[group.key]?.included} onChange={e => { setCompleteSnapshot(false); setSelected(current => ({ ...current, [group.key]: { included: e.target.checked, targets: current[group.key]?.targets ?? [] } })) }} /> <strong>{group.label}</strong> · {group.assignments.length} peserta</label>
-        {selected[group.key]?.included && group.replaceable && <details><summary>Ganti scope lama (opsional)</summary>
-          {existingGroups.length ? existingGroups.map(old => <label className="review-confirm" key={`${old.sourceId}|${old.key}`}><input type="checkbox" checked={!!selected[group.key]?.targets.some(t => t.sourceId === old.sourceId && t.registerKey === old.key)} onChange={e => toggleTarget(group.key, { sourceId: old.sourceId, registerKey: old.key }, e.target.checked)} /> Ganti {old.label} · {old.assignments.length} catatan · {old.fileName} (revisi {old.revision})</label>) : <p>Tidak ada register lama yang dapat dipilih; register ini akan ditambahkan.</p>}
-        </details>}
-        {selected[group.key]?.included && !group.replaceable && <p className="muted">Nomor ST atau unit tidak cukup terbaca untuk memilih scope lama. Data ini hanya dapat ditambahkan atau diganti bersama seluruh dataset.</p>}
-      </article>)}
-      {!incomingGroups.length && <p className="muted">Tidak ada peserta ST yang dapat dipilih dari workbook ini.</p>}
-      {replacingRegisters && <label className="review-confirm"><input type="checkbox" checked={completeSnapshot} onChange={e => setCompleteSnapshot(e.target.checked)} /> Saya memastikan register baru lengkap untuk scope lama yang dipilih; peserta yang hilang memang harus berhenti aktif.</label>}
-      {file.master?.length ? <Note tone="warn">Workbook juga memuat {file.master.length} baris master. Mode pilih register tidak mengaktifkan baris master itu; gunakan impor master terpisah bila memang perlu memperbaruinya.</Note> : null}
-    </section>}
-    <label className="import-reason">Alasan impor / dasar kelengkapan<textarea rows={2} value={reason} onChange={e => setReason(e.target.value)} maxLength={2000} placeholder="Jelaskan penambahan atau dasar snapshot lengkap, minimal 10 karakter" /></label>
-    {file.warnings.length > 0 && <details><summary>{file.warnings.length} catatan parser</summary><ul>{file.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul></details>}
-    {!!file.quarantined?.length && <details><summary>Baris karantina</summary><ul>{file.quarantined.map((q, i) => <li key={i}>{q.ref}: {q.reason}</li>)}</ul></details>}
-    {error && <p role="alert" className="form-error">{error}</p>}
-    <div className="form-actions"><button className="btn secondary" onClick={onDone} disabled={busy || loadingImpact}>Batalkan</button><button className="btn secondary" onClick={() => void requestImpact(0)} disabled={busy || loadingImpact || office === 'Belum ditentukan' || reason.trim().length < 10 || (mode === 'replace-file' && (!replaces || !completeSnapshot)) || (replacingRegisters && !completeSnapshot) || (mode === 'replace-registers' && !selections.length)}>{loadingImpact ? 'Menghitung diff…' : 'Hitung diff & dampak'}</button></div>
-    {loadingImpact && <p role="status">Menghitung perubahan baris dan dampak pada hari yang terpengaruh…</p>}
-    {impactCurrent && impact && <section className="import-impact" aria-label="Diff dan dampak impor">
-      <h4>Hasil preview terikat revisi {impact.revision}</h4>
-      <p>{impact.source.selectedRows} baris dipilih dari {impact.source.parsedRows} baris terurai{impact.source.omittedMasterCount ? ` · ${impact.source.omittedMasterCount} baris master tidak diaktifkan` : ''}. Scope lama yang diganti: {impact.replacedScopes.length}.</p>
-      <div className="import-counts">{([['Tambah',impact.counts.added],['Berubah',impact.counts.changed],['Dihapus dari scope',impact.counts.removed],['Ambigu',impact.counts.ambiguous],['Duplikat',impact.counts.duplicate],['Sama',impact.counts.unchanged]] as [string,number][]).map(([label,count]) => <span key={label}><strong>{fmt.format(count)}</strong> {label}</span>)}</div>
-      {impact.review.computed ? <Note>Perubahan hari UM: {impact.review.changedDays} hari berubah · {impact.review.newlyHeld} baru ditahan · {impact.review.changedAmounts} nominal berubah · isu terbuka {impact.review.issuesBefore} → {impact.review.issuesAfter} dari {impact.review.touchedDates} tanggal terdampak.</Note> : <Note tone="warn">{impact.review.note}</Note>}
-      {impact.registers?.map(r => <p key={r.incomingKey}>{r.label}: {r.selectedRows} peserta; {r.targetCount ? `${r.targetCount} scope register lama diganti` : 'ditambahkan'} · {r.counts.added} tambah, {r.counts.changed} berubah, {r.counts.removed} hilang dari scope, {r.counts.ambiguous} ambigu.</p>)}
-      {impact.changes.length > 0 ? <><div className="table-wrap"><table className="data"><thead><tr><th>Perubahan</th><th>Catatan lama</th><th>Catatan baru</th><th>Field berubah</th></tr></thead><tbody>{impact.changes.map((row,i) => <tr key={`${row.kind}-${row.status}-${row.after?.ref ?? row.before?.ref}-${i}`}><td>{changeStatus[row.status]} · {row.kind === 'presensi' ? 'Presensi' : row.kind === 'surat-tugas' ? 'Surat tugas' : 'Master'}{row.status === 'ambiguous' ? ` (${row.countBefore ?? 0} → ${row.countAfter ?? 0})` : ''}</td><td>{sourceValue(row.before)}</td><td>{sourceValue(row.after)}</td><td>{row.changedFields.join(', ') || '—'}</td></tr>)}</tbody></table></div>
-        {impact.totalChanges > impact.limit && <div className="form-actions"><button className="btn secondary" disabled={!impact.offset || loadingImpact} onClick={() => void requestImpact(Math.max(0, impact.offset - impact.limit))}>Sebelumnya</button><span>Baris {impact.offset + 1}–{impact.offset + impact.changes.length} dari {impact.totalChanges}</span><button className="btn secondary" disabled={!impact.hasMore || loadingImpact} onClick={() => void requestImpact(impact.offset + impact.limit)}>Berikutnya</button></div>}</> : <p>Tidak ada record baru/berubah/dihapus dalam scope yang dipilih.</p>}
-      {impact.review.examples.length > 0 && <details><summary>Contoh hari pegawai yang berubah ({impact.review.examples.length})</summary><div className="table-wrap"><table className="data"><thead><tr><th>Pegawai/tanggal</th><th>Sebelum</th><th>Sesudah</th></tr></thead><tbody>{impact.review.examples.map(day => <tr key={`${day.employeeId}|${day.date}`}><td>{day.name}<br />{day.date}</td><td>{day.before.status} · {day.before.mealState} · {day.before.clockIn}–{day.before.clockOut} · {day.before.issues} isu</td><td>{day.after.status} · {day.after.mealState} · {day.after.clockIn}–{day.after.clockOut} · {day.after.issues} isu</td></tr>)}</tbody></table></div></details>}
-      <label className="review-confirm"><input type="checkbox" checked={confirmedKey === intentKey} onChange={e => setConfirmedKey(e.target.checked ? intentKey : '')} /> Saya sudah memeriksa diff, scope penggantian, dan dampak hari UM.</label>
-      <button className="btn primary" onClick={() => void commit()} disabled={busy || loadingImpact || !impactCurrent || confirmedKey !== intentKey || hr.saveStatus !== 'saved'}>{busy ? 'Menyimpan…' : 'Konfirmasi impor'}</button>
-    </section>}
-    {impact && !impactCurrent && <p role="status" className="muted">Pilihan impor berubah. Hitung ulang diff dan dampaknya sebelum konfirmasi.</p>}
-  </Panel>
 }

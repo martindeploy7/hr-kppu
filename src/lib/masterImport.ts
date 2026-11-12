@@ -13,6 +13,8 @@ export const MASTER_COLUMNS: { header: string; key: keyof Employee; example: str
   { header: 'Status Kepegawaian', key: 'statusKepegawaian', example: 'PPPK' },
   { header: 'Golongan', key: 'golongan', example: 'IX' },
   { header: 'Jabatan', key: 'jabatan', example: 'Penata Kelola Persaingan Usaha' },
+  { header: 'Peringkat Jabatan', key: 'peringkatJabatan', example: '7' },
+  { header: 'Jenis Jabatan', key: 'jenisJabatan', example: 'Fungsional' },
   { header: 'Tanggal Lahir', key: 'tanggalLahir', example: '1989-08-24' },
   { header: 'Tempat Lahir', key: 'tempatLahir', example: 'Jakarta' },
   { header: 'Jenis Kelamin', key: 'jenisKelamin', example: 'Laki-laki' },
@@ -23,6 +25,8 @@ export const MASTER_COLUMNS: { header: string; key: keyof Employee; example: str
   { header: 'Disiplin Ilmu', key: 'disiplinIlmu', example: 'Hukum' },
   { header: 'Pelatihan', key: 'pelatihan', example: 'Hukum Persaingan Usaha; Investigasi' },
   { header: 'Tanggal Mulai Kerja', key: 'tanggalMulaiKerja', example: '2024-01-02' },
+  { header: 'Tanggal Pensiun', key: 'tanggalPensiun', example: '2049-08-24' },
+  { header: 'Tanggal Pengunduran Diri', key: 'tanggalPengunduranDiri', example: '2026-08-31' },
   { header: 'Alamat', key: 'alamat', example: '' },
   { header: 'Nama Kontak Darurat', key: 'namaKontakDarurat', example: '' },
   { header: 'Kontak Darurat', key: 'kontakDarurat', example: '' },
@@ -36,7 +40,7 @@ export type MasterPreview = MasterRow & { action: 'baru' | 'perbarui' | 'tetap' 
 const norm = (s: unknown) => String(s ?? '').toLowerCase().replace(/[^a-z]/g, '')
 const aliases: Record<string, keyof Employee> = { nipppk: 'nip', nippppk: 'nip', nippegawai: 'nip', namapegawai: 'nama', namalengkap: 'nama', namapppk: 'nama', unitkerja: 'unit', statuspegawai: 'statusKepegawaian' }
 const columnOf = (v: unknown) => MASTER_COLUMNS.find(c => norm(c.header) === norm(v) || norm(c.key) === norm(v))?.key ?? aliases[norm(v)]
-const dateKeys: (keyof Employee)[] = ['tanggalLahir', 'tanggalMulaiKerja']
+const dateKeys: (keyof Employee)[] = ['tanggalLahir', 'tanggalMulaiKerja', 'tanggalPensiun', 'tanggalPengunduranDiri']
 const display = (v: unknown) => Array.isArray(v) ? v.join('; ') : String(v ?? '')
 const nonempty = (v: unknown) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length)
 

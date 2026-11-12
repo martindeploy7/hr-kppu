@@ -14,7 +14,7 @@ export function RecordReview({ file, kind, recordId }: { file: SourceFile; kind:
   const [open, setOpen] = useState(false), [reason, setReason] = useState(''), [preview, setPreview] = useState<RecordReviewPreview | null>(null), [confirmed, setConfirmed] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [page, setPage] = useState(0)
   const id = useRef(crypto.randomUUID())
   const record = (kind === 'evidence' ? file.evidence : file.assignments).find(r => r.id === recordId)
-  const editable = ['admin', 'hr'].includes(user.role) && currentState !== 'not-selected' && (!user.offices?.length || user.offices.includes(record?.office ?? ''))
+  const editable = ['superadmin', 'admin'].includes(user.role) && currentState !== 'not-selected' && (!user.offices?.length || user.offices.includes(record?.office ?? ''))
   const excluded = currentState !== 'active'
   const superseded = (file.assignmentImport?.supersessions ?? []).filter(s => s.recordIds.includes(recordId)).at(-1)
   useEffect(() => { setPreview(null); setConfirmed(false) }, [reason, hr.revision, latest?.id])

@@ -3,6 +3,7 @@ import type { Roster } from './roster.ts'
 import { eachDay, formatID, isWeekend, toMinutes } from './dates.ts'
 import { enforcePolicy, golGroup, type GolGroup, type MealPolicy } from './policy.ts'
 import { DAY_CODE_LABEL } from './parsers/common.ts'
+import { OFFICES } from './ids.ts'
 import { effectiveSource } from './recordReviews.ts'
 import { dayReviewKey, dayReviewProblem, daySourceSignature, stableStringify, unresolvedIdentityEvidence } from './dayReview.ts'
 import { nameKey } from './names.ts'
@@ -15,7 +16,10 @@ export type DayRecord = {
   date: ISODate
   workday: boolean
   covered: boolean
+  sourceCoverageComplete: boolean
   reviewState: 'valid' | 'flag' | 'not-found' | 'future'
+  /** Hari tanpa clash disahkan otomatis oleh sistem; admin tetap dapat menimpa lewat keputusan harian. */
+  autoValidated?: boolean
   reviewSignature: string
   decision?: DayReview
   reviewError?: string
@@ -25,6 +29,7 @@ export type DayRecord = {
   basis: string
   clockIn?: string
   clockOut?: string
+  scheduleKnown: boolean
   lateMin: number
   earlyMin: number
   overtimeMin: number
@@ -32,7 +37,8 @@ export type DayRecord = {
   timeKnown: boolean
   issues: Issue[]
   resolved: Resolution[]
-  meal: { state: MealState; reason: string; amount: number; amountReady?: boolean; taxPct?: number }
+  /** estimate: nominal yang akan dibayar bila hari ini hanya tertahan karena setoran pekan belum lengkap. */
+  meal: { state: MealState; reason: string; amount: number; amountReady?: boolean; taxPct?: number; estimate?: number }
 }
 
 export type EmployeeMonth = {
@@ -57,6 +63,9 @@ export type EmployeeMonth = {
   overtimeMinutes: number
   mealDays: number
   heldDays: number
+  /** Hari eligible yang hanya menunggu setoran pekan lengkap, beserta perkiraan nominalnya. */
+  estimateDays: number
+  estimateBruto: number
   group: GolGroup
   groupAssumed: boolean
   rate: number
@@ -65,6 +74,8 @@ export type EmployeeMonth = {
   pph: number
   netto: number
   openIssues: number
+  /** Isu pemblokir (clash) yang belum diputuskan; isu informasi tidak menahan pengajuan. */
+  openClashes: number
   amountPendingDays: number
   nettoReady: boolean
 }
@@ -95,7 +106,7 @@ export const ISSUE_LABEL: Record<IssueType, string> = {
   'wfo-di-luar-kantor': 'WFO dengan koordinat di luar kantor',
   'jam-duplikat': 'Jam identik dengan hari sebelumnya',
   'jam-manual': 'Jam diisi manual (absen error)',
-  'jadwal-tidak-sesuai': 'Jadwal kerja mesin tidak sesuai',
+  'jadwal-tidak-sesuai': 'Jadwal kerja perlu dipastikan',
   'hadir-hari-libur': 'Absen di hari libur',
   'wfa-saat-dinas': 'Presensi WFA saat dinas',
   'st-tanpa-nomor': 'Penugasan tanpa nomor ST',
@@ -125,7 +136,7 @@ export function locationCentroids(files: SourceFile[]): Record<string, [number, 
   return out
 }
 
-export function reconcile(files: SourceFile[], roster: Roster, period: { start: ISODate; end: ISODate }, policy: MealPolicy, resolutions: Resolution[], asOf = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date()), dayReviews: DayReview[] = []): Reconciliation {
+export function reconcile(files: SourceFile[], roster: Roster, period: { start: ISODate; end: ISODate }, policy: MealPolicy, resolutions: Resolution[], asOf = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date()), dayReviews: DayReview[] = [], isSourceCoverageComplete?: (office: string, date: ISODate) => boolean): Reconciliation {
   const sourceFiles = files.filter(f => f.active !== false)
   files = sourceFiles.map(effectiveSource)
   policy = enforcePolicy(policy)
@@ -159,7 +170,10 @@ export function reconcile(files: SourceFile[], roster: Roster, period: { start: 
   const stByEmp = new Map<string, Assignment[]>()
   const officesWithRegister = new Set<string>()
   for (const f of files) if (f.kind === 'surat-tugas') {
+    // Setoran ST mingguan bersifat seluruh KPPU; register juga dicatat per kantor peserta.
     officesWithRegister.add(f.office)
+    for (const a of f.assignments) officesWithRegister.add(a.office)
+    if (f.office === 'Semua kantor') for (const office of OFFICES) officesWithRegister.add(office)
     for (const a of f.assignments) {
       if (a.end < period.start || a.start > period.end) continue
       const id = roster.assignmentLink.get(a.id)
@@ -169,10 +183,14 @@ export function reconcile(files: SourceFile[], roster: Roster, period: { start: 
     }
   }
 
-  const rawRowsByOfficeDate = new Map<string, { file: SourceFile; kind: 'evidence' | 'assignment'; id: string; name: string; office: string; date?: ISODate; start?: ISODate; end?: ISODate; ids?: Evidence['ids']; nip?: string }[]>()
-  const addRawRow = (key: string, row: { file: SourceFile; kind: 'evidence' | 'assignment'; id: string; name: string; office: string; date?: ISODate; start?: ISODate; end?: ISODate; ids?: Evidence['ids']; nip?: string }) => {
+  // Performa: nama dinormalisasi sekali per nama dan status/fakta baris disimpan sekali per baris (bukan per pegawai-hari).
+  const nkCache = new Map<string, string>()
+  const nameKeyCache = (name: string) => { let v = nkCache.get(name); if (v === undefined) { v = nameKey(name); nkCache.set(name, v) } return v }
+  const rowStateCache = new Map<string, string>()
+  const rawRowsByOfficeDate = new Map<string, { nk?: string; file: SourceFile; kind: 'evidence' | 'assignment'; id: string; name: string; office: string; date?: ISODate; start?: ISODate; end?: ISODate; ids?: Evidence['ids']; nip?: string; employeeId?: string }[]>()
+  const addRawRow = (key: string, row: { file: SourceFile; kind: 'evidence' | 'assignment'; id: string; name: string; office: string; date?: ISODate; start?: ISODate; end?: ISODate; ids?: Evidence['ids']; nip?: string; employeeId?: string }) => {
     const list = rawRowsByOfficeDate.get(key) ?? []
-    list.push(row); rawRowsByOfficeDate.set(key, list)
+    list.push({ ...row, nk: nameKeyCache(row.name) }); rawRowsByOfficeDate.set(key, list)
   }
   for (const file of sourceFiles) {
     for (const evidence of file.evidence) if (evidence.date >= period.start && evidence.date <= period.end) addRawRow(`${evidence.office}|${evidence.date}`, { file, kind: 'evidence', id: evidence.id, name: evidence.name, office: evidence.office, date: evidence.date, ids: evidence.ids })
@@ -180,39 +198,66 @@ export function reconcile(files: SourceFile[], roster: Roster, period: { start: 
       const start = assignment.start > period.start ? assignment.start : period.start
       const end = assignment.end < period.end ? assignment.end : period.end
       if (start > end) continue
-      for (const date of eachDay(start, end)) addRawRow(`${assignment.office}|${date}`, { file, kind: 'assignment', id: assignment.id, name: assignment.name, office: assignment.office, start: assignment.start, end: assignment.end, nip: assignment.nip })
+      for (const date of eachDay(start, end)) addRawRow(`${assignment.office}|${date}`, { file, kind: 'assignment', id: assignment.id, name: assignment.name, office: assignment.office, start: assignment.start, end: assignment.end, nip: assignment.nip, employeeId: assignment.employeeId })
     }
   }
 
-  const unresolvedAssignments = files.flatMap(f => f.assignments).filter(a => !roster.assignmentLink.has(a.id))
+  const unresolvedAssignments = files.flatMap(f => f.assignments).filter(a => !roster.assignmentLink.has(a.id) && a.end >= period.start && a.start <= period.end)
+  // Peserta ST yang belum tertaut hanya menahan pegawai yang namanya mungkin cocok, bukan seluruh kantor.
+  const unresolvedStByEmployee = new Map<string, Assignment[]>()
+  if (unresolvedAssignments.length) {
+    // Tahan hanya kandidat yang diusulkan pencocok nama ST (status ambigu); nama tanpa kandidat tidak menahan siapa pun.
+    const candidatesByName = new Map<string, string[]>()
+    for (const item of roster.identity) if (item.context === 'surat-tugas' && item.status === 'ambiguous') candidatesByName.set(`${item.office}|${item.name}`, item.candidates.map(c => c.employeeId))
+    for (const a of unresolvedAssignments) for (const id of candidatesByName.get(`${a.office}|${a.name}`) ?? []) {
+      const list = unresolvedStByEmployee.get(id) ?? []
+      list.push(a); unresolvedStByEmployee.set(id, list)
+    }
+  }
+
   const months: EmployeeMonth[] = []
   const allIssues: Issue[] = []
   for (const employee of roster.employees) {
+    const startDate = /^\d{4}-\d{2}-\d{2}$/.test(employee.tanggalMulaiKerja) ? employee.tanggalMulaiKerja : undefined
+    const employeeWorkdays = workdays.filter(date => (!startDate || date >= startDate) && date <= asOf)
     const empId = employee.id
     const evs = evByEmp.get(empId) ?? []
     const sts = stByEmp.get(empId) ?? []
     const spans = coverage.get(empId) ?? []
     const evByDate = groupBy(evs, e => e.date)
+    const employeeNameKey = nameKeyCache(employee.nama)
+    const identityContext = roster.identity.filter(i => i.employeeId === employee.id).map(({ sampleRefs: _sampleRefs, ...stable }) => stableStringify(stable)).sort()
     const records: DayRecord[] = []
     for (const date of days) {
+      if (startDate && date < startDate) continue
       const dayEv = evByDate.get(date) ?? []
       const daySt = sts.filter(a => a.start <= date && a.end >= date)
       const workday = workdays.includes(date)
       if (!workday && !dayEv.some(hasPresence)) continue
-      const covered = spans.some(s => date >= s.start && date <= s.end) || dayEv.length > 0
+      const sourceCoverageComplete = isSourceCoverageComplete?.(employee.kantor, date) ?? false
+      const covered = spans.some(s => date >= s.start && date <= s.end) || dayEv.length > 0 || sourceCoverageComplete
       const isPartial = dayEv.some(e => partial.has(`${e.fileId}|${date}`))
-      const identityContext = roster.identity.filter(i => i.employeeId === employee.id).map(i => JSON.stringify(i)).sort()
       const recordStates = (rawRowsByOfficeDate.get(`${employee.kantor}|${date}`) ?? []).filter(row => {
         if (row.kind === 'evidence') {
           const ids = row.ids ?? {}
           const aliases = employee.aliases ?? []
           const numericMatch = (!!employee.nip && ids.nip === employee.nip) || (!!employee.nika && ids.nika === employee.nika) || aliases.some(a => (a.kind === 'nip' && a.value === ids.nip) || (a.kind === 'nika' && a.value === ids.nika) || (a.kind === 'mesin' && a.value === ids.mesin) || (a.kind === 'app' && a.value === ids.appId))
-          return numericMatch || nameKey(row.name) === nameKey(employee.nama)
+          return numericMatch || row.nk === employeeNameKey
         }
-        return (!!employee.nip && row.nip === employee.nip) || nameKey(row.name) === nameKey(employee.nama)
+        return row.employeeId ? row.employeeId === employee.id : (!!employee.nip && row.nip === employee.nip) || row.nk === employeeNameKey
       }).map(row => {
-        const reviews = row.file.recordReviews?.filter(review => review.kind === row.kind && review.recordId === row.id) ?? []
-        return `${row.kind}:${row.file.id}:${row.id}:${sourceRecordState(row.file, row.kind, row.id)}:${reviews.map(stableStringify).join(',')}`
+        const cacheKey = `${row.file.id}|${row.kind}|${row.id}`
+        const cached = rowStateCache.get(cacheKey)
+        if (cached !== undefined) return cached
+        const record = row.kind === 'evidence' ? row.file.evidence.find(item => item.id === row.id) : row.file.assignments.find(item => item.id === row.id)
+        if (!record) return `${row.kind}:${sourceRecordState(row.file, row.kind, row.id)}`
+        const facts = row.kind === 'evidence'
+          ? (({ id: _id, fileId: _fileId, ref: _ref, ...value }) => value)(record as Evidence)
+          : (({ id: _id, fileId: _fileId, ref: _ref, dateRef: _dateRef, ...value }) => value)(record as Assignment)
+        const reviewHistory = (row.file.recordReviews ?? []).filter(review => review.kind === row.kind && review.recordId === row.id).map(review => review.disposition)
+        const value = `${row.kind}:${stableStringify(facts)}:${sourceRecordState(row.file, row.kind, row.id)}:${stableStringify(reviewHistory)}`
+        rowStateCache.set(cacheKey, value)
+        return value
       }).sort()
       const reviewSignature = daySourceSignature(employee, date, dayEv, daySt, { covered, partial: isPartial, identity: identityContext, recordStates })
       const proposedReview = dayReviewMap.get(dayReviewKey(employee.id, date))
@@ -222,8 +267,20 @@ export function reconcile(files: SourceFile[], roster: Roster, period: { start: 
       const selectedEvidence = dayReview ? visibleEvidence.filter(e => dayReview.evidenceIds.includes(e.id)) : visibleEvidence
       const selectedAssignments = dayReview ? daySt.filter(a => dayReview.assignmentIds.includes(a.id)) : daySt
       const rec = evaluateDay(employee, date, workday, covered, selectedEvidence, selectedAssignments, sts, officesWithRegister, centroids, policy, resolutionMap, isPartial, reviewSignature, dayReview, dayEv, daySt, reviewError)
-      if (rec.meal.state === 'eligible' && unresolvedAssignments.some(a => a.office === employee.kantor && a.start <= date && a.end >= date)) { rec.meal = { state: 'held', amount: 0, reason: 'Peserta ST pada kantor/tanggal ini belum terpetakan; selesaikan pencocokan identitas' }; rec.reviewState = 'flag' }
+      rec.sourceCoverageComplete = isSourceCoverageComplete?.(employee.kantor, date) ?? true
+      // Nama peserta ST yang belum dicocokkan diperiksa sebelum cakupan setoran, agar perkiraan UM tidak memuat hari yang mungkin dinas.
+      const unresolvedSt = unresolvedStByEmployee.get(employee.id)?.find(a => a.start <= date && a.end >= date)
+      if (rec.meal.state === 'eligible' && unresolvedSt) { rec.meal = { state: 'held', amount: 0, reason: `Nama "${unresolvedSt.name}" pada ST ${unresolvedSt.letterNo ?? ''} belum dicocokkan dan bisa jadi pegawai ini; selesaikan di Pencocokan Identitas` }; rec.reviewState = 'flag'; rec.autoValidated = false }
+      if (workday && rec.meal.state === 'eligible' && !rec.sourceCoverageComplete) {
+        rec.meal = { state: 'held', amount: 0, estimate: rec.meal.amountReady ? rec.meal.amount : undefined, reason: 'Setoran pekan ini belum lengkap (Offline, Online, dan ST); UM final setelah ketiga sumber disetor' }
+      }
+      if (workday && rec.reviewState === 'not-found' && !rec.decision) {
+        rec.meal = rec.sourceCoverageComplete
+          ? { state: 'excluded', amount: 0, reason: 'Tidak ada bukti kehadiran pada setoran pekan ini' }
+          : { state: 'held', amount: 0, reason: 'Belum ada data; menunggu setoran pekan ini lengkap' }
+      }
       if (unresolvedIdentityEvidence(selectedEvidence, employee.id, roster.identity).length) { rec.meal = { state: 'held', amount: 0, reason: 'Identifier numerik belum terverifikasi; perbaiki/mapping sumber' }; rec.reviewState = 'flag' }
+      if (selectedEvidence.some(e => e.officePending)) { rec.meal = { state: 'held', amount: 0, reason: 'Kantor sumber belum terpetakan; konfirmasi kantor sebelum mereview hari ini' }; rec.reviewState = 'flag' }
       if (date > asOf) {
         rec.status = 'belum-berlangsung'; rec.basis = 'Tanggal setelah waktu analisis'
         rec.meal = { state: 'held', amount: 0, reason: 'Tanggal belum berlangsung' }
@@ -232,7 +289,7 @@ export function reconcile(files: SourceFile[], roster: Roster, period: { start: 
       records.push(rec)
       allIssues.push(...rec.issues)
     }
-    months.push(summarize(employee, records, workdays.length, policy))
+    months.push(summarize(employee, records, employeeWorkdays.length, policy))
   }
   months.sort((a, b) => a.employee.kantor.localeCompare(b.employee.kantor) || a.employee.nama.localeCompare(b.employee.nama))
   return { period, workdays, months, issues: allIssues, officeCentroids: centroids }
@@ -260,7 +317,9 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   const officeEv = evs.filter(e => OFFICE_KINDS.includes(e.kind) && hasPresence(e) && !(e.code && LEAVE.has(e.code)) && e.mode !== 'WFA')
   const daringWfo = daring.filter(e => e.mode === 'WFO' && e.approved !== false && e.clockIn)
   const remoteEv = [...daring.filter(e => e.mode === 'WFA' && e.approved !== false && e.clockIn), ...evs.filter(e => e.kind !== 'daring' && e.mode === 'WFA' && hasPresence(e))]
-  const rejected = daring.filter(e => e.approved === false)
+  const rejected = daring.filter(e => e.approvalStatus === 'rejected' || (!e.approvalStatus && e.approved === false))
+  // Laporan matriks online tidak memuat kolom persetujuan ('not-reported'): itu batas format, bukan status Pending.
+  const approvalPending = daring.some(e => e.approvalStatus === 'pending' || e.approvalStatus === 'unknown')
   const stOut = sts.filter(a => !a.local), stLocal = sts.filter(a => a.local)
   const presenceEv = [...officeEv, ...daringWfo, ...remoteEv]
 
@@ -268,14 +327,39 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   const paired = presenceEv.filter(e => e.clockIn && e.clockOut && e.clockOut >= e.clockIn)
   const unique = (values: (string | undefined)[]) => [...new Set(values.filter((value): value is string => !!value))]
   const clockIns = unique(presenceEv.map(e => e.clockIn)), clockOuts = unique(presenceEv.map(e => e.clockOut))
-  const clockIn = clockIns.length === 1 ? clockIns[0] : undefined
-  const clockOut = clockOuts.length === 1 ? clockOuts[0] : undefined
+  const schedules = [...new Map(evs.filter(e => e.schedule && !e.notes?.includes('jadwal-puasa') && !/\basumsi\b/i.test(e.schedule.label)).map(e => [JSON.stringify(e.schedule), e.schedule!])).values()]
+  const inRamadan = date >= policy.ramadan.start && date <= policy.ramadan.end
+  // Jadwal resmi KPPU (mesin Pusat): Sen–Kam 08:00–16:00, Jumat 08:00–16:30. Dipakai bila bukti tidak membawa jadwal.
+  const official = schedules.length === 1 ? schedules[0] : schedules.length === 0 && !inRamadan ? defaultSchedule(date) : undefined
+  // Jam berbeda tipis antar sumber (mis. mesin 07:30–16:22 dan online 07:31–16:14) bukan clash bila semua pasangan
+  // memberi putusan UM yang sama. Dipakai satu pasangan utuh dari satu sumber (mesin lebih dulu), tidak dirakit.
+  const onTime = (time: string) => policy.arrivalBoundary === 'exclusive' ? time < '08:00' : time <= '08:00'
+  const allPaired = presenceEv.filter(hasTimes).every(e => paired.includes(e))
+  const pairVerdicts = official ? new Set(paired.map(e => onTime(e.clockIn!) && e.clockOut! >= official.end)) : new Set<boolean>()
+  // Signature isu dihitung lebih awal agar keputusan "pakai jam mesin offline" bisa memilih pasangan jam sebelum evaluasi.
+  const issueSignature = stableStringify({ employee: [employee.id, employee.kantor, employee.workStatusPeriods?.filter(s => s.start <= date && s.end >= date)], date, workday, partialDay, evs: [...new Set(evs.map(({ id, fileId, ref, ...e }) => stableStringify(e)))].sort(), sts: [...new Set(sts.map(({ id, fileId, ref, dateRef, ...a }) => stableStringify(a)))].sort() })
+  const scanDecision = resolutions.get(`${employee.id}|${date}|scan-berbeda`)
+  const machinePair = paired.find(e => OFFICE_KINDS.includes(e.kind))
+  const agreedByVerdict = (clockIns.length > 1 || clockOuts.length > 1) && allPaired && paired.length > 1 && new Set(paired.map(e => e.kind)).size === paired.length && pairVerdicts.size === 1 ? (paired.find(e => e.kind === 'mesin') ?? paired[0]) : undefined
+  // Hari WFA: baris mesin berkode WFA hanya mencerminkan status WFA (scan parsial); jam sah berasal dari presensi online WFA.
+  const unpairedTimed = presenceEv.filter(hasTimes).filter(e => !paired.includes(e))
+  const onlineWfaPairs = paired.filter(e => e.kind === 'daring' && e.mode === 'WFA')
+  const wfaPair = !agreedByVerdict && (clockIns.length > 1 || clockOuts.length > 1) && paired.length === 1 && onlineWfaPairs.length === 1 && unpairedTimed.length > 0 && unpairedTimed.every(e => e.kind !== 'daring' && e.mode === 'WFA') ? onlineWfaPairs[0] : undefined
+  // Satu pasangan lengkap + scan parsial di sumber lain yang tidak bertentangan (mis. mesin 06:43–— dan online 06:42–16:04):
+  // scan parsial menguatkan, bukan clash. Bertentangan bila jam parsial memberi putusan tepat waktu/pulang yang berbeda.
+  const soloPair = paired.length === 1 ? paired[0] : undefined
+  const partialAgrees = !!soloPair && !!official && unpairedTimed.length > 0 && unpairedTimed.every(e =>
+    (!e.clockIn || onTime(e.clockIn) === onTime(soloPair.clockIn!)) && (!e.clockOut || (e.clockOut >= official.end) === (soloPair.clockOut! >= official.end)))
+  const confirmedPair = !agreedByVerdict && !wfaPair && (clockIns.length > 1 || clockOuts.length > 1) && partialAgrees ? soloPair : undefined
+  // Admin memutuskan jam mesin offline yang berlaku (decision akui-hadir pada isu scan-berbeda).
+  const agreedPair = agreedByVerdict ?? wfaPair ?? confirmedPair ?? (scanDecision?.decision === 'akui-hadir' && scanDecision.signature === issueSignature && machinePair && (clockIns.length > 1 || clockOuts.length > 1) ? machinePair : undefined)
+  const clockIn = agreedPair ? agreedPair.clockIn : clockIns.length === 1 ? clockIns[0] : undefined
+  const clockOut = agreedPair ? agreedPair.clockOut : clockOuts.length === 1 ? clockOuts[0] : undefined
   const timeKnown = !!(clockIn || clockOut)
-  const complete = !!(clockIn && clockOut && clockOut >= clockIn && paired.some(e => e.clockIn === clockIn && e.clockOut === clockOut) && new Set(paired.map(e => `${e.clockIn}|${e.clockOut}`)).size === 1)
-  const schedules = [...new Map(evs.filter(e => e.schedule && !e.notes?.includes('jadwal-puasa')).map(e => [JSON.stringify(e.schedule), e.schedule!])).values()]
-  const official = schedules.length === 1 ? schedules[0] : defaultSchedule(date)
+  const complete = !!agreedPair || !!(clockIn && clockOut && clockOut >= clockIn && paired.some(e => e.clockIn === clockIn && e.clockOut === clockOut) && new Set(paired.map(e => `${e.clockIn}|${e.clockOut}`)).size === 1)
+  const scheduleKnown = !!official
   const lateMin = clockIn ? Math.max(0, Math.ceil(toMinutes(clockIn)! - 8 * 60)) : 0
-  const earlyMin = clockOut && clockIn ? Math.max(0, Math.ceil(toMinutes(official.end)! - toMinutes(clockOut)!)) : 0
+  const earlyMin = official && clockOut && clockIn ? Math.max(0, Math.ceil(toMinutes(official.end)! - toMinutes(clockOut)!)) : 0
   const overtimeMin = Math.max(0, ...evs.map(e => e.overtimeMin ?? 0))
 
   const leaveCode = [...codes].find(c => LEAVE.has(c))
@@ -291,10 +375,19 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   if (codes.has('DL') || stLocal.length) candidates.add('dinas-lokal')
   if (officePresence) candidates.add(complete ? 'hadir' : 'tidak-lengkap')
   if (remoteEv.length) candidates.add(complete ? 'hadir-wfa' : 'tidak-lengkap')
-  if (codes.has('WFA') && !remoteEv.length || rejected.length || codes.has('T')) candidates.add('tidak-lengkap')
-  if (candidates.size > 1) add('status-berbeda', 'tinggi', `Status berbeda antar-bukti: ${[...candidates].map(s => STATUS_LABEL[s]).join(', ')}. Admin perlu memilih catatan dan status harian yang berlaku.`, true)
+  // Presensi online yang ditolak tidak menjadi clash bila sumber lain sudah membuktikan kehadiran.
+  if (codes.has('WFA') && !remoteEv.length || (rejected.length && !officePresence && !remoteEv.length) || approvalPending || codes.has('T')) candidates.add('tidak-lengkap')
+  // Hadir di kantor vs hadir WFA sama-sama kehadiran: bila satu pasangan jam sudah dipilih (putusan sama atau keputusan
+  // admin), jenis kehadiran mengikuti pasangan itu dan tidak menjadi konflik status.
+  if (agreedPair && candidates.has('hadir') && candidates.has('hadir-wfa')) candidates.delete(agreedPair.kind === 'daring' && agreedPair.mode === 'WFA' ? 'hadir' : 'hadir-wfa')
+  // Clash hanya bila salah satu sisi benar-benar bisa mendapat UM (pasangan jam lengkap, masuk ≤ batas, pulang ≥ jadwal).
+  // Bila semua kemungkinan berujung tanpa UM (mis. kode DL + scan masuk saja), status dipilih otomatis dan dicatat sebagai info.
+  const couldEarnMeal = complete && !!clockIn && !!clockOut && onTime(clockIn) && (!official || clockOut >= official.end)
+  const STATUS_PRIORITY: DayStatus[] = ['dinas-luar', 'dinas-lokal', 'diklat', 'sakit', 'cuti', 'izin', 'tidak-lengkap']
+  if (candidates.size > 1) add('status-berbeda', 'tinggi', `Status berbeda antar-bukti: ${[...candidates].map(s => STATUS_LABEL[s]).join(', ')}. Admin perlu memilih catatan dan status harian yang berlaku.`, couldEarnMeal)
   if (!workday) { status = presenceEv.length ? 'hadir' : 'libur'; basis = presenceEv.length ? 'Ada absen pada hari libur' : 'Hari libur' }
-  else if (candidates.size > 1) { status = 'tidak-lengkap'; basis = 'Sumber mencatat status berbeda; menunggu keputusan admin' }
+  else if (candidates.size > 1 && couldEarnMeal) { status = 'tidak-lengkap'; basis = 'Sumber mencatat status berbeda; menunggu keputusan admin' }
+  else if (candidates.size > 1) { status = STATUS_PRIORITY.find(c => candidates.has(c)) ?? 'tidak-lengkap'; basis = `Sumber berbeda (${[...candidates].map(c => STATUS_LABEL[c]).join(', ')}), tetapi tidak ada bukti hadir yang memenuhi syarat UM; dipakai ${STATUS_LABEL[status]}` }
   else if (candidates.size === 1) {
     const candidate = [...candidates][0]
     status = candidate
@@ -313,15 +406,21 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   if (dayReview) { status = dayReview.status; basis = `Ditetapkan ${dayReview.reviewer}: ${STATUS_LABEL[dayReview.status]}` }
 
   // ---- deteksi isu ----
-  if (new Set(paired.map(e => `${e.clockIn}|${e.clockOut}`)).size > 1 || clockIns.length > 1 || clockOuts.length > 1) add('scan-berbeda', 'tinggi', 'Jam masuk/pulang berbeda antar-bukti terpilih; pilih bukti absensi yang berlaku.', true)
+  // Clash jam hanya menahan bila setidaknya satu pasangan jam lengkap bisa mendapat UM (tepat waktu dan tidak pulang cepat).
+  const anyPairEarns = paired.some(e => onTime(e.clockIn!) && (!official || e.clockOut! >= official.end))
+  if (confirmedPair) add('scan-berbeda', 'rendah', `Scan parsial di sumber lain sejalan dengan pasangan jam ${SOURCE_NAME[confirmedPair.kind] ?? confirmedPair.kind} ${confirmedPair.clockIn}–${confirmedPair.clockOut}; pasangan itu dipakai.`, false)
+  else if (wfaPair) add('scan-berbeda', 'rendah', `Mesin mencatat kode WFA dengan scan parsial; jam WFA dari presensi online (${wfaPair.clockIn}–${wfaPair.clockOut}) dipakai.`, false)
+  else if (agreedByVerdict) add('scan-berbeda', 'rendah', `Jam berbeda tipis antar sumber (${paired.map(e => `${SOURCE_NAME[e.kind] ?? e.kind} ${e.clockIn}–${e.clockOut}`).join('; ')}), putusan UM sama; dipakai ${SOURCE_NAME[agreedByVerdict.kind] ?? agreedByVerdict.kind}.`, false)
+  else if (new Set(paired.map(e => `${e.clockIn}|${e.clockOut}`)).size > 1 || clockIns.length > 1 || clockOuts.length > 1) add('scan-berbeda', 'tinggi', 'Jam masuk/pulang berbeda antar-bukti terpilih; pilih bukti absensi yang berlaku.', anyPairEarns)
   if (schedules.length > 1) add('jadwal-tidak-sesuai', 'sedang', 'Jadwal berbeda antar-bukti terpilih; pilih sumber jadwal yang berlaku sebelum menghitung pulang cepat.', true)
+  else if (!scheduleKnown && policy.requireNoEarlyLeave && timeKnown && workday) add('jadwal-tidak-sesuai', 'sedang', 'Bukti terpilih tidak memuat jadwal dan tanggal ini berada pada masa Ramadan. Konfirmasikan jadwal kerja sebelum menilai pulang cepat.', true)
   const scanAtOffice = officeEv.some(hasTimes) || daringWfo.length > 0
   if ((pdCode || stOut.length) && scanAtOffice) {
     const edge = stOut.some(a => a.start === date || a.end === date)
     const sev: Severity = stOut.length ? (edge ? 'rendah' : 'tinggi') : 'sedang'
-    add('dinas-vs-scan-kantor', sev, `${stOut.length ? `ST ${stOut.map(a => a.letterNo ?? '(tanpa nomor)').join(', ')} ${stOut[0].start === stOut[0].end ? formatID(stOut[0].start) : `${formatID(stOut[0].start, { year: false })}–${formatID(stOut[0].end)}`}` : 'Kode perjalanan dinas'} tetapi ada absen kantor ${clockIn ?? ''}${clockOut ? `–${clockOut}` : ''}.${edge ? ' Tanggal ini hari berangkat/pulang, sehingga scan pagi masih wajar.' : ''}`, true)
+    add('dinas-vs-scan-kantor', sev, `${stOut.length ? `ST ${stOut.map(a => a.letterNo ?? '(tanpa nomor)').join(', ')} ${stOut[0].start === stOut[0].end ? formatID(stOut[0].start) : `${formatID(stOut[0].start, { year: false })}–${formatID(stOut[0].end)}`}` : 'Kode perjalanan dinas'} tetapi ada absen kantor ${clockIn ?? ''}${clockOut ? `–${clockOut}` : ''}.${edge ? ' Tanggal ini hari berangkat/pulang, sehingga scan pagi masih wajar.' : ''}`, couldEarnMeal)
   }
-  if (leaveCode && presenceEv.some(hasTimes)) add('cuti-vs-hadir', 'sedang', `${DAY_CODE_LABEL[leaveCode as 'S']} tercatat, namun ada jam hadir ${clockIn ?? '—'}–${clockOut ?? '—'}.`, true)
+  if (leaveCode && presenceEv.some(hasTimes)) add('cuti-vs-hadir', 'sedang', `${DAY_CODE_LABEL[leaveCode as 'S']} tercatat, namun ada jam hadir ${clockIn ?? '—'}–${clockOut ?? '—'}.`, couldEarnMeal)
   const letters = new Map<string, Assignment>()
   for (const a of stOut) { const k = (a.letterNo ?? a.id).replace(/[^\w]/g, '').toLowerCase().replace(/^0+/, ''); if (!letters.has(k)) letters.set(k, a) }
   if (letters.size >= 2) {
@@ -357,22 +456,37 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   const resolved: Resolution[] = []
   let finalStatus = status, finalBasis = basis
   for (const issue of issues) {
-    issue.signature = stableStringify({ employee: [employee.id, employee.kantor, employee.workStatusPeriods?.filter(s => s.start <= date && s.end >= date)], date, workday, partialDay, evs: [...new Set(evs.map(({ id, fileId, ref, ...e }) => stableStringify(e)))].sort(), sts: [...new Set(sts.map(({ id, fileId, ref, dateRef, ...a }) => stableStringify(a)))].sort() })
+    issue.signature = issueSignature
     const r = resolutions.get(issue.id)
     if (!r || r.signature !== issue.signature) continue
     resolved.push(r)
-    if (!dayReview && r.decision === 'akui-hadir' && !sts.length && !pdCode && !codes.has('DL')) { finalStatus = complete ? (remoteEv.length && !officePresence ? 'hadir-wfa' : 'hadir') : 'tidak-lengkap'; finalBasis = `Diputuskan HR: hadir (${r.reviewer})` }
+    // Admin memilih absensi sebagai bukti yang valid (mis. ST batal); berlaku juga bila ada ST/kode dinas.
+    if (!dayReview && r.decision === 'akui-hadir') { finalStatus = complete ? (remoteEv.length && !officePresence ? 'hadir-wfa' : 'hadir') : 'tidak-lengkap'; finalBasis = `Diputuskan HR: hadir (${r.reviewer})` }
     if (!dayReview && r.decision === 'akui-dinas') { finalStatus = 'dinas-luar'; finalBasis = `Diputuskan HR: dinas (${r.reviewer})` }
     if (!dayReview && r.decision === 'tidak-hadir') { finalStatus = 'tanpa-keterangan'; finalBasis = `Diputuskan HR: tidak sah (${r.reviewer})` }
   }
   const open = issues.filter(i => !resolved.some(r => r.issueId === i.id))
   if (partialDay && finalStatus === 'tidak-lengkap' && clockIn && !clockOut) { finalStatus = remoteEv.length && !officePresence ? 'hadir-wfa' : 'hadir'; finalBasis = `${finalBasis} — jam pulang belum tersinkron (ekspor belum lengkap)` }
   const meal = partialDay && workday && (['tidak-lengkap', 'tidak-ada-data'].includes(finalStatus) || (['hadir', 'hadir-wfa'].includes(finalStatus) && !clockOut && timeKnown)) ? { state: 'held' as const, reason: 'Ditahan: data mesin belum lengkap, tunggu ekspor ulang', amount: 0 } : mealFor(employee, date, finalStatus, workday, complete, timeKnown, clockIn, lateMin, earlyMin, open, policy)
-  const reviewState = !workday ? (rawEvidence.length || rawAssignments.length ? 'flag' : 'not-found') : dayReview ? (open.length ? 'flag' : 'valid') : rawEvidence.length || rawAssignments.length ? 'flag' : 'not-found'
-  const reviewHeld = workday && !dayReview
-  const finalMeal = reviewHeld ? { state: 'held' as const, reason: reviewError ? `Keputusan perlu diperbarui: ${reviewError}` : rawEvidence.length || rawAssignments.length ? 'Menunggu admin memilih bukti dan menetapkan status hari' : 'Belum ditemukan data; pastikan hari ini sebelum mengesahkan status', amount: 0 } : meal
-  return { employeeId: employee.id, date, workday, covered, reviewState, reviewSignature, decision: dayReview, reviewError, evidence: rawEvidence, assignments: rawAssignments, status: finalStatus, basis: finalBasis, clockIn, clockOut, lateMin, earlyMin, overtimeMin, complete, timeKnown, issues, resolved, meal: finalMeal }
+  const hasSource = rawEvidence.length > 0 || rawAssignments.length > 0
+  // Clash = isu yang memblokir (status berbeda antar-sumber, ST vs absen kantor, jam berbeda, cuti vs hadir, dst.).
+  const clash = open.some(i => i.blocksMeal)
+  // Status persetujuan online Pending/tidak dikenal dan jenis kehadiran tak dikenal tetap menunggu admin.
+  const needsReview = approvalPending || codes.has('T')
+  // Hari yang clash-nya sudah diputuskan admin (resolusi isu pemblokir) sah, tetapi bukan "valid otomatis".
+  const decidedByAdmin = resolved.some(r => issues.some(i => i.id === r.issueId && i.blocksMeal))
+  const settled = workday && !dayReview && hasSource && !clash && !needsReview && !reviewError
+  const autoValidated = settled && !decidedByAdmin
+  const reviewState = !workday ? (hasSource ? 'flag' : 'not-found') : dayReview ? (open.length ? 'flag' : 'valid') : settled ? 'valid' : hasSource ? 'flag' : 'not-found'
+  const reviewHeld = workday && !dayReview && !settled
+  const autoMeal = settled && meal.state === 'held' && (finalStatus === 'tidak-lengkap' || finalStatus === 'tidak-ada-data') && !partialDay
+    ? { state: 'excluded' as const, reason: rawEvidence.some(e => e.present && !e.clockIn) ? `Sumber hanya mencatat kode ${rawEvidence.find(e => e.present && !e.clockIn)?.codeLabel ?? 'kehadiran'} tanpa jam; tidak membuktikan masuk ≤ 08:00` : finalStatus === 'tidak-ada-data' ? 'Sumber mencatat hari ini tanpa scan maupun keterangan; admin dapat mengoreksi lewat rekonsiliasi' : 'Scan masuk/pulang tidak lengkap atau presensi online tidak disetujui; admin dapat mengoreksi lewat rekonsiliasi', amount: 0 }
+    : meal
+  const finalMeal = reviewHeld ? { state: 'held' as const, reason: reviewError ? `Keputusan perlu diperbarui: ${reviewError}` : hasSource ? 'Clash antar-sumber: menunggu admin memilih bukti yang valid' : 'Belum ditemukan data absensi', amount: 0 } : autoMeal
+  return { employeeId: employee.id, date, workday, covered, sourceCoverageComplete: true, reviewState, autoValidated, reviewSignature, decision: dayReview, reviewError, evidence: rawEvidence, assignments: rawAssignments, status: finalStatus, basis: finalBasis, clockIn, clockOut, scheduleKnown, lateMin, earlyMin, overtimeMin, complete, timeKnown, issues, resolved, meal: finalMeal }
 }
+
+const SOURCE_NAME: Partial<Record<SourceKind, string>> = { mesin: 'mesin offline', daring: 'online', 'matriks-kanwil': 'mesin Kanwil', 'jadwal-kanwil': 'rekap manual Kanwil', 'laporan-kanwil': 'laporan Kanwil' }
 
 function describePresence(office: Evidence[], wfo: Evidence[]) {
   const parts: string[] = []
@@ -432,7 +546,7 @@ function mealFor(employee: Employee, date: ISODate, status: DayStatus, workday: 
 }
 
 function summarize(employee: Employee, days: DayRecord[], workdayCount: number, policy: MealPolicy): EmployeeMonth {
-  const wd = days.filter(d => d.workday)
+  const wd = days.filter(d => d.workday && d.reviewState !== 'future')
   const count = (s: DayStatus[]) => wd.filter(d => d.reviewState === 'valid' && s.includes(d.status)).length
   const { group, assumed } = golGroup(employee.golongan, employee.statusKepegawaian, policy.defaultGroup)
   const mealDays = wd.filter(d => d.meal.state === 'eligible').length
@@ -445,7 +559,7 @@ function summarize(employee: Employee, days: DayRecord[], workdayCount: number, 
     reviewedDays: wd.filter(d => d.reviewState === 'valid').length,
     flaggedDays: wd.filter(d => d.reviewState === 'flag').length,
     notFoundDays: wd.filter(d => d.reviewState === 'not-found').length,
-    futureDays: wd.filter(d => d.reviewState === 'future').length,
+    futureDays: days.filter(d => d.workday && d.reviewState === 'future').length,
     present: count(['hadir', 'hadir-wfa', 'dinas-lokal']),
     wfa: count(['hadir-wfa']),
     dutyOut: count(['dinas-luar']), dutyLocal: count(['dinas-lokal']),
@@ -458,8 +572,10 @@ function summarize(employee: Employee, days: DayRecord[], workdayCount: number, 
     earlyDays: wd.filter(d => d.reviewState === 'valid' && d.earlyMin > 0).length,
     overtimeMinutes: days.reduce((s, d) => s + (d.reviewState === 'valid' ? d.overtimeMin : 0), 0),
     mealDays, heldDays: wd.filter(d => d.meal.state === 'held').length,
+    estimateDays: wd.filter(d => d.meal.estimate).length, estimateBruto: wd.reduce((sum, d) => sum + (d.meal.estimate ?? 0), 0),
     amountPendingDays: wd.filter(d => d.meal.state === 'eligible' && !d.meal.amountReady).length,
     group, groupAssumed: assumed, rate, bruto, pphPct, pph, netto: policy.taxParametersApproved ? bruto - pph : 0, nettoReady: policy.taxParametersApproved === true,
     openIssues: days.reduce((s, d) => s + d.issues.filter(i => !d.resolved.some(r => r.issueId === i.id)).length, 0),
+    openClashes: days.reduce((s, d) => s + (d.workday && d.reviewState === 'flag' && !d.decision ? d.issues.filter(i => i.blocksMeal && !d.resolved.some(r => r.issueId === i.id)).length : 0), 0),
   }
 }

@@ -2,9 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { DayReview, Employee, RecordReview, Resolution, SourceFile, ValidatedDayStatus } from '../engine/types.ts'
 import { buildRoster, type Roster } from '../engine/roster.ts'
 import { reconcile, type Reconciliation } from '../engine/reconcile.ts'
-import { inspectMonthlyPackage, type MonthlyPackage } from '../engine/monthlyFlow.ts'
+import { createCoverageLookup, inspectMonthlyPackage, type MonthlyPackage } from '../engine/monthlyFlow.ts'
 import { enforcePolicy, type MealPolicy } from '../engine/policy.ts'
-import { eachDay, monthBounds } from '../engine/dates.ts'
+import { eachDay, monthBounds, weekRange, weeksInMonth, type WeekSlice } from '../engine/dates.ts'
 import { api, ApiError, downloadJson } from '../lib/api.ts'
 import { useAuth } from './Auth.tsx'
 import { emptyWorkspace, upsertEmployees, type Workspace, type WorkspaceResponse } from '../../shared/workspace.ts'
@@ -13,13 +13,15 @@ import type { ImportImpactResponse, ImportProposal } from '../../shared/imports.
 export type ImportResult = { name: string; ok: boolean; message: string }
 type Preview = { duplicate: boolean; file: SourceFile }
 type Ctx = Workspace & {
-  ready: boolean; roster: Roster; recordRoster: Roster; recon: Reconciliation; periods: string[]; activePeriod: string; monthlyPackage: MonthlyPackage
+  ready: boolean; roster: Roster; recordRoster: Roster; recon: Reconciliation; weekRecon: Reconciliation; weekSlice: WeekSlice; weekScope: 'month-part' | 'full'; periods: string[]; activePeriod: string; monthlyPackage: MonthlyPackage
   revision: number; saveStatus: 'loading' | 'saved' | 'saving' | 'error'; saveError: string
   retrySave: () => void; reload: () => Promise<void>; backup: () => void
-  previewFiles: (files: File[], dateOrder?: 'DMY' | 'MDY') => Promise<{ previews: Preview[]; results: ImportResult[] }>
+  previewFiles: (files: File[], dateOrder?: 'DMY' | 'MDY', weekly?: boolean) => Promise<{ previews: Preview[]; results: ImportResult[] }>
   previewImport: (proposal: ImportProposal) => Promise<ImportImpactResponse>
   commitImport: (proposal: ImportProposal, confirmedImpact: string) => Promise<void>
-  declareNilSt: (office: string, period: string, basis: string) => Promise<void>
+  declareNilSt: (office: string, start: string, end: string, basis: string) => Promise<void>
+  declareNotApplicable: (office: string, source: 'offline' | 'online' | 'surat-tugas', start: string, end: string, basis: string) => Promise<void>
+  declareFileCoverage: (sourceId: string, start: string, end: string, status: 'complete' | 'partial' | 'not-applicable', basis: string) => Promise<void>
   reviewRecord: (sourceId: string, input: { id: string; kind: RecordReview['kind']; recordId: string; disposition: RecordReview['disposition']; reason: string; confirmedImpact: string }) => Promise<void>
   restoreBackup: (state: Workspace) => Promise<void>
   removeFile: (id: string) => Promise<void>; setFileOffice: (id: string, office: string) => Promise<void>; clearAll: () => void
@@ -29,7 +31,7 @@ type Ctx = Workspace & {
   reviewDay: (input: { employeeId: string; date: string; status: ValidatedDayStatus; evidenceIds: string[]; assignmentIds: string[]; note: string; signature: string }) => void
   unreviewDay: (employeeId: string, date: string) => void
   resolve: (ids: string[], decision: Resolution['decision'], note: string) => void; unresolve: (ids: string[]) => void
-  setPolicy: (patch: Partial<MealPolicy>) => void; setPeriod: (period: string) => void; setReviewer: (name: string) => void
+  setPolicy: (patch: Partial<MealPolicy>) => void; setPeriod: (period: string) => void; selectWeek: (weekStart: string) => void; setWeekScope: (scope: 'month-part' | 'full') => void; setReviewer: (name: string) => void
 }
 const HrContext = createContext<Ctx | null>(null)
 export function useHr() { const ctx = useContext(HrContext); if (!ctx) throw new Error('useHr outside provider'); return ctx }
@@ -46,6 +48,15 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
   const apply = useCallback((r: WorkspaceResponse) => { base.current = r.state; current.current = r.state; setState(r.state); setRevision(r.revision); setReady(true); setSaveStatus('saved'); setSaveError('') }, [])
   const reload = useCallback(async () => { try { apply(await api<WorkspaceResponse>('/workspace')) } catch (e) { setSaveError((e as Error).message); setSaveStatus('error') } }, [apply])
   useEffect(() => { void reload() }, [reload])
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('demo') !== '1') return
+    const refreshDemo = (event: Event) => {
+      const done = (event as CustomEvent<{ done?: () => void }>).detail?.done
+      void reload().finally(() => done?.())
+    }
+    window.addEventListener('kppu-demo-refresh', refreshDemo)
+    return () => window.removeEventListener('kppu-demo-refresh', refreshDemo)
+  }, [reload])
   useEffect(() => {
     if (!ready) return
     let polling = false, disposed = false
@@ -97,7 +108,18 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
   const recordRoster = useMemo(() => files.some(f => f.recordReviews?.length) ? buildRoster(files, state.master, state.overrides, state.decisions, true) : roster, [files, state.master, state.overrides, state.decisions, roster])
   const periods = useMemo(() => [...new Set(files.flatMap(f => [...f.evidence.map(e => e.date.slice(0, 7)), ...f.assignments.flatMap(a => eachDay(a.start, a.end).map(d => d.slice(0, 7))) ]))].sort().reverse(), [files])
   const activePeriod = period || state.period || periods[0] || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date()).slice(0, 7)
-  const recon = useMemo(() => reconcile(files, roster, monthBounds(activePeriod), state.policy, state.resolutions, undefined, state.dayReviews), [files, roster, activePeriod, state.policy, state.resolutions, state.dayReviews])
+  const coverageLookup = useMemo(() => createCoverageLookup(files), [files])
+  const recon = useMemo(() => reconcile(files, roster, monthBounds(activePeriod), state.policy, state.resolutions, undefined, state.dayReviews, coverageLookup), [files, roster, activePeriod, state.policy, state.resolutions, state.dayReviews, coverageLookup])
+  const weekSlices = useMemo(() => weeksInMonth(activePeriod), [activePeriod])
+  const weekPreferenceKey = `kppu.hr.weekStart:${user.id}:${activePeriod}`
+  const preferredWeekStart = (() => { try { return window.localStorage.getItem(weekPreferenceKey) ?? '' } catch { return '' } })()
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date())
+  const defaultWeek = weekSlices.find(slice => slice.displayStart <= today && slice.displayEnd >= today) ?? weekSlices[0]
+  const weekSlice = weekSlices.find(slice => slice.weekStart === preferredWeekStart) ?? defaultWeek
+  const weekScopeKey = `kppu.hr.weekScope:${user.id}:${activePeriod}`
+  const weekScope = (() => { try { return window.localStorage.getItem(weekScopeKey) === 'full' ? 'full' : 'month-part' } catch { return 'month-part' } })() as 'month-part' | 'full'
+  const activeWeekRange = weekScope === 'full' ? weekRange(weekSlice.weekStart) : { start: weekSlice.displayStart, end: weekSlice.displayEnd }
+  const weekRecon = useMemo(() => reconcile(files, roster, activeWeekRange, state.policy, state.resolutions, undefined, state.dayReviews, coverageLookup), [files, roster, activeWeekRange.start, activeWeekRange.end, state.policy, state.resolutions, state.dayReviews, coverageLookup])
   const localMonthlyPackage = useMemo(() => inspectMonthlyPackage(files, activePeriod), [files, activePeriod])
   const officeScoped = !!user.offices?.length
   useEffect(() => {
@@ -120,18 +142,20 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
     ...state, files, reviewer: user.name, resolutions: effectiveResolutions, ready, revision, saveStatus, saveError,
     retrySave: () => { setSaveError(''); setRetry(n => n + 1) }, reload,
     backup: () => downloadJson(`KPPU_HR_backup_r${revision}.json`, { application: 'kppu-hr', exportedAt: new Date().toISOString(), revision, state }),
-    roster, recordRoster, recon, periods: [...new Set([activePeriod, ...periods])], activePeriod, monthlyPackage,
-    previewFiles: async (files, dateOrder) => {
+    roster, recordRoster, recon, weekRecon, weekSlice, weekScope, periods: [...new Set([activePeriod, ...periods])], activePeriod, monthlyPackage,
+    previewFiles: async (files, dateOrder, weekly) => {
       const previews: Preview[] = [], results: ImportResult[] = []
       for (const file of files) {
-        try { const data = new FormData(); data.set('file', file); if (dateOrder) data.set('dateOrder', dateOrder); const r = await api<Preview>('/imports/preview', { method: 'POST', body: data }); previews.push(r); results.push({ name: file.name, ok: true, message: r.duplicate ? 'Duplikat identik; tidak ditambahkan' : `${r.file.stats.rows} baris siap ditinjau` }) }
+        try { const data = new FormData(); data.set('file', file); if (dateOrder) data.set('dateOrder', dateOrder); if (weekly) data.set('weekly', '1'); const r = await api<Preview>('/imports/preview', { method: 'POST', body: data }); previews.push(r); results.push({ name: file.name, ok: true, message: r.duplicate ? 'Duplikat identik; tidak ditambahkan' : `${r.file.stats.rows} baris siap ditinjau` }) }
         catch (e) { results.push({ name: file.name, ok: false, message: (e as Error).message }) }
       }
       return { previews, results }
     },
     previewImport: proposal => api<ImportImpactResponse>('/imports/impact', { method: 'POST', body: JSON.stringify(proposal) }),
     commitImport: (proposal, confirmedImpact) => serverAction('/imports/commit', { ...proposal, confirmedImpact }, proposal.expectedRevision),
-    declareNilSt: (office, period, basis) => serverAction('/coverage/nil-st', { office, period, basis }),
+    declareNilSt: (office, start, end, basis) => serverAction('/coverage/nil-st', { office, start, end, basis }),
+    declareNotApplicable: (office, source, start, end, basis) => serverAction('/coverage/not-applicable', { office, source, start, end, basis }),
+    declareFileCoverage: (sourceId, start, end, status, basis) => serverAction(`/sources/${sourceId}/coverage`, { start, end, status, basis }),
     reviewRecord: (sourceId, input) => serverAction(`/sources/${sourceId}/record-review`, input),
     restoreBackup: state => serverAction('/backup/restore', { state, reason: 'Pemulihan workspace setelah preview dan konfirmasi admin' }),
     removeFile: id => serverAction(`/sources/${id}/withdraw`, { reason: 'Sumber ditarik dari perhitungan oleh SDM' }),
@@ -152,7 +176,10 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
     },
     unresolve: ids => patch(s => ({ resolutions: s.resolutions.filter(r => !ids.includes(r.issueId)) })),
     setPolicy: p => patch(s => ({ policy: enforcePolicy({ ...s.policy, ...p }) })),
-    setPeriod: next => { setLocalPeriod(next); patch(() => ({ period: next })) }, setReviewer: () => {},
+    setPeriod: next => { setLocalPeriod(next); if (user.role === 'superadmin') patch(() => ({ period: next })) },
+    selectWeek: weekStart => { try { window.localStorage.setItem(weekPreferenceKey, weekStart) } catch { /* preference is optional */ }; setRetry(n => n + 1) },
+    setWeekScope: scope => { try { window.localStorage.setItem(weekScopeKey, scope) } catch { /* preference is optional */ }; setRetry(n => n + 1) },
+    setReviewer: () => {},
   }
   return <HrContext.Provider value={value}>{children}</HrContext.Provider>
 }

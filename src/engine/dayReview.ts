@@ -22,12 +22,14 @@ export function daySourceSignature(
   assignments: Assignment[],
   context: { covered: boolean; partial: boolean; identity?: string[]; recordStates?: string[] },
 ) {
+  const evidenceFacts = evidence.map(({ id: _id, fileId: _fileId, ref: _ref, ...facts }) => facts)
+  const assignmentFacts = assignments.map(({ id: _id, fileId: _fileId, ref: _ref, dateRef: _dateRef, ...facts }) => facts)
   return stableStringify({
     employee: [employee.id, employee.nip, employee.nika, employee.kantor],
     date,
     context,
-    evidence: evidence.map(stableStringify).sort(),
-    assignments: assignments.map(stableStringify).sort(),
+    evidence: evidenceFacts.map(stableStringify).sort(),
+    assignments: assignmentFacts.map(stableStringify).sort(),
   })
 }
 

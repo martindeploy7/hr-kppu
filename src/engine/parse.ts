@@ -51,6 +51,7 @@ export function parseWorkbook(fileName: string, sheets: Sheet[], fileId: string,
   const master: Partial<Employee>[] = []
   const nameText = fileName.replace(/\.(xlsx?|csv|dbf)/gi, ' ')
   const guessOffice = (fallback = 'Pusat') => officeFromText(nameText) ?? officeFromText(sheets.map(s => `${s.name} ${sheetText(s, 4)}`).join(' ')) ?? fallback
+  const officeCandidate = officeFromText(`${nameText} ${sheets.map(s => s.name).join(' ')}`)
   let kind: SourceKind
   let office: string
 
@@ -61,14 +62,14 @@ export function parseWorkbook(fileName: string, sheets: Sheet[], fileId: string,
   const report = sheets.find(isCheckingReport)
   if (onlineMatrix) {
     kind = 'daring'; office = 'Semua kantor'
-    for (const sheet of sheets.filter(isOnlineMatrix)) evidence.push(...parseOnlineMatrix(sheet, fileId, warnings))
+    for (const sheet of sheets.filter(isOnlineMatrix)) evidence.push(...parseOnlineMatrix(sheet, fileId, warnings, quarantined, officeCandidate))
   } else if (online) {
     kind = 'daring'; office = 'Semua kantor'
-    for (const sheet of sheets.filter(isOnlineExport)) evidence.push(...parseOnline(sheet, fileId, warnings))
+    for (const sheet of sheets.filter(isOnlineExport)) evidence.push(...parseOnline(sheet, fileId, warnings, options.dateOrder, quarantined, officeCandidate))
   } else if (machine) {
     kind = 'mesin'; office = guessOffice('Belum ditentukan')
     if (office === 'Belum ditentukan') warnings.push('Kantor asal tidak terbaca dari nama file — pilih kantor secara manual.')
-    for (const sheet of sheets.filter(isMachineExport)) evidence.push(...parseMachine(sheet, fileId, office, warnings, options.dateOrder))
+    for (const sheet of sheets.filter(isMachineExport)) evidence.push(...parseMachine(sheet, fileId, office, warnings, options.dateOrder, quarantined))
   } else if (matrix) {
     kind = 'matriks-kanwil'; office = guessOffice('Belum ditentukan')
     for (const sheet of sheets.filter(isTransactionMatrix)) evidence.push(...parseTransactionMatrix(sheet, fileId, office, warnings))
@@ -91,12 +92,12 @@ export function parseWorkbook(fileName: string, sheets: Sheet[], fileId: string,
   for (const sheet of sheets) {
     master.push(...parseMasterSheet(sheet, office, quarantined))
     for (const risk of sheet.identifierRisks ?? []) {
-      quarantined.push({ ref: rowRef(sheet, risk.row), reason: 'IDENTIFIER_PRECISION_RISK: identifier numerik harus diverifikasi terhadap master teks', raw: risk.raw })
-      for (const e of evidence.filter(e => e.ref === rowRef(sheet, risk.row))) { e.identityPending = true; delete e.ids.nip }
+      quarantined.push({ ref: `${rowRef(sheet, risk.row)}, kolom ${risk.col + 1}`, reason: 'IDENTIFIER_PRECISION_RISK: identifier numerik harus diverifikasi terhadap master teks', raw: risk.raw })
+      for (const e of evidence.filter(e => e.ref.split(', kolom')[0] === rowRef(sheet, risk.row))) { e.identityPending = true; delete e.ids.nip }
     }
   }
   // Account independently for named source rows, including adapter skips.
-  const parsedRefs = new Set([...evidence.map(e => e.ref.split(', kolom')[0]), ...assignments.map(a => a.ref), ...quarantined.map(q => q.ref)])
+  const parsedRefs = new Set([...evidence.map(e => e.ref.split(', kolom')[0]), ...assignments.map(a => a.ref.split(', kolom')[0]), ...quarantined.map(q => q.ref.split(', kolom')[0])])
   const masterNames = new Set(master.map(e => e.nama))
   for (const sheet of sheets) {
     const h = findHeaderRow(sheet, [/^(?:nama(?: pegawai| pelaksana)?|name)$/])
@@ -118,7 +119,7 @@ export function parseWorkbook(fileName: string, sheets: Sheet[], fileId: string,
   const dates = [...evidence.map(e => e.date), ...assignments.flatMap(a => [a.start, a.end])].sort()
   const people = new Set([...evidence.map(e => e.ids.nip ?? e.ids.nika ?? `${e.office}|${e.name}`), ...assignments.map(a => a.name.toLowerCase())])
   return {
-    id: fileId, fileName, kind, label: KIND_LABEL[kind], office,
+    id: fileId, fileName, kind, label: KIND_LABEL[kind], office, ...(officeCandidate ? { officeCandidate } : {}),
     importedAt: new Date().toISOString(),
     period: dates.length ? { start: dates[0], end: dates[dates.length - 1] } : null,
     evidence, assignments, master: master.length ? master : undefined, quarantined, summaries: summaries.length ? summaries : undefined, partialDates: partialDates.length ? partialDates : undefined, warnings,

@@ -25,13 +25,16 @@ export type MealPolicy = {
 
 /** Tarif bruto mengikuti angka yang ditetapkan pengguna; parameter operasional dan PPh tetap perlu pengesahan. */
 export const DEFAULT_POLICY: MealPolicy = {
+  // Presensi daring KPPU mencatat masuk 08:00 tanpa keterlambatan dan 08:01 sebagai "Terlambat 1 Menit".
+  arrivalBoundary: 'inclusive',
   requireComplete: true,
   requireOnTime: true,
   lateToleranceMin: 0,
   requireNoEarlyLeave: true,
   countWfa: true,
   countLocalDuty: false,
-  parametersApproved: false,
+  // Tarif bruto mengikuti tabel yang ditetapkan pengguna; UM langsung dihitung untuk hari tanpa clash yang eligible.
+  parametersApproved: true,
   taxParametersApproved: false,
   holdOnIssues: true,
   includeNonAsn: false,
@@ -48,7 +51,7 @@ export const DEFAULT_POLICY: MealPolicy = {
 }
 
 export const POLICY_PRESETS: { id: string; label: string; detail: string; patch: Partial<MealPolicy> }[] = [
-  { id: 'brief', label: 'Aturan wajib UM (draf)', detail: 'Masuk sebelum 08:00, scan masuk & pulang. Tepat 08:00 ditahan sampai operator batas disahkan.', patch: { requireComplete: true, requireOnTime: true, lateToleranceMin: 0, requireNoEarlyLeave: true } },
+  { id: 'brief', label: 'Aturan wajib UM (draf)', detail: 'Masuk paling lambat 08:00 (sesuai presensi daring KPPU), scan masuk & pulang lengkap, tidak pulang sebelum jadwal.', patch: { requireComplete: true, requireOnTime: true, lateToleranceMin: 0, requireNoEarlyLeave: true } },
 ]
 
 /** Golongan PNS (I–IV, "III/b") atau PPPK (I–XVII) → kelompok tarif sesuai tabel yang ditetapkan pengguna. */

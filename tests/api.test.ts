@@ -12,6 +12,7 @@ import { blankEmployee } from '../src/engine/roster.ts'
 import { groupAssignments } from '../shared/imports.ts'
 import { buildRoster } from '../src/engine/roster.ts'
 import { reconcile } from '../src/engine/reconcile.ts'
+import { createCoverageLookup } from '../src/engine/monthlyFlow.ts'
 import { OFFICES } from '../src/engine/ids.ts'
 import { sourceRecordState } from '../src/engine/recordReviews.ts'
 import { users, auditEvents } from '../server/schema.ts'
@@ -25,7 +26,7 @@ const request=(path:string,method='GET',body?:unknown,role='admin',origin='http:
 const workspace=async()=>await (await request('/workspace')).json()
 function reviewAllWorkdays(state:any, period:string, asOf='2026-10-20') {
  const bounds=monthBounds(period), roster=buildRoster(state.files,state.master,state.overrides,state.decisions)
- const calculation=reconcile(state.files,roster,bounds,state.policy,[],asOf,[])
+ const calculation=reconcile(state.files,roster,bounds,state.policy,[],asOf,[],createCoverageLookup(state.files))
  state.dayReviews=calculation.months.flatMap(month=>month.days.filter(day=>day.workday).map(day=>{
   const assignment=day.assignments[0], evidence=day.evidence.find((item:any)=>item.code)||day.evidence.find((item:any)=>item.clockIn&&item.clockOut)
   let status='tanpa-keterangan', evidenceIds:string[]=[], assignmentIds:string[]=[]
@@ -39,12 +40,13 @@ function monthPackage(state:any,period:string,evidenceRows:any[]) {
  const bounds=monthBounds(period), stamp='2026-10-20T00:00:00Z', offlineId=`offline-${period}`, onlineId=`online-${period}`
  const offline=evidenceRows.map((row:any)=>({...row,id:`off-${row.id}`,fileId:offlineId,kind:'mesin',office:row.office??'Pusat'}))
  const online=evidenceRows.map((row:any)=>({...row,id:`on-${row.id}`,fileId:onlineId,kind:'daring',office:row.office??'Pusat',mode:'WFO',approved:true}))
- const source=(id:string,kind:any,office:string,evidence:any[],declaration?:any)=>({id,fileName:`Synthetic ${id}`,kind,label:'Synthetic test fixture',office,importedAt:stamp,period:bounds,completeThrough:bounds.end,evidence,assignments:[],warnings:[],stats:{rows:evidence.length,people:new Set(evidence.map(e=>e.name)).size},...(declaration?{declaration}:{})})
- state.files=[source(offlineId,'mesin','Pusat',offline),source(onlineId,'daring','Semua kantor',online),...OFFICES.filter(office=>office!=='Pusat').map(office=>source(`st-${office}-${period}`,'surat-tugas',office,[],{actorId:'fixture-admin',basis:'Register ST nihil pada fixture integrasi',at:stamp}))]
+ const coverage=(status:'complete'|'nil'|'not-applicable')=>[{start:bounds.start,end:bounds.end,status,basis:'Konfirmasi cakupan fixture integrasi',actorId:'fixture-admin',at:stamp}]
+ const source=(id:string,kind:any,office:string,evidence:any[],declaration?:any,status:'complete'|'nil'|'not-applicable'='complete')=>({id,fileName:`Synthetic ${id}`,kind,label:'Synthetic test fixture',office,importedAt:stamp,period:bounds,completeThrough:bounds.end,coverageDeclarations:coverage(status),evidence,assignments:[],warnings:[],stats:{rows:evidence.length,people:new Set(evidence.map(e=>e.name)).size},...(declaration?{declaration}:{})})
+ state.files=[source(offlineId,'mesin','Pusat',offline),...OFFICES.filter(office=>office!=='Pusat').map(office=>source(`offline-na-${office}-${period}`,'mesin',office,[],{actorId:'fixture-admin',basis:'Kantor tidak memakai mesin offline pada fixture integrasi',at:stamp},'not-applicable')),source(onlineId,'daring','Semua kantor',online),...OFFICES.map(office=>source(`st-${office}-${period}`,'surat-tugas',office,[],{actorId:'fixture-admin',basis:'Register ST nihil pada fixture integrasi',at:stamp},'nil'))]
 }
 function dayReviewFor(state:any,period:string,employeeId:string,date:string,status:string,evidenceIds:string[],assignmentIds:string[]) {
  const bounds=monthBounds(period),roster=buildRoster(state.files,state.master,state.overrides,state.decisions)
- const calculation=reconcile(state.files,roster,bounds,state.policy,[],`${period}-30`,state.dayReviews)
+ const calculation=reconcile(state.files,roster,bounds,state.policy,[],`${period}-30`,state.dayReviews,createCoverageLookup(state.files))
  const day=calculation.months.find((month:any)=>month.employee.id===employeeId)?.days.find((item:any)=>item.date===date)
  if(!day) throw new Error(`Missing day ${employeeId} ${date}`)
  return {employeeId,date,status,evidenceIds,assignmentIds,note:'Keputusan diperbarui setelah perubahan sumber',reviewer:'Admin fixture',actorId:'fixture-admin',at:'2026-10-20T00:00:00Z',signature:day.reviewSignature}
@@ -129,7 +131,7 @@ describe('Authenticated PostgreSQL API',()=>{
   const before=await workspace(),old=before.state.files.find((f:any)=>f.active!==false)
   const preview=await app.request('http://kppu.test/api/imports/preview',{method:'POST',headers:{origin:'http://kppu.test',cookie:cookies.admin},body:form});expect(preview.status).toBe(200);const file=(await preview.json()).file
   expect((await workspace()).state.files.filter((f:any)=>f.active!==false)).toHaveLength(before.state.files.filter((f:any)=>f.active!==false).length)
-  const body={uploadId:file.id,expectedRevision:before.revision,office:'Pusat',mode:'replace-file',replaces:old.id,completeSnapshot:true,reason:'Explicit complete snapshot replacement'}
+  const body={uploadId:file.id,expectedRevision:before.revision,office:'Pusat',mode:'replace-file',replaces:old.id,coverage:{start:'2026-10-15',end:'2026-10-15',status:'complete',basis:'Complete snapshot coverage for the same week'},completeSnapshot:true,reason:'Explicit complete snapshot replacement'}
   expect((await request('/imports/impact','POST',{...body,completeSnapshot:false})).status).toBe(400)
   const impact=await request('/imports/impact','POST',body);expect(impact.status).toBe(200);const diff=await impact.json();expect(diff.counts.changed).toBe(1);expect(diff.counts.duplicate).toBe(1);expect(diff.review.computed).toBe(true)
   const commit=await request('/imports/commit','POST',{...body,confirmedImpact:diff.checksum});expect(commit.status).toBe(200)
@@ -155,7 +157,7 @@ describe('Authenticated PostgreSQL API',()=>{
    const form=new FormData();form.set('file',new File([XLSX.write(wb,{type:'buffer',bookType:'xlsx'})],'Kesekjenan ST revisi.xlsx'))
    const upload=await app.request('http://kppu.test/api/imports/preview',{method:'POST',headers:{origin:'http://kppu.test',cookie:cookies.admin},body:form});expect(upload.status,await upload.clone().text()).toBe(200);const file=(await upload.json()).file
    const nextState=await workspace(),old=nextState.state.files.find((f:any)=>f.id===oldId)!,incoming=groupAssignments(file.assignments)[0],target=groupAssignments(old.assignments.filter((a:any)=>a.letterNo==='001/ST/2026'))[0]
-   const intent={uploadId:file.id,expectedRevision:nextState.revision,office:'Pusat',mode:'replace-registers',completeSnapshot:true,selections:[{incomingKey:incoming.key,targets:[{sourceId:oldId,registerKey:target.key}]}],reason:'Ganti register lengkap ST 001/2026'}
+   const intent={uploadId:file.id,expectedRevision:nextState.revision,office:'Pusat',mode:'replace-registers',coverage:{start:'2026-10-15',end:'2026-10-15',status:'complete',basis:'Complete ST coverage for the selected date range'},completeSnapshot:true,selections:[{incomingKey:incoming.key,targets:[{sourceId:oldId,registerKey:target.key}]}],reason:'Ganti register lengkap ST 001/2026'}
    expect((await request('/imports/impact','POST',{...intent,expectedRevision:intent.expectedRevision-1})).status).toBe(409)
    const preview=await request('/imports/impact','POST',intent);expect(preview.status).toBe(200);const diff=await preview.json();expect(diff.counts.removed).toBe(1);expect(diff.counts.unchanged).toBe(1);expect(diff.counts.duplicate).toBe(1);expect(diff.review.computed).toBe(true)
    expect((await request('/imports/commit','POST',{...intent,confirmedImpact:'0'.repeat(64)})).status).toBe(409)
@@ -287,7 +289,7 @@ describe('Authenticated PostgreSQL API',()=>{
   expect((await request('/workspace','PUT',{expectedRevision:before.revision,patch:{master:[...before.state.master,p]},reason:'Additional office test'})).status).toBe(200)
   await createUser(connection.db,'office-one@kppu.test','Office One',password,'hr',['Kanwil I'])
   const login=await request('/auth/login','POST',{email:'office-one@kppu.test',password});cookies.officeOne=login.headers.get('set-cookie')!.split(';')[0]
-  const scoped=await (await request('/workspace','GET',undefined,'officeOne')).json();expect(scoped.state.master.map((e:any)=>e.id)).toEqual(['other-office-person']);expect(scoped.state.files).toHaveLength(1);expect(scoped.state.files[0]).toMatchObject({kind:'surat-tugas',office:'Kanwil I'})
+  const scoped=await (await request('/workspace','GET',undefined,'officeOne')).json();expect(scoped.state.master.map((e:any)=>e.id)).toEqual(['other-office-person']);expect(scoped.state.files.some((f:any)=>f.kind==='surat-tugas'&&f.office==='Kanwil I')).toBe(true);expect(scoped.state.files.every((f:any)=>['Kanwil I','Semua kantor'].includes(f.office))).toBe(true);expect(scoped.state.files.flatMap((f:any)=>[...f.evidence,...f.assignments,...f.master??[]]).every((row:any)=>row.office==='Kanwil I'||row.kantor==='Kanwil I')).toBe(true)
   const reject=await request('/workspace','PUT',{expectedRevision:scoped.revision,patch:{overrides:{'snapshot-person':{nama:'Unauthorized'}}},reason:'Cross office rejected'},'officeOne');expect(reject.status).toBe(403)
   const update=await request('/workspace','PUT',{expectedRevision:scoped.revision,patch:{master:[{...p,jabatan:'Updated own office'}]},reason:'Own office update'},'officeOne');expect(update.status).toBe(200)
   const global=await workspace();expect(global.state.master.some((e:any)=>e.id==='snapshot-person')).toBe(true);expect(global.state.master.find((e:any)=>e.id===p.id).jabatan).toBe('Updated own office')
@@ -303,7 +305,9 @@ describe('Authenticated PostgreSQL API',()=>{
  test('record review previews impact, keeps participants separate and audits cancellation/reinstatement',async()=>{
   const original=await workspace(),state=structuredClone(original.state),people=state.master.filter((p:any)=>p.kantor==='Pusat'),id='review-st-source'
   if(people.length<2){const extra={...blankEmployee('review-extra-person'),nama:'Peserta ST Uji Tambahan',nip:'198001012020011777',kantor:'Pusat',statusKepegawaian:'PNS' as const,golongan:'III/a'};state.master.push(extra);people.push(extra)}
-  state.files.push({id,fileName:'Synthetic participant review',kind:'surat-tugas',label:'Synthetic',office:'Pusat',importedAt:'2026-10-20T00:00:00Z',period:{start:'2026-09-02',end:'2026-09-02'},completeThrough:'2026-09-30',evidence:[],assignments:people.map((p:any,i:number)=>({id:`review-st-${i}`,fileId:id,office:'Pusat',name:p.nama,nip:p.nip,start:'2026-09-02',end:'2026-09-02',rawDate:'2 September 2026',letterNo:'Synthetic/1',local:true,ref:`Sheet1 A${i+2}`})),warnings:[],stats:{rows:people.length,people:people.length}})
+  const completeStCoverage=[{start:'2026-09-01',end:'2026-09-30',status:'complete' as const,basis:'Register ST sintetis lengkap setelah koreksi deklarasi nihil',actorId:'fixture-admin',at:'2026-10-20T00:00:00Z'}]
+  for(const source of state.files.filter((f:any)=>f.kind==='surat-tugas'&&f.office==='Pusat')){source.coverageDeclarations=structuredClone(completeStCoverage);source.declaration=undefined}
+  state.files.push({id,fileName:'Synthetic participant review',kind:'surat-tugas',label:'Synthetic',office:'Pusat',importedAt:'2026-10-20T00:00:00Z',period:{start:'2026-09-02',end:'2026-09-02'},completeThrough:'2026-09-30',coverageDeclarations:completeStCoverage,evidence:[],assignments:people.map((p:any,i:number)=>({id:`review-st-${i}`,fileId:id,office:'Pusat',name:p.nama,nip:p.nip,start:'2026-09-02',end:'2026-09-02',rawDate:'2 September 2026',letterNo:'Synthetic/1',local:true,ref:`Sheet1 A${i+2}`})),warnings:[],stats:{rows:people.length,people:people.length}})
   reviewAllWorkdays(state,'2026-09')
   expect((await request('/backup/restore','POST',{expectedRevision:original.revision,state,reason:'Synthetic multi-participant ST review fixture'})).status).toBe(200)
   let w=await workspace(),body={id:randomUUID(),expectedRevision:w.revision,kind:'assignment',recordId:'review-st-0',disposition:'excluded',reason:'Pembatalan peserta pertama dikonfirmasi dokumen revisi'}

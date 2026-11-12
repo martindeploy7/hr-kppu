@@ -1,31 +1,78 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import type { Assignment, Evidence, SourceFile } from '../src/engine/types.ts'
 import { effectiveSource, sourceRecordState } from '../src/engine/recordReviews.ts'
 import { buildRoster } from '../src/engine/roster.ts'
 import { reconcile } from '../src/engine/reconcile.ts'
+import { createCoverageLookup } from '../src/engine/monthlyFlow.ts'
 import { eachDay, monthBounds } from '../src/engine/dates.ts'
 import { groupAssignments, type ImportChange, type ImportCounts, type ImportDaySummary, type ImportImpactResponse, type ImportReviewImpact, type ImportValue } from '../shared/imports.ts'
 import type { User, Workspace } from '../shared/workspace.ts'
 import { globalAccess, requireOffice, scopeWorkspace, sourceAllowed } from './scope.ts'
+import { OFFICES, officeFromText, officeFromUnit } from '../src/engine/ids.ts'
 
 const text = z.string().max(2000)
 const targetSchema = z.object({ sourceId: z.uuid(), registerKey: z.string().min(1).max(1000) }).strict()
 const selectionSchema = z.object({ incomingKey: z.string().min(1).max(1000), targets: z.array(targetSchema).max(200) }).strict()
 const importBaseSchema = z.object({
   uploadId: z.uuid(), expectedRevision: z.number().int().nonnegative(), office: text.trim().min(1),
+  resolveUnmappedOffice: z.boolean().optional(),
   mode: z.enum(['add', 'replace-file', 'replace-registers']), replaces: z.uuid().optional(),
-  completeThrough: z.iso.date().optional(), completeSnapshot: z.boolean().optional(), selections: z.array(selectionSchema).max(1000).optional(),
+  completeThrough: z.iso.date().optional(),
+  /** Setoran mingguan: hanya baris dengan tanggal kejadian di rentang ini yang dipakai; ST dipakai bila beririsan. */
+  range: z.object({ start: z.iso.date(), end: z.iso.date() }).strict().refine(value => value.start <= value.end, 'Rentang pekan terbalik').optional(),
+  coverage: z.object({ start: z.iso.date(), end: z.iso.date(), status: z.enum(['complete', 'partial']), basis: text.trim().min(10) }).strict().refine(value => value.start <= value.end, 'Rentang cakupan tanggal terbalik').optional(),
+  completeSnapshot: z.boolean().optional(), selections: z.array(selectionSchema).max(1000).optional(),
   reason: text.trim().optional(), offset: z.number().int().min(0).max(100000).optional().default(0), limit: z.number().int().min(10).max(100).optional().default(50),
 }).strict()
-const validateImportIntent = (v: { mode: string; replaces?: string; selections?: { targets: unknown[] }[]; completeSnapshot?: boolean }, ctx: z.RefinementCtx) => {
+const validateImportIntent = (v: { mode: string; replaces?: string; selections?: { targets: unknown[] }[]; completeSnapshot?: boolean; coverage?: { status: string } }, ctx: z.RefinementCtx) => {
   if (v.mode === 'replace-file' && !v.replaces) ctx.addIssue({ code: 'custom', path: ['replaces'], message: 'Pilih dataset yang akan diganti' })
   if (v.mode !== 'replace-file' && v.replaces) ctx.addIssue({ code: 'custom', path: ['replaces'], message: 'Target dataset hanya berlaku untuk penggantian penuh' })
   if (v.mode === 'replace-registers' && !v.selections?.length) ctx.addIssue({ code: 'custom', path: ['selections'], message: 'Pilih minimal satu register dari workbook baru' })
   if (v.mode !== 'replace-registers' && v.selections?.length) ctx.addIssue({ code: 'custom', path: ['selections'], message: 'Pilihan register hanya berlaku untuk impor sebagian register' })
   if ((v.mode === 'replace-file' || v.selections?.some(s => s.targets.length)) && !v.completeSnapshot) ctx.addIssue({ code: 'custom', path: ['completeSnapshot'], message: 'Konfirmasi bahwa scope penggantian adalah snapshot lengkap' })
+  if (v.mode === 'replace-registers' && v.selections?.some(s => s.targets.length) && v.coverage?.status !== 'complete') ctx.addIssue({ code: 'custom', path: ['coverage'], message: 'Penggantian register memerlukan deklarasi cakupan lengkap untuk rentang yang dipilih' })
 }
+export function mapImportOffices(rows: SourceFile['evidence'], master: Workspace['master']): SourceFile['evidence'] {
+  return rows.map(row => {
+    if (row.officeConflict) throw new HTTPException(422, { message: 'Ada konflik mapping kantor. Perbaiki kantor atau unit pada sumber.' })
+    const matches = master.filter(employee => (row.ids.nip && employee.nip === row.ids.nip) || (row.ids.nika && employee.nika === row.ids.nika))
+    const masterOffices = [...new Set(matches.map(employee => employee.kantor).filter(office => OFFICES.includes(office)))]
+    // Ekspor mesin offline berformat Pusat (NIK/Nama/Tanggal/Jam Kerja/…/Departemen) berasal dari mesin Kantor Pusat;
+    // file Kanwil dikenali dari nama file/judul sehingga row.office sudah terisi sebelum sampai di sini.
+    const office = OFFICES.includes(row.office) ? row.office : officeFromUnit(row.unit) ?? officeFromText(row.location ?? '') ?? (masterOffices.length === 1 ? masterOffices[0] : undefined) ?? (row.kind === 'mesin' ? 'Pusat' : undefined)
+    return { ...row, office: office ?? 'Belum ditentukan', officePending: !office }
+  })
+}
+
+/** Kantor peserta ST mengikuti master pegawai (via NIP); bila belum diketahui, kantor register (default Pusat). */
+export function mapAssignmentOffices(rows: SourceFile['assignments'], master: Workspace['master'], fallback: string): SourceFile['assignments'] {
+  return rows.map(row => {
+    const matches = row.nip ? master.filter(employee => employee.nip === row.nip) : []
+    const offices = [...new Set(matches.map(employee => employee.kantor).filter(office => OFFICES.includes(office)))]
+    const office = offices.length === 1 ? offices[0] : OFFICES.includes(row.office) ? row.office : fallback
+    return { ...row, office }
+  })
+}
+
+/** Batasi setoran ke pekan terpilih tanpa mengubah tanggal asli; ST lintas pekan tetap utuh. */
+export function limitToRange(file: SourceFile, range: { start: string; end: string }): SourceFile {
+  const evidence = file.evidence.filter(row => row.date >= range.start && row.date <= range.end)
+  const assignments = file.assignments.filter(row => row.start <= range.end && row.end >= range.start)
+  const outside = file.evidence.length - evidence.length + file.assignments.length - assignments.length
+  if (!outside) return file
+  const dates = [...evidence.map(row => row.date), ...assignments.flatMap(row => [row.start, row.end])].sort()
+  const people = new Set([...evidence.map(row => row.ids.nip ?? row.ids.nika ?? `${row.office}|${row.name}`), ...assignments.map(row => row.name.toLowerCase())])
+  return {
+    ...file, evidence, assignments,
+    partialDates: file.partialDates?.filter(date => date >= range.start && date <= range.end),
+    period: dates.length ? { start: dates[0], end: dates[dates.length - 1] } : null,
+    stats: { rows: evidence.length + assignments.length, people: people.size },
+    warnings: [`${outside} baris di luar pekan ${range.start} s.d. ${range.end} tidak dipakai pada setoran ini (file asli tetap diarsipkan).`, ...file.warnings],
+  }
+}
+
 export const importIntentSchema = importBaseSchema.superRefine(validateImportIntent)
 export const importCommitSchema = importBaseSchema.extend({
   reason: text.trim().min(10), confirmedImpact: z.string().regex(/^[a-f0-9]{64}$/),
@@ -45,7 +92,7 @@ const json = (v: unknown) => JSON.stringify(v)
 const sha = (v: unknown) => createHash('sha256').update(json(v)).digest('hex')
 
 function evidenceData(e: Evidence) {
-  return { kind: e.kind, office: e.office, name: norm(e.name), ids: { nip: e.ids.nip ?? '', nika: e.ids.nika ?? '', mesin: e.ids.mesin ?? '', appId: e.ids.appId ?? '' }, date: e.date, schedule: e.schedule ?? null, clockIn: e.clockIn ?? '', clockOut: e.clockOut ?? '', present: e.present ?? null, incomplete: e.incomplete ?? null, code: e.code ?? '', mode: e.mode ?? '', approved: e.approved ?? null, location: norm(e.location), coordIn: e.coordIn ?? null, coordOut: e.coordOut ?? null, lateMin: e.lateMin ?? null, earlyMin: e.earlyMin ?? null, overtimeMin: e.overtimeMin ?? null, unit: norm(e.unit) }
+  return { kind: e.kind, office: e.office, officePending: e.officePending ?? false, officeConflict: e.officeConflict ?? false, officeCandidates: e.officeCandidates ?? [], name: norm(e.name), identityPending: e.identityPending ?? false, ids: { nip: e.ids.nip ?? '', nika: e.ids.nika ?? '', mesin: e.ids.mesin ?? '', appId: e.ids.appId ?? '', nonAsn: e.ids.nonAsn ?? false }, date: e.date, schedule: e.schedule ?? null, clockIn: e.clockIn ?? '', clockOut: e.clockOut ?? '', present: e.present ?? null, incomplete: e.incomplete ?? null, code: e.code ?? '', codeLabel: norm(e.codeLabel), mode: e.mode ?? '', approved: e.approved ?? null, approvalStatus: e.approvalStatus ?? '', sourceDurationMin: e.sourceDurationMin ?? null, minimumDurationMin: e.minimumDurationMin ?? null, targetPekerjaan: e.targetPekerjaan ?? '', hasilPekerjaan: e.hasilPekerjaan ?? '', sourceValues: e.sourceValues ?? null, location: norm(e.location), coordIn: e.coordIn ?? null, coordOut: e.coordOut ?? null, lateMin: e.lateMin ?? null, earlyMin: e.earlyMin ?? null, overtimeMin: e.overtimeMin ?? null, unit: norm(e.unit), notes: [...(e.notes ?? [])].sort() }
 }
 function assignmentData(a: Assignment) {
   return { office: a.office, unit: norm(a.unit), letterNo: norm(a.letterNo), letterDate: a.letterDate ?? '', name: norm(a.name), nip: a.nip ?? '', start: a.start, end: a.end, destination: norm(a.destination), local: a.local }
@@ -58,7 +105,34 @@ function masterData(row: MasterRow) {
 function evidenceIdentity(e: Evidence) { return `${e.office}|${e.date}|${e.ids.nip ? `nip:${e.ids.nip}` : e.ids.nika ? `nika:${e.ids.nika}` : e.ids.appId ? `app:${e.ids.appId}` : e.ids.mesin ? `mesin:${e.ids.mesin}` : `name:${norm(e.name)}`}` }
 function assignmentIdentity(a: Assignment) { return a.nip ? `nip:${a.nip}` : `name:${norm(a.name)}` }
 function masterIdentity(row: MasterRow) { return row.nip ? `nip:${row.nip}` : row.nika ? `nika:${row.nika}` : `name:${norm(row.nama)}|${norm(row.kantor)}` }
-const valueForEvidence = (e: Evidence): Value => ({ name: e.name, office: e.office, start: e.date, end: e.date, detail: [e.clockIn && e.clockOut ? `${e.clockIn}–${e.clockOut}` : '', e.code ?? e.mode ?? ''].filter(Boolean).join(' · ') || 'Tanpa rincian jam/status', ref: e.ref })
+
+function relinkUniqueFacts<T extends { id: string }>(previous: T[], incoming: T[], canonical: (row: T) => unknown) {
+  const group = (rows: T[]) => {
+    const result = new Map<string, T[]>()
+    for (const row of rows) { const key = json(canonical(row)), values = result.get(key) ?? []; values.push(row); result.set(key, values) }
+    return result
+  }
+  const oldGroups = group(previous), newGroups = group(incoming), pairs: { previousId: string; incomingId: string }[] = []
+  for (const [key, oldRows] of oldGroups) {
+    const newRows = newGroups.get(key)
+    if (oldRows.length !== 1 || newRows?.length !== 1) continue
+    const incomingId = newRows[0].id
+    newRows[0].id = oldRows[0].id
+    pairs.push({ previousId: oldRows[0].id, incomingId })
+  }
+  return pairs
+}
+
+function carryRecordReviews(previous: SourceFile, incoming: SourceFile, kind: 'evidence' | 'assignment', pairs: { previousId: string; incomingId: string }[]) {
+  if (!pairs.length || !previous.recordReviews?.length) return
+  const previousIds = new Set(pairs.map(pair => pair.previousId))
+  const carried = previous.recordReviews.filter(review => review.kind === kind && previousIds.has(review.recordId)).map(review => ({ ...review, id: randomUUID() }))
+  if (carried.length) incoming.recordReviews = [...incoming.recordReviews ?? [], ...carried]
+}
+
+function withinRange(start: string, end: string, range: { start: string; end: string }) { return start >= range.start && end <= range.end }
+function overlapsRange(start: string, end: string, range: { start: string; end: string }) { return start <= range.end && end >= range.start }
+const valueForEvidence = (e: Evidence): Value => ({ name: e.name, office: e.office, start: e.date, end: e.date, detail: [e.clockIn && e.clockOut ? `${e.clockIn}–${e.clockOut}` : '', e.code ?? e.mode ?? '', e.approvalStatus, e.sourceDurationMin === undefined ? '' : `durasi sumber ${e.sourceDurationMin} mnt`].filter(Boolean).join(' · ') || 'Tanpa rincian jam/status', ref: e.ref })
 const valueForAssignment = (a: Assignment): Value => ({ name: a.name, office: a.office, start: a.start, end: a.end, detail: [`ST ${a.letterNo ?? '(tanpa nomor)'}`, a.unit, a.destination].filter(Boolean).join(' · '), ref: a.ref })
 const valueForMaster = (m: MasterRow): Value => ({ name: m.nama ?? '(tanpa nama)', office: m.kantor ?? '(kantor tidak terbaca)', start: '', end: '', detail: [m.nip ? `NIP ${m.nip}` : '', m.jabatan, m.unit].filter(Boolean).join(' · ') || 'Profil pegawai', ref: 'Sheet master' })
 
@@ -131,9 +205,11 @@ function reviewImpact(before: Workspace, after: Workspace, actor: User, touched:
   const examples: ReviewImpact['examples'] = []; let changedDays = 0, newlyHeld = 0, changedAmounts = 0, issuesBefore = 0, issuesAfter = 0
   const touchedSet = touched
   for (const month of months) {
-    const period = monthBounds(month)
-    const oldCalc = reconcile(oldScope.files, oldRoster, period, oldScope.policy, oldScope.resolutions, undefined, oldScope.dayReviews)
-    const newCalc = reconcile(newScope.files, newRoster, period, newScope.policy, newScope.resolutions, undefined, newScope.dayReviews)
+    // Hanya tanggal tersentuh yang dibandingkan; rekonsiliasi cukup untuk rentang itu (setoran mingguan ≈ 1 pekan), bukan sebulan penuh.
+    const bounds = monthBounds(month), inMonth = [...touchedSet].filter(d => d.startsWith(month)).sort()
+    const period = { start: inMonth[0] ?? bounds.start, end: inMonth.at(-1) ?? bounds.end }
+    const oldCalc = reconcile(oldScope.files, oldRoster, period, oldScope.policy, oldScope.resolutions, undefined, oldScope.dayReviews, createCoverageLookup(oldScope.files))
+    const newCalc = reconcile(newScope.files, newRoster, period, newScope.policy, newScope.resolutions, undefined, newScope.dayReviews, createCoverageLookup(newScope.files))
     const oldMonths = new Map(oldCalc.months.map(m => [m.employee.id, m])), newMonths = new Map(newCalc.months.map(m => [m.employee.id, m]))
     const ids = new Set([...oldMonths.keys(), ...newMonths.keys()])
     for (const id of ids) {
@@ -157,10 +233,27 @@ function reviewImpact(before: Workspace, after: Workspace, actor: User, touched:
 export function previewImport(state: Workspace, revision: number, parsed: SourceFile, actor: User, rawIntent: ImportIntent): { next: Workspace; impact: ImportImpact } {
   const intent = importIntentSchema.parse(rawIntent)
   if (intent.expectedRevision !== revision) throw new HTTPException(409, { message: 'Data berubah; muat ulang lalu periksa preview impor kembali' })
-  if (!['admin', 'hr'].includes(actor.role)) throw new HTTPException(403, { message: 'Hanya admin/SDM dapat mengimpor sumber' })
+  if (actor.role !== 'superadmin') throw new HTTPException(403, { message: 'Hanya Superadmin yang dapat mengimpor sumber' })
   requireOffice(actor, intent.office)
   if (parsed.id !== intent.uploadId) throw new HTTPException(400, { message: 'ID upload tidak sesuai' })
-  const incomingFile: SourceFile = { ...parsed, office: parsed.kind === 'daring' ? parsed.office : intent.office, evidence: parsed.kind === 'daring' ? parsed.evidence : parsed.evidence.map(e => ({ ...e, office: intent.office })), assignments: parsed.assignments.map(a => ({ ...a, office: intent.office })) }
+  const mixedOffices = intent.office === 'Semua kantor'
+  if (mixedOffices && (!globalAccess(actor) || intent.mode !== 'add')) throw new HTTPException(403, { message: 'Setoran gabungan hanya tersedia untuk penambahan oleh akun seluruh kantor.' })
+  const parsedRows = parsed.stats.rows
+  if (intent.range) parsed = limitToRange(parsed, intent.range)
+  if (intent.range && !parsed.evidence.length && !parsed.assignments.length) throw new HTTPException(422, { message: `Tidak ada baris dengan tanggal di pekan ${intent.range.start} s.d. ${intent.range.end}. Periksa pekan yang dipilih atau isi file.` })
+  let incomingEvidence = mixedOffices ? mapImportOffices(parsed.evidence, state.master) : parsed.evidence
+  if (parsed.kind === 'daring' && !mixedOffices) {
+    const conflicts = incomingEvidence.filter(e => e.officePending && (e.officeConflict || (e.officeCandidates?.length ?? 0) > 1))
+    if (conflicts.length) throw new HTTPException(422, { message: `${conflicts.length} baris memiliki konflik antara kantor eksplisit dan mapping Unit. Perbaiki data sumber atau mapping sebelum commit.` })
+    const pendingOffice = incomingEvidence.filter(e => e.officePending)
+    if (pendingOffice.length) {
+      if (!intent.resolveUnmappedOffice) throw new HTTPException(422, { message: `${pendingOffice.length} baris belum terpetakan ke kantor. Konfirmasikan kantor hanya jika seluruh baris tersebut memang satu kantor.` })
+      if (!OFFICES.includes(intent.office)) throw new HTTPException(422, { message: 'Pilih satu kantor yang sah untuk menyelesaikan baris tanpa mapping kantor.' })
+      incomingEvidence = incomingEvidence.map(e => e.officePending ? { ...e, office: intent.office, officePending: false, officeCandidates: undefined } : e)
+    }
+  }
+  const incomingFile: SourceFile = { ...parsed, office: mixedOffices ? 'Semua kantor' : parsed.kind === 'daring' ? parsed.office : intent.office, evidence: mixedOffices || parsed.kind === 'daring' ? incomingEvidence : incomingEvidence.map(e => ({ ...e, office: intent.office })), assignments: mixedOffices ? mapAssignmentOffices(parsed.assignments, state.master, OFFICES.includes(parsed.office) ? parsed.office : 'Pusat') : parsed.assignments.map(a => ({ ...a, office: intent.office })) }
+  if (intent.coverage && intent.coverage.end > new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date())) throw new HTTPException(422, { message: 'Cakupan hanya dapat dikonfirmasi sampai tanggal yang sudah berlangsung' })
   if (intent.mode !== 'replace-registers' && !sourceAllowed(actor, incomingFile)) throw new HTTPException(403, { message: 'Sumber berisi kantor di luar cakupan akun. Impor hanya dapat dilakukan untuk kantor yang diizinkan.' })
   const next = structuredClone(state), file = structuredClone(incomingFile)
   const changes: ImportChange[] = [], counts = emptyCounts(), replacedScopes: ImportImpact['replacedScopes'] = [], registerResults: NonNullable<ImportImpact['registers']> = []
@@ -172,8 +265,23 @@ export function previewImport(state: Workspace, revision: number, parsed: Source
     if (old.kind !== file.kind || old.office !== file.office) throw new HTTPException(400, { message: 'Jenis dan kantor dataset pengganti harus sama' })
     if (!sourceAllowed(actor, old)) throw new HTTPException(403)
     const oldActive = effectiveSource(old)
+    const needsDateScope = !!old.period || !!file.period || !!old.coverageDeclarations?.length || oldActive.evidence.length > 0 || oldActive.assignments.length > 0 || file.evidence.length > 0 || file.assignments.length > 0
+    if (needsDateScope) {
+      const range = intent.coverage
+      if (!range || range.status !== 'complete') throw new HTTPException(422, { message: 'Penggantian snapshot bertanggal memerlukan deklarasi cakupan lengkap untuk seluruh rentang dataset lama' })
+      if (old.period && !withinRange(old.period.start, old.period.end, range)) throw new HTTPException(422, { message: `Rentang penggantian ${range.start}–${range.end} lebih kecil daripada dataset lama ${old.period.start}–${old.period.end}. Gunakan penambahan atau pilih snapshot pada minggu yang sama.` })
+      if ((old.coverageDeclarations ?? []).some(declaration => !withinRange(declaration.start, declaration.end, range))) throw new HTTPException(422, { message: 'Dataset lama memiliki deklarasi cakupan di luar rentang penggantian. Ganti snapshot pada scope yang sama atau gunakan penambahan.' })
+      if (oldActive.evidence.some(row => !withinRange(row.date, row.date, range)) || oldActive.assignments.some(row => !withinRange(row.start, row.end, range))) throw new HTTPException(422, { message: 'Dataset lama memiliki catatan aktif di luar rentang penggantian. Gunakan penambahan atau revisi penuh yang mencakup seluruh catatan.' })
+      if (file.evidence.some(row => !withinRange(row.date, row.date, range)) || file.assignments.some(row => !withinRange(row.start, row.end, range))) throw new HTTPException(422, { message: 'Workbook baru memuat tanggal di luar cakupan yang dinyatakan. Periksa rentang atau unggah snapshot lengkap yang sesuai.' })
+    }
     const uniqueEvidence = uniqueIncoming(file.evidence, 'presensi', evidenceData, valueForEvidence)
     const uniqueAssignments = uniqueIncoming(file.assignments, 'surat-tugas', assignmentData, valueForAssignment)
+    const linkableEvidence = old.evidence.filter(row => ['active', 'excluded'].includes(sourceRecordState(old, 'evidence', row.id)))
+    const linkableAssignments = old.assignments.filter(row => ['active', 'excluded'].includes(sourceRecordState(old, 'assignment', row.id)))
+    const evidencePairs = relinkUniqueFacts(linkableEvidence, uniqueEvidence.selected, evidenceData)
+    const assignmentPairs = relinkUniqueFacts(linkableAssignments, uniqueAssignments.selected, assignmentData)
+    carryRecordReviews(old, file, 'evidence', evidencePairs)
+    carryRecordReviews(old, file, 'assignment', assignmentPairs)
     if (uniqueEvidence.selected.length < file.evidence.length) file.evidenceImport = { selectedIds: uniqueEvidence.selected.map(e => e.id) }
     if (uniqueAssignments.selected.length < file.assignments.length) file.assignmentImport = { selectedIds: uniqueAssignments.selected.map(a => a.id) }
     const newActive = effectiveSource(file)
@@ -204,6 +312,8 @@ export function previewImport(state: Workspace, revision: number, parsed: Source
       if (!incoming || incoming.office !== intent.office) throw new HTTPException(400, { message: 'Register baru tidak termasuk upload atau kantor yang dipilih' })
       for (const a of incoming.assignments) requireOffice(actor, a.office)
       const uniqueAssignments = uniqueIncoming(incoming.assignments, 'surat-tugas', assignmentData, valueForAssignment)
+      if (selection.targets.length && (!intent.coverage || intent.coverage.status !== 'complete')) throw new HTTPException(422, { message: 'Pilih cakupan lengkap sebelum mengganti register lama' })
+      if (selection.targets.length && uniqueAssignments.selected.some(a => !withinRange(a.start, a.end, intent.coverage!))) throw new HTTPException(422, { message: 'Register baru memuat ST di luar rentang penggantian. Perluas cakupan atau tambahkan register tanpa mengganti data lama.' })
       selectedAssignments.push(...uniqueAssignments.selected); selectedKeys.push(incoming.key)
       const registerCounts = emptyCounts()
       const oldAssignments: Assignment[] = []
@@ -214,21 +324,27 @@ export function previewImport(state: Workspace, revision: number, parsed: Source
         const group = existingGroups.find(g => g.sourceId === target.sourceId && g.key === target.registerKey)
         if (!group || group.office !== intent.office) throw new HTTPException(409, { message: 'Register lama sudah berubah, tidak aktif, atau di luar kantor akun' })
         group.assignments.forEach(a => requireOffice(actor, a.office))
-        oldAssignments.push(...group.assignments)
-        replacedScopes.push({ sourceId: group.sourceId, registerKey: group.key, label: `${group.label} · ${group.fileName}`, rows: group.assignments.length })
+        const range = intent.coverage!
+        const overlapping = group.assignments.filter(a => overlapsRange(a.start, a.end, range))
+        if (overlapping.some(a => !withinRange(a.start, a.end, range))) throw new HTTPException(422, { message: 'ST lama melintasi batas rentang penggantian. Unggah revisi seluruh rentang ST agar hari di luar scope tidak hilang.' })
+        const scopedAssignments = overlapping.filter(a => withinRange(a.start, a.end, range))
+        if (!scopedAssignments.length) throw new HTTPException(422, { message: 'Register lama yang dipilih tidak memiliki catatan di dalam rentang penggantian' })
+        oldAssignments.push(...scopedAssignments)
+        replacedScopes.push({ sourceId: group.sourceId, registerKey: group.key, label: `${group.label} · ${range.start}–${range.end} · ${group.fileName}`, rows: scopedAssignments.length })
       }
       const diff = diffRecords(oldAssignments, uniqueAssignments.selected, assignmentIdentity, assignmentData, valueForAssignment, 'surat-tugas')
       addCounts(registerCounts, diff.counts); addCounts(counts, diff.counts); changes.push(...diff.changes)
       registerCounts.duplicate += uniqueAssignments.duplicates.length; counts.duplicate += uniqueAssignments.duplicates.length; changes.push(...uniqueAssignments.duplicates)
       registerResults.push({ incomingKey: incoming.key, label: incoming.label, selectedRows: uniqueAssignments.selected.length, targetCount: selection.targets.length, counts: registerCounts })
-      touchedFiles.push({ ...file, evidence: [], assignments: uniqueAssignments.selected }, ...existingGroups.filter(g => selection.targets.some(t => t.sourceId === g.sourceId && t.registerKey === g.key)).map(g => ({ ...state.files.find(f => f.id === g.sourceId)!, evidence: [], assignments: g.assignments })))
+      const scopedOldGroups = existingGroups.filter(g => selection.targets.some(t => t.sourceId === g.sourceId && t.registerKey === g.key)).map(g => ({ group: g, assignments: g.assignments.filter(a => overlapsRange(a.start, a.end, intent.coverage!) && withinRange(a.start, a.end, intent.coverage!)) }))
+      touchedFiles.push({ ...file, evidence: [], assignments: uniqueAssignments.selected }, ...scopedOldGroups.map(({ group, assignments }) => ({ ...state.files.find(f => f.id === group.sourceId)!, evidence: [], assignments })))
     }
     selectedIds = selectedAssignments.map(a => a.id)
     file.master = undefined
     omittedMasterCount = parsed.master?.length ?? 0
     file.assignmentImport = { selectedIds, selectedRegisterKeys: selectedKeys, supersessions: [], omittedMasterCount: omittedMasterCount || undefined }
   } else {
-    const oldRows = state.files.filter(f => f.active !== false && f.kind === file.kind && (file.kind === 'daring' || f.office === intent.office)).map(effectiveSource)
+    const oldRows = state.files.filter(f => f.active !== false && f.kind === file.kind && (mixedOffices || file.kind === 'daring' || f.office === intent.office)).map(effectiveSource)
     const activeEvidence = oldRows.flatMap(f => f.evidence)
     const activeAssignments = oldRows.flatMap(f => f.assignments)
     const existingEvidence = new Set(activeEvidence.map(e => json(evidenceData(e))))
@@ -256,7 +372,9 @@ export function previewImport(state: Workspace, revision: number, parsed: Source
     touchedFiles.push(effectiveSource(file))
   }
   if (file.assignments.length && !file.assignmentImport && selectedIds.length < file.assignments.length) file.assignmentImport = { selectedIds, selectedRegisterKeys: selectedKeys }
-  const selectedFile = { ...file, completeThrough: intent.completeThrough, active: true, importCommit: undefined }
+  const at = new Date().toISOString()
+  const coverageDeclarations = intent.coverage ? [...(file.coverageDeclarations ?? []), { ...intent.coverage, actorId: actor.id, at }] : file.coverageDeclarations
+  const selectedFile = { ...file, ...(intent.completeThrough ? { completeThrough: intent.completeThrough } : {}), ...(coverageDeclarations ? { coverageDeclarations } : {}), active: true, importCommit: undefined }
   const index = next.files.findIndex(f => f.id === selectedFile.id)
   if (index >= 0) next.files[index] = selectedFile; else next.files.push(selectedFile)
   if (intent.mode === 'replace-registers') {
@@ -267,7 +385,7 @@ export function previewImport(state: Workspace, revision: number, parsed: Source
         const oldGroup = activeTargetGroups(state, intent.office, actor).find(g => g.sourceId === target.sourceId && g.key === target.registerKey)!
         const key = `${target.sourceId}|${target.registerKey}`
         const entry = selectionByTarget.get(key) ?? { sourceId: target.sourceId, registerKey: target.registerKey, registerLabel: oldGroup.label, ids: new Set<string>() }
-        oldGroup.assignments.forEach(a => entry.ids.add(a.id)); selectionByTarget.set(key, entry)
+        oldGroup.assignments.filter(a => overlapsRange(a.start, a.end, intent.coverage!) && withinRange(a.start, a.end, intent.coverage!)).forEach(a => entry.ids.add(a.id)); selectionByTarget.set(key, entry)
         void incoming
       }
     }
@@ -284,7 +402,7 @@ export function previewImport(state: Workspace, revision: number, parsed: Source
   const review = reviewImpact(state, next, actor, touched)
   const allChanges = changes.sort((a, b) => `${a.kind}|${a.status}|${a.after?.start ?? a.before?.start ?? ''}|${a.after?.name ?? a.before?.name ?? ''}|${a.after?.ref ?? a.before?.ref ?? ''}`.localeCompare(`${b.kind}|${b.status}|${b.after?.start ?? b.before?.start ?? ''}|${b.after?.name ?? b.before?.name ?? ''}|${b.after?.ref ?? b.before?.ref ?? ''}`, 'id'))
   const confirmation = {
-    actorId: actor.id, revision, uploadId: intent.uploadId, hash: parsed.hash, office: intent.office, mode: intent.mode, replaces: intent.replaces ?? '', completeThrough: intent.completeThrough ?? '', completeSnapshot: !!intent.completeSnapshot, reason: intent.reason?.trim() ?? '',
+    actorId: actor.id, revision, uploadId: intent.uploadId, hash: parsed.hash, office: intent.office, mode: intent.mode, range: intent.range ?? null, replaces: intent.replaces ?? '', completeThrough: intent.completeThrough ?? '', coverage: intent.coverage ?? null, completeSnapshot: !!intent.completeSnapshot, reason: intent.reason?.trim() ?? '',
     selections: (intent.selections ?? []).map(s => ({ incomingKey: s.incomingKey, targets: [...s.targets].sort((a, b) => `${a.sourceId}|${a.registerKey}`.localeCompare(`${b.sourceId}|${b.registerKey}`)) })).sort((a, b) => a.incomingKey.localeCompare(b.incomingKey)),
     counts, allChanges, replacedScopes, review,
   }
@@ -292,7 +410,7 @@ export function previewImport(state: Workspace, revision: number, parsed: Source
   const offset = intent.offset ?? 0, limit = intent.limit ?? 50
   const activeFile = effectiveSource(file)
   const selectedRows = intent.mode === 'replace-registers' ? selectedIds.length : activeFile.evidence.length + activeFile.assignments.length + (activeFile.master?.length ?? 0)
-  return { next, impact: { checksum, revision, mode: intent.mode, source: { id: parsed.id, kind: parsed.kind, office: intent.office, parsedRows: parsed.stats.rows, selectedRows, omittedMasterCount }, counts, changes: allChanges.slice(offset, offset + limit), offset, limit, totalChanges: allChanges.length, hasMore: offset + limit < allChanges.length, registers: registerResults, replacedScopes, review } }
+  return { next, impact: { checksum, revision, mode: intent.mode, source: { id: parsed.id, kind: parsed.kind, office: intent.office, parsedRows, selectedRows, omittedMasterCount }, counts, changes: allChanges.slice(offset, offset + limit), offset, limit, totalChanges: allChanges.length, hasMore: offset + limit < allChanges.length, registers: registerResults, replacedScopes, review } }
 }
 
 export function canRetryImport(file: SourceFile | undefined, actor: User, confirmedImpact: string) {

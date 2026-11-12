@@ -6,8 +6,13 @@ export type Workspace = {
   decisions: MatchDecision[]; resolutions: Resolution[]; dayReviews: DayReview[]; policy: MealPolicy; reviewer: string; period: string
 }
 export const emptyWorkspace = (): Workspace => ({ version: 2, files: [], master: [], overrides: {}, decisions: [], resolutions: [], dayReviews: [], policy: { ...DEFAULT_POLICY }, reviewer: '', period: '' })
-export const roles = ['admin', 'hr', 'reviewer', 'finance', 'viewer'] as const
+export const roles = ['superadmin', 'admin', 'operator_st'] as const
 export type Role = typeof roles[number]
+export const ROLE_LABEL: Record<Role, string> = { superadmin: 'Superadmin', admin: 'Admin · rekonsiliasi', operator_st: 'Operator Rekap ST' }
+/** Legacy accounts keep read access until a superadmin assigns one of the current roles. */
+export function canonicalRole(value: string | null | undefined): Role {
+  return value === 'superadmin' || value === 'operator_st' || value === 'admin' ? value : 'admin'
+}
 export type User = { id: string; email: string; name: string; role: Role; offices?: string[] | null }
 export type WorkspaceResponse = { state: Workspace; revision: number }
 

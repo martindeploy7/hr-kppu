@@ -7,7 +7,7 @@ export function SourceRecords({ file }: { file: SourceFile }) {
   const [query, setQuery] = useState(''), [page, setPage] = useState(0)
   const entries = useMemo(() => [
     ...file.assignments.map(a => ({ record: a, kind: 'assignment' as const, date: `${a.start}—${a.end}`, detail: `ST ${a.letterNo ?? '(tanpa nomor)'} · ${a.destination ?? ''}` })),
-    ...file.evidence.map(e => ({ record: e, kind: 'evidence' as const, date: e.date, detail: `${e.clockIn ?? '—'}–${e.clockOut ?? '—'} · ${e.code ?? e.mode ?? ''}` })),
+    ...file.evidence.map(e => ({ record: e, kind: 'evidence' as const, date: e.date, detail: [e.clockIn || e.clockOut ? `${e.clockIn ?? '—'}–${e.clockOut ?? '—'}` : '', e.code ?? e.mode ?? '', e.approvalStatus ? `approval ${e.approvalStatus}` : '', e.sourceDurationMin === undefined ? '' : `durasi ${e.sourceDurationMin} mnt`, e.minimumDurationMin === undefined ? '' : `min. ${e.minimumDurationMin} mnt`, e.officePending ? 'kantor belum terpetakan' : '', e.targetPekerjaan ? `target: ${e.targetPekerjaan}` : '', e.hasilPekerjaan ? `hasil: ${e.hasilPekerjaan}` : ''].filter(Boolean).join(' · ') || 'Tanpa rincian jam/status' })),
   ].filter(row => `${row.record.name} ${row.record.ref} ${row.detail} ${row.date}`.toLowerCase().includes(query.trim().toLowerCase())), [file, query])
   return <section className="source-records" aria-label={`Catatan sumber ${file.fileName}`}>
     <h4>Catatan sumber & koreksi</h4>

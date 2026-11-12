@@ -18,7 +18,7 @@ export function DayReviewEditor({ day }: { day: DayRecord }) {
   const [assignmentIds, setAssignmentIds] = useState<string[]>(day.decision?.assignmentIds ?? [])
   const [note, setNote] = useState(day.decision?.note ?? '')
   const [error, setError] = useState('')
-  const canReview = ['admin', 'hr', 'reviewer'].includes(user.role)
+  const canReview = user.role === 'superadmin' || user.role === 'admin'
   const current = day.decision
 
   const toggle = (ids: string[], id: string, set: (value: string[]) => void) => set(ids.includes(id) ? ids.filter(value => value !== id) : [...ids, id])
@@ -34,11 +34,11 @@ export function DayReviewEditor({ day }: { day: DayRecord }) {
 
   return <section className="day-review" aria-label="Keputusan validasi harian">
     <div className="day-review-head"><div><strong>Keputusan hari</strong><span>{day.reviewState === 'valid' ? `Valid · ${current?.reviewer ?? 'Admin'}` : day.reviewState === 'future' ? 'Belum berlangsung' : day.reviewState === 'not-found' ? 'Tidak ditemukan' : 'Flag · menunggu keputusan'}</span></div>
-      {day.reviewState === 'valid' && <span className="review-valid"><CheckCircle2 size={15} /> Ditetapkan admin</span>}
+      {day.reviewState === 'valid' && <span className="review-valid"><CheckCircle2 size={15} /> Ditetapkan reviewer</span>}
     </div>
     {current && <p className="muted small">{STATUS_LABEL[current.status]} · {current.note} · {new Date(current.at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</p>}
     {stale && <p className="form-error" role="status">Bukti atau identitas berubah sejak keputusan terakhir. Tinjau ulang sebelum UM dihitung.</p>}
-    {!canReview || day.reviewState === 'future' ? <p className="muted small">{!canReview ? 'Akun ini hanya dapat melihat keputusan.' : 'Hari yang belum berlangsung belum dapat divalidasi.'}</p> : <>
+    {!canReview || day.reviewState === 'future' ? <p className="muted small">{!canReview ? 'Akun ini tidak memiliki hak untuk mengesahkan keputusan.' : 'Hari yang belum berlangsung belum dapat divalidasi.'}</p> : <>
       <p className="muted small">Pilih catatan yang dipakai dan tetapkan statusnya. Catatan dari sumber lain tetap terlihat untuk audit; sumber tidak saling mengesahkan.</p>
       {day.evidence.length > 0 ? <div className="table-wrap"><table className="evidence"><thead><tr><th>Gunakan</th><th>Sumber & kantor</th><th>Masuk–pulang</th><th>Keterangan</th><th>Rujukan</th></tr></thead><tbody>{day.evidence.map(e => <tr key={e.id}>
         <td><input type="checkbox" checked={evidenceIds.includes(e.id)} onChange={() => toggle(evidenceIds, e.id, setEvidenceIds)} aria-label={`Gunakan bukti ${e.kind} ${e.ref}`} /></td>

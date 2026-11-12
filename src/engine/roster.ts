@@ -1,10 +1,12 @@
 import type { Alias, Assignment, Employee, Evidence, MatchDecision, SourceFile, SourceKind } from './types.ts'
 import { decodeNIP, officeFromUnit } from './ids.ts'
 import { nameKey, nameScore, nameTokens, titleCase } from './names.ts'
+import { stCandidates, stQueryTokens, ST_KIND_LABEL, type StCandidate } from './stMatch.ts'
+import { eachDay } from './dates.ts'
 import { effectiveSource } from './recordReviews.ts'
 
 export type LinkMethod = 'nip' | 'nika' | 'app' | 'mesin' | 'nama' | 'manual' | 'baru'
-export type Candidate = { employeeId: string; score: number }
+export type Candidate = { employeeId: string; score: number; hint?: string }
 
 export type IdentityItem = {
   key: string
@@ -17,6 +19,8 @@ export type IdentityItem = {
   method?: LinkMethod
   employeeId?: string
   score?: number
+  /** Alasan penautan otomatis nama ST (jenis kecocokan dan bukti yang dipakai). */
+  reason?: string
   candidates: Candidate[]
 }
 
@@ -116,16 +120,20 @@ export function buildRoster(files: SourceFile[], master: Employee[], overrides: 
 
   // 1) Sumber absensi: NIP → NIKA/ID aplikasi → nomor mesin → keputusan HR → nama dalam kantor yang sama → pegawai baru.
   const ordered = files.filter(f => f.kind !== 'surat-tugas').sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind))
+  // Setoran mingguan memecah sumber yang sama ke beberapa file. Pegawai tanpa identifier (hanya nama) yang sudah
+  // dibuat dari file pekan sebelumnya dipakai ulang, bukan dibuat ganda per file.
+  const createdBySig = new Map<string, string>()
   for (const file of ordered) {
     const groups = new Map<string, Evidence[]>()
     for (const ev of file.evidence) {
+      if (ev.officePending) continue
       const sig = ev.ids.nip ? `nip:${ev.ids.nip}` : ev.ids.nika ? `nika:${ev.ids.nika}:${nameKey(ev.name)}` : ev.ids.mesin ? `mesin:${ev.office}:${ev.ids.mesin}:${nameKey(ev.name)}` : `nama:${ev.office}:${nameKey(ev.name)}`
       const g = groups.get(sig)
       if (g) g.push(ev); else groups.set(sig, [ev])
     }
-    for (const evs of groups.values()) {
+    for (const [sig, evs] of groups) {
       const ev = evs.find(e => e.unit) ?? evs[0]
-      const office = ev.kind === 'daring' ? officeFromUnit(ev.unit) ?? 'Pusat' : ev.office
+      const office = ev.kind === 'daring' ? (officeFromUnit(ev.unit) ?? ev.office) : ev.office
       const mesinKey = ev.ids.mesin ? `${office}:${ev.ids.mesin}` : undefined
       const decision = decisionMap.get(matchKey(office, ev.name))
       let id: string | undefined, method: LinkMethod = 'baru', score: number | undefined
@@ -142,12 +150,15 @@ export function buildRoster(files: SourceFile[], master: Employee[], overrides: 
         // Nama/fuzzy hanya kandidat. Pemetaan lintas sumber memerlukan keputusan eksplisit.
         if (d.id) { /* candidate retained for review */ }
       }
+      const previous = !id ? createdBySig.get(sig) : undefined
+      if (previous && byId.has(previous)) id = previous
       let e = id ? byId.get(id) : undefined
       if (!e) {
         const newId = ev.ids.nip ? `nip:${ev.ids.nip}` : ev.ids.nika ? `nika:${ev.ids.nika}` : `${office}:${nameKey(ev.name).replace(/\s/g, '-')}`
         e = blankEmployee(byId.has(newId) ? `${newId}-${byId.size}` : newId)
         e.kantor = office
         method = 'baru'
+        createdBySig.set(sig, e.id)
       }
       mergeEvidenceInto(e, ev, office, file)
       if (ev.ids.nip) addAlias(e, { kind: 'nip', value: ev.ids.nip, source: SOURCE_LABEL[file.kind] })
@@ -157,7 +168,9 @@ export function buildRoster(files: SourceFile[], master: Employee[], overrides: 
       addAlias(e, { kind: 'nama', value: ev.name, source: `${SOURCE_LABEL[file.kind]} ${office}` })
       index(e)
       for (const x of evs) evidenceLink.set(x.id, e.id)
-      if (method === 'manual' || (method === 'baru' && !ev.ids.nip)) {
+      const existingItem = previous ? identity.find(item => item.context === 'absensi' && item.employeeId === e!.id && item.key === matchKey(office, ev.name)) : undefined
+      if (existingItem) existingItem.occurrences += evs.length
+      else if (method === 'manual' || (method === 'baru' && !ev.ids.nip)) {
         identity.push({ key: matchKey(office, ev.name), name: ev.name, office, context: 'absensi', occurrences: evs.length, sampleRefs: [evs[0].ref, file.fileName], status: method === 'baru' ? 'unmatched' : 'linked', method, employeeId: e.id, score, candidates: cands.filter(c => c.employeeId !== e!.id).slice(0, 4) })
       }
     }
@@ -176,10 +189,70 @@ export function buildRoster(files: SourceFile[], master: Employee[], overrides: 
     index(to)
   }
 
+  // Rekap ST memakai nama panggilan/inisial ("Manaek", "Febi N", "MMT"). Lihat stMatch.ts untuk pola nama.
+  const stPool = [...byId.values()].map(e => ({ id: e.id, tokens: tokens.get(e.id) ?? [] }))
+  // Bukti absensi untuk memilih di antara beberapa kandidat: tanggal yang oleh mesin/online dicatat dinas (PD/DL).
+  const dutyDates = new Map<string, Set<string>>()
+  for (const f of files) if (f.kind !== 'surat-tugas') for (const ev of f.evidence) {
+    if (ev.code !== 'PD' && ev.code !== 'DL') continue
+    const id = evidenceLink.get(ev.id)
+    if (!id) continue
+    const set = dutyDates.get(id) ?? new Set<string>(); set.add(ev.date); dutyDates.set(id, set)
+  }
+  // Bukti tandingan: tanggal dengan scan kantor lengkap (masuk & pulang) tanpa kode dinas/cuti.
+  const officeDates = new Map<string, Set<string>>()
+  for (const f of files) if (f.kind !== 'surat-tugas') for (const ev of f.evidence) {
+    if (!ev.clockIn || !ev.clockOut || ev.code || ev.mode === 'WFA') continue
+    const id = evidenceLink.get(ev.id)
+    if (!id) continue
+    const set = officeDates.get(id) ?? new Set<string>(); set.add(ev.date); officeDates.set(id, set)
+  }
+  const stDays = (list: Assignment[]) => [...new Set(list.flatMap(a => eachDay(a.start, a.end)))]
+  /** Skor bukti: hari ST yang dicatat dinas dikurangi hari ST dengan scan kantor lengkap (orang itu jelas tidak sedang dinas). */
+  const evidenceFor = (employeeId: string, list: Assignment[]) => {
+    const days = stDays(list)
+    const duty = days.filter(d => dutyDates.get(employeeId)?.has(d)).length
+    const office = days.filter(d => officeDates.get(employeeId)?.has(d) && !dutyDates.get(employeeId)?.has(d)).length
+    return { duty, office, score: duty - office }
+  }
+  const dutyOverlap = (employeeId: string, list: Assignment[]) => list.some(a => eachDay(a.start, a.end).some(d => dutyDates.get(employeeId)?.has(d)))
+  const hasId = (id: string) => { const e = byId.get(id); return !!(e?.nip || e?.nika) }
+  const resolveSt = (a: Assignment, list: Assignment[]): { id?: string; reason?: string; candidates: Candidate[] } => {
+    let cands = stCandidates(a.name, stPool)
+    // Master ganda (nama sama, satu ber-NIP satu tidak) atau entri master yang hanya nama panggilan: utamakan yang ber-NIP.
+    const withId = cands.filter(c => hasId(c.employeeId))
+    if (withId.length) cands = cands.filter(c => hasId(c.employeeId) || !withId.some(w => {
+      const wt = tokens.get(w.employeeId) ?? [], ct = tokens.get(c.employeeId) ?? []
+      return ct.length <= wt.length && ct.every(t => wt.includes(t))
+    }))
+    const hint = (c: StCandidate) => { const ev = evidenceFor(c.employeeId, list); return [ST_KIND_LABEL[c.kind], ev.duty ? `dinas tercatat ${ev.duty} hari pada tanggal ST` : '', ev.office ? `⚠ scan kantor lengkap ${ev.office} hari pada tanggal ST` : ''].filter(Boolean).join(' · ') }
+    const sameOffice = (id: string) => Number(byId.get(id)?.kantor === a.office)
+    const asCandidates = (xs: StCandidate[]) => [...xs].sort((x, y) => evidenceFor(y.employeeId, list).score - evidenceFor(x.employeeId, list).score || evidenceFor(y.employeeId, list).duty - evidenceFor(x.employeeId, list).duty || sameOffice(y.employeeId) - sameOffice(x.employeeId) || y.score - x.score).slice(0, 5).map(c => ({ employeeId: c.employeeId, score: c.score, hint: hint(c) }))
+    // Kecocokan ejaan tidak pernah ditautkan otomatis: tampil sebagai usulan satu klik untuk admin.
+    const firm = cands.filter(c => c.kind !== 'ejaan')
+    if (!firm.length) return { candidates: asCandidates(cands) }
+    const top = firm[0].score
+    const contenders = firm.filter(c => c.score >= top - 0.1)
+    const q0 = stQueryTokens(a.name)[0]
+    // Nama panggilan lazimnya nama depan: "Erika" lebih mungkin Erika Rovita daripada Irene Erika.
+    const firstName = contenders.filter(c => { const t0 = (tokens.get(c.employeeId) ?? [])[0] ?? ''; return t0 === q0 || (q0.length === 1 && t0.startsWith(q0)) })
+    // Kandidat yang dicatat dinas pada tanggal ST dan tidak punya scan kantor lengkap pada tanggal tersebut.
+    const onDuty = contenders.filter(c => { const ev = evidenceFor(c.employeeId, list); return ev.duty > 0 && ev.office === 0 })
+    if (contenders.length === 1) return { id: contenders[0].employeeId, reason: ST_KIND_LABEL[contenders[0].kind], candidates: asCandidates(cands) }
+    if (onDuty.length === 1 && (!firstName.length || firstName.some(c => c.employeeId === onDuty[0].employeeId)))
+      return { id: onDuty[0].employeeId, reason: `${ST_KIND_LABEL[onDuty[0].kind]}; satu-satunya kandidat yang dicatat dinas oleh mesin/online pada tanggal ST`, candidates: asCandidates(cands) }
+    if (!onDuty.length && firstName.length === 1) return { id: firstName[0].employeeId, reason: `${ST_KIND_LABEL[firstName[0].kind]}; satu-satunya kandidat dengan nama depan tersebut`, candidates: asCandidates(cands) }
+    if (a.office !== 'Pusat') {
+      const sameOffice = contenders.filter(c => byId.get(c.employeeId)?.kantor === a.office)
+      if (sameOffice.length === 1) return { id: sameOffice[0].employeeId, reason: `${ST_KIND_LABEL[sameOffice[0].kind]}; satu-satunya kandidat di ${a.office}`, candidates: asCandidates(cands) }
+    }
+    return { candidates: asCandidates(cands) }
+  }
+
   // 3) Surat tugas: hanya mencocokkan (tidak pernah membuat pegawai baru).
   const stGroups = new Map<string, Assignment[]>()
   for (const f of files) if (f.kind === 'surat-tugas') for (const a of f.assignments) {
-    const k = a.nip ? `${a.office}|nip:${a.nip}` : matchKey(a.office, a.name)
+    const k = a.employeeId ? `${a.office}|employee:${a.employeeId}` : a.nip ? `${a.office}|nip:${a.nip}` : matchKey(a.office, a.name)
     const g = stGroups.get(k)
     if (g) g.push(a); else stGroups.set(k, [a])
   }
@@ -189,18 +262,42 @@ export function buildRoster(files: SourceFile[], master: Employee[], overrides: 
     const cands = rank(a.name, a.office)
     const base = { key, name: a.name, office: a.office, context: 'surat-tugas' as const, occurrences: list.length, sampleRefs: list.slice(0, 2).map(x => `${x.ref}${x.letterNo ? ` · ST ${x.letterNo}` : ''}`), candidates: cands }
     let item: IdentityItem
+    const selectedEmployee = a.employeeId && byId.has(a.employeeId) ? a.employeeId : undefined
     const nipId = a.nip ? byNip.get(a.nip) : undefined
-    if (nipId) item = { ...base, status: 'linked', method: 'nip', employeeId: nipId }
+    if (selectedEmployee) item = { ...base, status: 'linked', method: 'manual', employeeId: selectedEmployee }
+    else if (nipId) item = { ...base, status: 'linked', method: 'nip', employeeId: nipId }
     else if (decision) item = { ...base, status: decision.employeeId ? 'linked' : 'ignored', method: 'manual', employeeId: decision.employeeId ?? undefined }
     else {
-      const d = decide(cands)
-      item = { ...base, status: cands.length ? 'ambiguous' : 'unmatched', score: cands[0]?.score }
+      const r = resolveSt(a, list)
+      item = r.id ? { ...base, candidates: r.candidates, status: 'linked', method: 'nama', employeeId: r.id, reason: r.reason }
+        : { ...base, candidates: r.candidates.length ? r.candidates : cands, status: r.candidates.length || cands.length ? 'ambiguous' : 'unmatched', score: (r.candidates[0] ?? cands[0])?.score }
     }
     identity.push(item)
     if (item.employeeId && byId.has(item.employeeId)) {
       addAlias(byId.get(item.employeeId)!, { kind: 'nama', value: a.name, source: `Surat tugas ${a.unit ?? a.office}` })
       for (const x of list) assignmentLink.set(x.id, item.employeeId)
     }
+  }
+
+  // 3b) Nama ST yang tidak cocok dengan siapa pun: usulkan pegawai yang oleh mesin/online dicatat dinas pada
+  // tanggal ST itu tetapi belum punya ST yang menutupi tanggal tersebut. Hanya usulan; tidak menautkan otomatis.
+  const coveredByLinkedSt = new Map<string, Set<string>>()
+  for (const f of files) if (f.kind === 'surat-tugas') for (const a of f.assignments) {
+    const id = assignmentLink.get(a.id)
+    if (!id) continue
+    const set = coveredByLinkedSt.get(id) ?? new Set<string>()
+    eachDay(a.start, a.end).forEach(d => set.add(d)); coveredByLinkedSt.set(id, set)
+  }
+  for (const item of identity) {
+    if (item.context !== 'surat-tugas' || item.status !== 'unmatched') continue
+    const list = stGroups.get(item.key) ?? []
+    const days = [...new Set(list.flatMap(a => eachDay(a.start, a.end)))]
+    const suggestions = [...dutyDates.entries()]
+      .map(([id, dates]) => ({ id, hits: days.filter(d => dates.has(d) && !coveredByLinkedSt.get(id)?.has(d)).length }))
+      // Usulan hanya bila 3 huruf awal nama depan sama; tanpa kemiripan nama, kode dinas saja terlalu lemah.
+      .filter(x => x.hits > 0 && byId.has(x.id) && !!stQueryTokens(item.name)[0] && ((tokens.get(x.id) ?? [])[0] ?? '').slice(0, 3) === stQueryTokens(item.name)[0].slice(0, 3))
+      .sort((x, y) => y.hits - x.hits).slice(0, 5)
+    item.candidates = suggestions.map(x => ({ employeeId: x.id, score: Math.min(0.5, 0.1 * x.hits), hint: `dinas tercatat ${x.hits} hari pada tanggal ST, belum ada ST` }))
   }
 
   // 4) Override data dari HR, lalu deteksi konflik identitas.

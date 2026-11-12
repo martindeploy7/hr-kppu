@@ -50,6 +50,13 @@
       "when": 1792483823693,
       "tag": "0006_bent_stingray",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793266361996,
+      "tag": "0007_current_roles",
+      "breakpoints": true
     }
   ]
 }

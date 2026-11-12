@@ -11,6 +11,7 @@ import { DayReviewEditor } from './DayReviewEditor.tsx'
 const NOTE_LABEL: Record<string, string> = {
   'jadwal-puasa': 'jadwal puasa', 'jam-sama-hari-sebelumnya': 'jam identik hari sebelumnya', 'jam-manual-absen-error': 'jam diketik manual', 'tanpa-jam': 'tanpa jam',
 }
+const APPROVAL_LABEL: Record<string, string> = { approved: 'Approved sumber', rejected: 'Reject sumber', pending: 'Pending sumber', unknown: 'Status sumber tidak dikenal', 'not-reported': 'Status tidak dilaporkan' }
 
 export function DayDetail({ day, showMeal = true, canReview = false }: { day: DayRecord; showMeal?: boolean; canReview?: boolean }) {
   const hr = useHr()
@@ -20,7 +21,7 @@ export function DayDetail({ day, showMeal = true, canReview = false }: { day: Da
   const evidence = [...day.evidence, ...excludedEvidence], assignments = [...day.assignments, ...excludedAssignments]
   return <div className="day-detail">
     <div className="day-head">
-      <div><strong>{formatID(day.date, { day: true })}</strong><span>{day.basis}</span></div>
+      <div><strong>{formatID(day.date, { day: true })}</strong><span>{day.basis}{day.autoValidated ? ' · valid otomatis (tidak ada clash antar-sumber)' : ''}</span></div>
       <StatusChip status={day.status} />
     </div>
     {evidence.length > 0 ? <div className="table-wrap"><table className="evidence">
@@ -31,10 +32,16 @@ export function DayDetail({ day, showMeal = true, canReview = false }: { day: Da
         <td className="mono">{e.clockOut ?? (e.present && !e.incomplete ? 'hadir*' : '—')}</td>
         <td>
           {e.code && <span className="code">{DAY_CODE_LABEL[e.code]}{e.codeLabel && e.codeLabel !== e.code ? ` · "${e.codeLabel}"` : ''}</span>}
-          {e.mode && <span className="code">{e.mode}{e.approved === false ? ' · Reject' : e.approved ? ' · Approved' : ''}</span>}
+          {e.mode && <span className="code">{e.mode}{e.approvalStatus ? ` · ${APPROVAL_LABEL[e.approvalStatus]}` : ''}</span>}
           {e.location && <span className="loc"><MapPin size={11} /> {e.location}{e.coordIn ? ` (${e.coordIn[0].toFixed(4)}, ${e.coordIn[1].toFixed(4)})` : ''}</span>}
           {e.schedule && <small>Jadwal {e.schedule.start}–{e.schedule.end}{e.schedule.label ? ` · ${e.schedule.label}` : ''}</small>}
+          {e.sourceDurationMin !== undefined && <small>Durasi sumber {e.sourceValues?.duration ?? `${e.sourceDurationMin} menit`} ({e.sourceDurationMin} menit terurai)</small>}
+          {e.minimumDurationMin !== undefined && <small>Min. Durasi {e.sourceValues?.minimumDuration ?? `${e.minimumDurationMin} menit`} ({e.minimumDurationMin} menit terurai; bukan jam jadwal)</small>}
           {e.lateMin ? <small>Terlambat {e.lateMin} mnt (sumber)</small> : null}
+          {e.sourceValues?.approval && <small>Status asli aplikasi: {e.sourceValues.approval}</small>}
+          {e.targetPekerjaan && <small>Target pekerjaan: {e.targetPekerjaan}</small>}
+          {e.hasilPekerjaan && <small>Hasil pekerjaan: {e.hasilPekerjaan}</small>}
+          {e.officePending && <span className="flag">Kantor perlu dikonfirmasi</span>}
           {e.notes?.map(n => <span key={n} className="flag">{NOTE_LABEL[n] ?? n}</span>)}
         </td>
         <td><small title={fileName(e.fileId)}>{fileName(e.fileId)}</small><small>{e.ref}</small>{hr.files.find(f => f.id === e.fileId) && <RecordReview file={hr.files.find(f => f.id === e.fileId)!} kind="evidence" recordId={e.id} />}</td>
@@ -50,6 +57,7 @@ export function DayDetail({ day, showMeal = true, canReview = false }: { day: Da
       <span>Masuk <b>{day.clockIn ?? '—'}</b></span><span>Pulang <b>{day.clockOut ?? '—'}</b></span>
       {day.lateMin > 0 && <span>Terlambat <b>{day.lateMin} mnt</b></span>}
       {day.earlyMin > 0 && <span>Pulang cepat <b>{day.earlyMin} mnt</b></span>}
+      {day.workday && day.timeKnown && !day.scheduleKnown && <span className="meal-tag m-held">Jadwal resmi perlu dikonfirmasi</span>}
       {day.overtimeMin > 0 && <span>Lembur <b>{Math.round(day.overtimeMin / 6) / 10} jam</b></span>}
       {showMeal && <span className={`meal-tag m-${day.meal.state}`}>Uang makan: {day.meal.state === 'eligible' ? day.meal.amountReady ? 'hari memenuhi syarat' : 'hari memenuhi syarat, nominal pending' : day.meal.state === 'held' ? 'ditahan' : 'tidak memenuhi syarat'} · {day.meal.reason}</span>}
     </div>

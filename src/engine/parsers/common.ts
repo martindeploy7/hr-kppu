@@ -20,6 +20,21 @@ export function columnIndex(header: Cell[], ...tests: RegExp[]): number {
   return -1
 }
 
+export function mappedColumns(header: Cell[], mapping: Record<string, RegExp[]>, required: string[] = []) {
+  const cells = header.map(low), result: Record<string, number> = {}, used = new Map<number, string>()
+  for (const [field, aliases] of Object.entries(mapping)) {
+    const indexes = cells.flatMap((cell, index) => aliases.some(alias => { alias.lastIndex = 0; return alias.test(cell) }) ? [index] : [])
+    if (indexes.length > 1) throw new Error(`Header ${field} muncul lebih dari sekali (kolom ${indexes.map(i => i + 1).join(', ')}); perbaiki workbook sebelum mengimpor.`)
+    if (required.includes(field) && indexes.length === 0) throw new Error(`Kolom wajib ${field} tidak ditemukan pada baris header.`)
+    if (indexes.length) {
+      const index = indexes[0], previous = used.get(index)
+      if (previous) throw new Error(`Kolom ${index + 1} cocok sebagai ${previous} dan ${field}; mapping tidak dapat dipastikan.`)
+      used.set(index, field); result[field] = index
+    }
+  }
+  return result
+}
+
 export const rowRef = (sheet: Sheet, r: number) => `${sheet.name.trim()} · baris ${r + 1}`
 
 export function sheetText(sheet: Sheet, rows = 12) {

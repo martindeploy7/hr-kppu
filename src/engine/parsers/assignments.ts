@@ -1,6 +1,6 @@
 import type { Assignment, Cell, Sheet } from '../types.ts'
 import { formatID, parseDateRange, parseSingleDate } from '../dates.ts'
-import { splitPeople, cleanText } from '../names.ts'
+import { splitPeople, cleanText, isAttachmentMarker } from '../names.ts'
 import { columnIndex, low, rowRef, str } from './common.ts'
 const NAME = /^nama(?: pegawai| pelaksana)?$|pegawai yang tugas/
 const LETTER = /^(?:no\.?\s*(?:st|surat(?: tugas)?)|nomor (?:st|surat tugas))(?:\b|[- ])/i
@@ -43,7 +43,8 @@ export function parseAssignmentSheet(sheet: Sheet, fileId: string, office: strin
   const dateRef=hasDate?rowRef(sheet,r):block.dateRef
   const letterDate=parseSingleDate(row[letterDateCol],year)??block.letterDate
   const destination=cleanText(row[col.dest]) || (col.dest<0 && typeof dateCell==='string'?dateCell.replace(/\d[\s\S]*$/,'').replace(/[, ]+$/,''):block.dest)
-  const names=splitPeople(rawName), range=parseDateRange(dateCell??null,year)
+  const names=splitPeople(rawName).filter(n=>!isAttachmentMarker(n)), range=parseDateRange(dateCell??null,year)
+  if(isAttachmentMarker(rawName))quarantine.push({ref:rowRef(sheet,r),reason:`ST ${letter||'tanpa nomor'}: peserta tercantum di lampiran surat; catat peserta lewat Rekap ST manual`,raw:rawName})
   const participantNip = str(row[col.nip]) || (!explicitName && continuation ? block.nip : undefined)
   block={date:dateCell,dateRef,letter,dest:destination,name:rawName,nip:participantNip,letterDate}
   if(!range){quarantine.push({ref:rowRef(sheet,r),reason:'Tanggal pelaksanaan tidak terbaca; tidak memakai tanggal surat sebagai pengganti',raw:str(dateCell)});continue}

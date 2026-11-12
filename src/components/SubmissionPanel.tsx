@@ -31,23 +31,23 @@ export function SubmissionPanel() {
   const correction = detail?.snapshot.correction
   const delta = correction?.delta.reduce((s, d) => s + d.after.netto - d.before.netto, 0) ?? 0
   const packageReady = hr.monthlyPackage.ready
-  const calculationReady = hr.policy.parametersApproved && hr.policy.taxParametersApproved && hr.recon.months.length > 0 && hr.recon.months.every(m => !m.heldDays && !m.amountPendingDays && !m.openIssues)
+  const calculationReady = hr.policy.parametersApproved && hr.policy.taxParametersApproved && hr.recon.months.length > 0 && hr.recon.months.every(m => !m.heldDays && !m.amountPendingDays && !m.openClashes)
   return <Panel title="Pengajuan & snapshot periode KPPU" sub="Satu pengajuan mencakup Pusat dan seluruh Kanwil untuk bulan yang dipilih. SDM mengajukan; akun Keuangan yang berbeda menyetujui dan mengunci.">
     <div className="toolbar"><strong>Cakupan: seluruh KPPU · {hr.activePeriod}</strong>
-      {['admin', 'hr'].includes(user.role) && !user.offices?.length && <button className="btn primary" disabled={busy || hr.saveStatus !== 'saved' || !packageReady || !calculationReady} onClick={() => action()}>Ajukan {hr.activePeriod}</button>}
+      {user.role === 'superadmin' && !user.offices?.length && <button className="btn primary" disabled={busy || hr.saveStatus !== 'saved' || !packageReady || !calculationReady} onClick={() => action()}>Ajukan {hr.activePeriod}</button>}
       <button className="btn secondary" disabled={busy} onClick={() => void load().catch(e => setError(e.message))}>Muat pengajuan</button>
     </div>
     {!packageReady && <p className="muted">Paket sumber bulan {hr.activePeriod} belum lengkap. Selesaikan impor Mesin Offline, Mesin Online, dan cakupan ST tiap kantor terlebih dahulu.</p>}
     {packageReady && !calculationReady && <p className="muted">Pengajuan dibuka setelah setiap hari kerja memiliki keputusan, tidak ada isu terbuka, parameter uang makan dan parameter PPh/netto disahkan, serta tarif siap.</p>}
-    <label className="inline-num">Catatan tindakan <input value={note} onChange={e => setNote(e.target.value)} placeholder="Alasan tindakan; koreksi minimal 10 karakter" maxLength={2000} /></label>
+    {user.role === 'superadmin' && <label className="inline-num">Catatan tindakan <input value={note} onChange={e => setNote(e.target.value)} placeholder="Alasan tindakan; koreksi minimal 10 karakter" maxLength={2000} /></label>}
     {error && <p role="alert" className="form-error">{error}</p>}
     <div className="table-wrap"><table className="data"><thead><tr><th>Periode</th><th>Kantor</th><th>Versi & status</th><th>Pengaju</th><th>Data r</th><th>Tindakan</th></tr></thead><tbody>{items.map(s => <tr key={s.id}><td>{s.period}</td><td>{s.office}</td><td>v{s.version} · {s.supersededBy ? 'arsip digantikan' : s.status}{s.correctionId && !s.supersededBy && <p className="muted">Usulan koreksi sedang diproses</p>}</td><td>{s.creator}</td><td>{s.workspaceRevision}</td><td>
       <a className="link" href={`/api/meal-submissions/${s.id}/export`}>Unduh snapshot Excel</a>
       <button className="link" disabled={busy} onClick={() => void view(s)}>Lihat rincian v{s.version}</button>
-      {['admin', 'finance'].includes(user.role) && s.createdBy !== user.id && s.status === 'submitted' && <button className="link" disabled={busy || note.trim().length < 3} onClick={() => action(s, 'approve')}>Setujui</button>}
-      {['admin', 'finance'].includes(user.role) && s.createdBy !== user.id && s.status === 'approved' && <button className="link" disabled={busy || note.trim().length < 3} onClick={() => action(s, 'lock')}>Kunci</button>}
-      {(['admin', 'finance'].includes(user.role) || (user.role === 'hr' && s.createdBy === user.id)) && ['submitted', 'approved'].includes(s.status) && <button className="link" disabled={busy || note.trim().length < 3} onClick={() => action(s, 'cancel')}>Batalkan pengajuan</button>}
-      {['admin', 'hr'].includes(user.role) && s.office === 'Semua' && s.status === 'locked' && !s.correctionId && <button className="link" disabled={busy || note.trim().length < 10 || hr.saveStatus !== 'saved'} onClick={() => action(s, 'correct')}>Ajukan koreksi v{s.version + 1}</button>}
+      {user.role === 'superadmin' && s.createdBy !== user.id && s.status === 'submitted' && <button className="link" disabled={busy || note.trim().length < 3} onClick={() => action(s, 'approve')}>Setujui</button>}
+      {user.role === 'superadmin' && s.createdBy !== user.id && s.status === 'approved' && <button className="link" disabled={busy || note.trim().length < 3} onClick={() => action(s, 'lock')}>Kunci</button>}
+      {user.role === 'superadmin' && ['submitted', 'approved'].includes(s.status) && <button className="link" disabled={busy || note.trim().length < 3} onClick={() => action(s, 'cancel')}>Batalkan pengajuan</button>}
+      {user.role === 'superadmin' && s.office === 'Semua' && s.status === 'locked' && !s.correctionId && <button className="link" disabled={busy || note.trim().length < 10 || hr.saveStatus !== 'saved'} onClick={() => action(s, 'correct')}>Ajukan koreksi v{s.version + 1}</button>}
     </td></tr>)}</tbody></table></div>
     {!items.length && <p className="muted">Belum ada pengajuan. Lengkapi seluruh bukti, review, tarif dan coverage ST sebelum mengajukan.</p>}
     {detail && <section className="import-preview" aria-label="Rincian snapshot pengajuan">

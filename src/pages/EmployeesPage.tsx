@@ -15,6 +15,7 @@ const ALIAS_LABEL = { nip: 'NIP', nika: 'NIKA', app: 'ID aplikasi', mesin: 'No. 
 
 export function EmployeesPage({ nav, toast, focus }: { nav: Nav; toast: (m: string) => void; focus?: string }) {
   const hr = useHr()
+  const { user } = useAuth()
   const [q, setQ] = useState('')
   const [office, setOffice] = useState('Semua')
   const [status, setStatus] = useState('Semua')
@@ -28,10 +29,10 @@ export function EmployeesPage({ nav, toast, focus }: { nav: Nav; toast: (m: stri
     .sort((a, b) => a.nama.localeCompare(b.nama)), [emps, office, status, q])
   const emp = selected ? hr.roster.byId.get(selected) : undefined
 
-  if (!emps.length) return <div className="page"><Empty icon={UploadCloud} title="Belum ada data pegawai" action={<button className="btn primary" onClick={() => nav('import')}>Impor file absensi</button>} /></div>
+  if (!emps.length) return <div className="page"><Empty icon={UploadCloud} title="Belum ada data pegawai" action={user.role === 'superadmin' ? <button className="btn primary" onClick={() => nav('import')}>Impor file absensi</button> : undefined} /></div>
 
   return <div className="page">
-    <PageHeader title="Direktori pegawai" actions={<button className="btn primary" onClick={() => nav('add')}><Plus size={16} /> Tambah / impor master</button>}>
+    <PageHeader title="Direktori pegawai" actions={user.role === 'superadmin' ? <button className="btn primary" onClick={() => nav('add')}><Plus size={16} /> Tambah / impor master</button> : undefined}>
       Satu profil per orang, menyatukan NIP, NIKA, nomor mesin, dan semua variasi nama yang muncul di sumber. Field bertanda "dari NIP" diturunkan otomatis.
     </PageHeader>
     <Panel>
@@ -46,7 +47,7 @@ export function EmployeesPage({ nav, toast, focus }: { nav: Nav; toast: (m: stri
         <tbody>{rows.slice(0, limit).map(e => <tr key={e.id} onClick={() => setSelected(e.id)} tabIndex={0} onKeyDown={ev => ev.key === 'Enter' && setSelected(e.id)}>
           <td><div className="emp-cell"><span className="mini-avatar">{initials(e.nama)}</span><div><strong>{e.nama}</strong><small>{e.aliases.filter(a => a.kind === 'nama' && a.value.toLowerCase() !== e.nama.toLowerCase()).length ? `juga ditulis: ${[...new Set(e.aliases.filter(a => a.kind === 'nama' && a.value.toLowerCase() !== e.nama.toLowerCase()).map(a => a.value))].slice(0, 2).join(', ')}` : e.jabatan || ''}</small></div></div></td>
           <td className="mono">{e.nip || <span className="warn-text">tanpa NIP</span>}<small>{e.nika || e.aliases.find(a => a.kind === 'app')?.value || ''}</small></td>
-          <td>{e.kantor}<small>{e.unit.replace(/ - Sekretaris Jenderal$/, '') || '—'}</small></td>
+          <td>{e.kantor}<small>{e.unit.replace(/ - Sekretaris Jenderal$/, '') || 'Unit belum diisi'}</small></td>
           <td><span className={`pill st-${e.statusKepegawaian.replace(/\s/g, '-').toLowerCase()}`}>{e.statusKepegawaian}</span></td>
           <td><div className="src-tags">{e.sources.map(s => <span key={s}>{s}</span>)}</div></td>
           <td><ChevronRight size={15} /></td>
@@ -62,7 +63,13 @@ function Profile({ emp, toast, nav }: { emp: Employee; toast: (m: string) => voi
   const { user } = useAuth()
   const hr = useHr()
   const [edit, setEdit] = useState(false)
-  const [form, setForm] = useState({ golongan: emp.golongan, jabatan: emp.jabatan, nip: emp.nip, nomorWhatsApp: emp.nomorWhatsApp, agama: emp.agama, email: emp.email })
+  const [form, setForm] = useState({
+    golongan: emp.golongan, jabatan: emp.jabatan, nip: emp.nip, nomorWhatsApp: emp.nomorWhatsApp,
+    agama: emp.agama, email: emp.email, pendidikan: emp.pendidikan,
+    peringkatJabatan: emp.peringkatJabatan ?? '', jenisJabatan: emp.jenisJabatan ?? '',
+    tanggalMulaiKerja: emp.tanggalMulaiKerja, tanggalPensiun: emp.tanggalPensiun ?? '',
+    tanggalPengunduranDiri: emp.tanggalPengunduranDiri ?? '',
+  })
   const month = hr.recon.months.find(m => m.employee.id === emp.id)
   const derived = (k: string) => emp.derived.includes(k) ? <em className="derived">dari NIP</em> : null
   const save = () => { hr.updateEmployee(emp.id, form as Partial<Employee>); setEdit(false); toast('Data pegawai diperbarui') }
@@ -71,24 +78,30 @@ function Profile({ emp, toast, nav }: { emp: Employee; toast: (m: string) => voi
     <div className="profile-top">
       <span className="profile-avatar">{initials(emp.nama)}</span>
       <div><span className="pill">{emp.statusKepegawaian}</span><h2>{emp.nama}</h2><p>{emp.jabatan || 'Jabatan belum diisi'} · {emp.kantor}</p><small>{emp.unit || 'Unit belum diisi'}</small></div>
-      {['admin', 'hr'].includes(user.role) && <button className="btn secondary" onClick={() => setEdit(v => !v)}><Pencil size={14} /> {edit ? 'Batal' : 'Lengkapi'}</button>}
+      {user.role === 'superadmin' && <button className="btn secondary" onClick={() => setEdit(v => !v)}><Pencil size={14} /> {edit ? 'Batal' : 'Lengkapi'}</button>}
     </div>
 
     {edit && <div className="edit-grid">
-      {([['nip', 'NIP'], ['golongan', 'Golongan (mis. IX atau III/b)'], ['jabatan', 'Jabatan'], ['nomorWhatsApp', 'Nomor WhatsApp'], ['email', 'Email']] as const).map(([k, label]) => <label key={k}><span>{label}</span><input value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} /></label>)}
-      <label><span>Agama</span><select value={form.agama} onChange={e => setForm({ ...form, agama: e.target.value as Employee['agama'] })}><option value="">—</option>{['Islam', 'Kristen', 'Katolik', 'Hindu', 'Buddha', 'Konghucu', 'Lainnya'].map(x => <option key={x}>{x}</option>)}</select></label>
+      {([['nip', 'NIP'], ['golongan', 'Golongan (mis. IX atau III/b)'], ['jabatan', 'Jabatan'], ['peringkatJabatan', 'Peringkat jabatan'], ['jenisJabatan', 'Jenis jabatan'], ['pendidikan', 'Pendidikan'], ['nomorWhatsApp', 'Nomor WhatsApp'], ['email', 'Email']] as const).map(([k, label]) => <label key={k}><span>{label}</span><input value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} /></label>)}
+      {([['tanggalMulaiKerja', 'Tanggal mulai kerja'], ['tanggalPensiun', 'Tanggal pensiun'], ['tanggalPengunduranDiri', 'Tanggal pengunduran diri']] as const).map(([k, label]) => <label key={k}><span>{label}</span><input type="date" value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} /></label>)}
+      <label><span>Agama</span><select value={form.agama} onChange={e => setForm({ ...form, agama: e.target.value as Employee['agama'] })}><option value="">Pilih agama</option>{['Islam', 'Kristen', 'Katolik', 'Hindu', 'Buddha', 'Konghucu', 'Lainnya'].map(x => <option key={x}>{x}</option>)}</select></label>
       <button className="btn primary" onClick={save}>Simpan</button>
     </div>}
 
     <div className="facts">
-      <div><span>NIP</span><strong className="mono">{emp.nip || '—'}</strong></div>
-      <div><span>NIKA</span><strong className="mono">{emp.nika || '—'}</strong></div>
-      <div><span>Tanggal lahir {derived('tanggalLahir')}</span><strong>{emp.tanggalLahir ? `${formatID(emp.tanggalLahir)} (${ageFrom(emp.tanggalLahir)} th)` : '—'}</strong></div>
-      <div><span>Jenis kelamin {derived('jenisKelamin')}</span><strong>{emp.jenisKelamin || '—'}</strong></div>
+      <div><span>NIP</span><strong className="mono">{emp.nip || 'Belum diisi'}</strong></div>
+      <div><span>NIKA</span><strong className="mono">{emp.nika || 'Belum diisi'}</strong></div>
+      <div><span>Tanggal lahir {derived('tanggalLahir')}</span><strong>{emp.tanggalLahir ? `${formatID(emp.tanggalLahir)} (${ageFrom(emp.tanggalLahir)} th)` : 'Belum diisi'}</strong></div>
+      <div><span>Jenis kelamin {derived('jenisKelamin')}</span><strong>{emp.jenisKelamin || 'Belum diisi'}</strong></div>
       <div><span>Status {derived('statusKepegawaian')}</span><strong>{emp.statusKepegawaian}</strong></div>
-      <div><span>Golongan</span><strong>{emp.golongan || '—'}</strong></div>
-      <div><span>WhatsApp</span><strong>{emp.nomorWhatsApp || '—'}</strong></div>
-      <div><span>Agama</span><strong>{emp.agama || '—'}</strong></div>
+      <div><span>Golongan</span><strong>{emp.golongan || 'Belum diisi'}</strong></div>
+      <div><span>Peringkat jabatan</span><strong>{emp.peringkatJabatan || 'Belum diisi'}</strong></div>
+      <div><span>Jenis jabatan</span><strong>{emp.jenisJabatan || 'Belum diisi'}</strong></div>
+      <div><span>Tanggal mulai kerja</span><strong>{emp.tanggalMulaiKerja ? formatID(emp.tanggalMulaiKerja) : 'Belum diisi'}</strong></div>
+      <div><span>Tanggal pensiun</span><strong>{emp.tanggalPensiun ? formatID(emp.tanggalPensiun) : 'Belum diisi'}</strong></div>
+      <div><span>Tanggal pengunduran diri</span><strong>{emp.tanggalPengunduranDiri ? formatID(emp.tanggalPengunduranDiri) : 'Belum diisi'}</strong></div>
+      <div><span>WhatsApp</span><strong>{emp.nomorWhatsApp || 'Belum diisi'}</strong></div>
+      <div><span>Agama</span><strong>{emp.agama || 'Belum diisi'}</strong></div>
     </div>
 
     {month && <section className="profile-block">
@@ -109,16 +122,16 @@ function Profile({ emp, toast, nav }: { emp: Employee; toast: (m: string) => voi
 
     {month && month.days.some(d => d.status === 'dinas-luar' && d.assignments.length) && <section className="profile-block">
       <h3>Surat tugas periode ini</h3>
-      <div className="st-list">{[...new Map(month.days.flatMap(d => d.assignments).map(a => [a.id, a])).values()].map(a => <div key={a.id}><StatusChip status={a.local ? 'dinas-lokal' : 'dinas-luar'} compact /><div><strong>ST {a.letterNo ?? '(tanpa nomor)'}</strong><span>{a.rawDate} → {a.destination ?? '—'}</span><small>{a.unit ?? a.office}</small></div></div>)}</div>
+      <div className="st-list">{[...new Map(month.days.flatMap(d => d.assignments).map(a => [a.id, a])).values()].map(a => <div key={a.id}><StatusChip status={a.local ? 'dinas-lokal' : 'dinas-luar'} compact /><div><strong>ST {a.letterNo ?? '(tanpa nomor)'}</strong><span>{a.rawDate} → {a.destination ?? 'Tujuan belum diisi'}</span><small>{a.unit ?? a.office}</small></div></div>)}</div>
     </section>}
 
     {(emp.pendidikan || emp.pelatihan.length > 0 || emp.alamat) && <section className="profile-block">
       <h3>Profil lain (master)</h3>
       <div className="facts">
-        <div><span>Pendidikan</span><strong>{[emp.pendidikan, emp.disiplinIlmu].filter(Boolean).join(' ') || '—'}</strong></div>
-        <div><span>Pelatihan</span><strong>{emp.pelatihan.join(', ') || '—'}</strong></div>
-        <div><span>Alamat</span><strong>{emp.alamat || '—'}</strong></div>
-        <div><span>Kontak darurat</span><strong>{[emp.namaKontakDarurat, emp.kontakDarurat].filter(Boolean).join(' · ') || '—'}</strong></div>
+        <div><span>Pendidikan</span><strong>{[emp.pendidikan, emp.disiplinIlmu].filter(Boolean).join(' ') || 'Belum diisi'}</strong></div>
+        <div><span>Pelatihan</span><strong>{emp.pelatihan.join(', ') || 'Belum diisi'}</strong></div>
+        <div><span>Alamat</span><strong>{emp.alamat || 'Belum diisi'}</strong></div>
+        <div><span>Kontak darurat</span><strong>{[emp.namaKontakDarurat, emp.kontakDarurat].filter(Boolean).join(' · ') || 'Belum diisi'}</strong></div>
       </div>
     </section>}
   </>

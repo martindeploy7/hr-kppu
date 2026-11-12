@@ -21,11 +21,14 @@ const rateHistorySchema = z.array(range({ rate: z.number().int().min(0).max(1000
 export const employeeSchema = z.object({
   id: identifierKey, nama: text.min(1), nip: z.string().max(32), nika: z.string().max(64), kantor: text, unit: text,
   statusKepegawaian: z.enum(['PPPK', 'PNS', 'Non-ASN', 'Belum diketahui']), golongan: text, jabatan: text,
+  peringkatJabatan: text.optional(), jenisJabatan: text.optional(),
   tanggalLahir: text, jenisKelamin: z.enum(['Laki-laki', 'Perempuan', '']), tempatLahir: text,
   pendidikan: text, disiplinIlmu: text, pelatihan: z.array(text).max(500), tanggalMulaiKerja: text,
   alamat: text, kontakDarurat: text, namaKontakDarurat: text, statusPerkawinan: text,
   agama: z.enum(['Islam', 'Kristen', 'Katolik', 'Hindu', 'Buddha', 'Konghucu', 'Lainnya', '']), nomorWhatsApp: text, email: text,
-  statusPegawai: z.enum(['Aktif', 'Cuti', 'Tugas Belajar', 'Nonaktif']), aliases: z.array(alias), sources: z.array(text), derived: z.array(text),
+  statusPegawai: z.enum(['Aktif', 'Cuti', 'Tugas Belajar', 'Nonaktif']),
+  tanggalPensiun: text.optional(), tanggalPengunduranDiri: text.optional(),
+  aliases: z.array(alias), sources: z.array(text), derived: z.array(text),
   workStatusPeriods: workStatusPeriodsSchema.optional(),
   rateHistory: rateHistorySchema.optional(),
 })
@@ -49,24 +52,27 @@ export const workspaceEditSchema = z.object({
 }).strict()
 const time = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/)
 const evidenceSchema = z.object({
-  id: text, fileId: text, kind: z.enum(['mesin', 'daring', 'matriks-kanwil', 'jadwal-kanwil', 'laporan-kanwil', 'surat-tugas']), office: text, name: text,
+  id: text, fileId: text, kind: z.enum(['mesin', 'daring', 'matriks-kanwil', 'jadwal-kanwil', 'laporan-kanwil', 'surat-tugas']), office: text, officePending: z.boolean().optional(), officeConflict: z.boolean().optional(), officeCandidates: z.array(text).max(10).optional(), officeCandidate: text.optional(), name: text,
   ids: z.object({ nip: text.optional(), nika: text.optional(), mesin: text.optional(), appId: text.optional(), nonAsn: z.boolean().optional() }), date,
   clockIn: time.optional(), clockOut: time.optional(), ref: text,
   schedule: z.object({ start: time, end: time, label: text }).optional(), identityPending: z.boolean().optional(),
-  present: z.boolean().optional(), incomplete: z.boolean().optional(), approved: z.boolean().optional(),
+  present: z.boolean().optional(), incomplete: z.boolean().optional(), approved: z.boolean().optional(), approvalStatus: z.enum(['approved', 'rejected', 'pending', 'unknown', 'not-reported']).optional(), sourceDurationMin: z.number().nonnegative().optional(), minimumDurationMin: z.number().nonnegative().optional(),
+  targetPekerjaan: z.string().max(1000).optional(), hasilPekerjaan: z.string().max(1000).optional(), sourceValues: z.object({ name: text.optional(), identifier: text.optional(), employeeNumber: text.optional(), machineId: text.optional(), date: text.optional(), schedule: text.optional(), scheduleStart: text.optional(), scheduleEnd: text.optional(), duration: text.optional(), minimumDuration: text.optional(), exception: text.optional(), mode: text.optional(), approval: text.optional(), office: text.optional(), unit: text.optional() }).optional(),
   mode: z.enum(['WFO', 'WFA']).optional(), code: z.enum(['PD', 'DL', 'WFA', 'S', 'C', 'CB', 'I', 'DIKLAT', 'KO', 'X', 'ERR', 'T']).optional(),
   codeLabel: text.optional(), location: text.optional(), coordIn: z.tuple([z.number(), z.number()]).optional(), coordOut: z.tuple([z.number(), z.number()]).optional(),
   lateMin: z.number().optional(), earlyMin: z.number().optional(), overtimeMin: z.number().optional(), unit: text.optional(), notes: z.array(z.enum(['jadwal-puasa', 'jam-sama-hari-sebelumnya', 'jam-manual-absen-error', 'tanpa-jam'])).optional(),
 })
-const assignmentSchema = range({ id: text, fileId: text, office: text, name: text, nip: text.optional(), unit: text.optional(), letterNo: text.optional(), letterDate: date.optional(), rawDate: text, dateRef: text.optional(), destination: text.optional(), local: z.boolean(), ref: text })
+const assignmentSchema = range({ id: text, fileId: text, employeeId: text.optional(), createdBy: text.optional(), createdAt: z.iso.datetime().optional(), office: text, name: text, nip: text.optional(), unit: text.optional(), letterNo: text.optional(), letterDate: date.optional(), rawDate: text, dateRef: text.optional(), destination: text.optional(), local: z.boolean(), ref: text })
 const assignmentSupersessionSchema = z.object({ recordIds: z.array(text).min(1).max(20000), bySourceId: text, registerKey: text.max(1000), registerLabel: text, reason: text.min(10), actorId: text, reviewer: text, at: z.iso.datetime() })
 const assignmentImportSchema = z.object({ selectedIds: z.array(text).max(20000).optional(), selectedRegisterKeys: z.array(text.max(1000)).max(1000).optional(), supersessions: z.array(assignmentSupersessionSchema).max(10000).optional(), omittedMasterCount: z.number().int().nonnegative().max(10000).optional() })
 const evidenceImportSchema = z.object({ selectedIds: z.array(text).max(100000).optional() })
+const coverageDeclarationSchema = range({ status: z.enum(['complete', 'partial', 'nil', 'not-applicable']), basis: text.min(10), actorId: text.min(1), at: z.iso.datetime() })
 const importCommitSchema = z.object({ mode: z.enum(['add', 'replace-file', 'replace-registers']), confirmation: z.string().regex(/^[a-f0-9]{64}$/), actorId: text, committedAt: z.iso.datetime(), selectedRegisterKeys: z.array(text.max(1000)).max(1000).optional(), replacedScopes: z.array(z.object({ sourceId: text, registerKey: text.max(1000), label: text })).max(1000).optional() })
 const sourceSchema = z.object({
-  id: text, fileName: text, kind: evidenceSchema.shape.kind, label: text, office: text, importedAt: z.iso.datetime(), period: range({}).nullable(),
+  id: text, fileName: text, kind: evidenceSchema.shape.kind, label: text, office: text, officeCandidate: text.optional(), importedAt: z.iso.datetime(), period: range({}).nullable(),
   evidence: z.array(evidenceSchema).max(100000), assignments: z.array(assignmentSchema).max(20000), warnings: z.array(text), stats: z.object({ rows: z.number().int().nonnegative(), people: z.number().int().nonnegative() }),
   hash: z.string().regex(/^[a-f0-9]{64}$/).optional(), parserVersion: text.optional(), revision: z.number().int().positive().optional(), supersedes: text.optional(), active: z.boolean().optional(), completeThrough: date.optional(),
+  coverageDeclarations: z.array(coverageDeclarationSchema).max(1000).optional(),
   declaration: z.object({ actorId: text, basis: text, at: z.iso.datetime() }).optional(),
   recordReviews: z.array(z.object({ id: z.uuid(), kind: z.enum(['evidence', 'assignment']), recordId: text, disposition: z.enum(['excluded', 'active']), reason: text.min(10), actorId: text, reviewer: text, at: z.iso.datetime() })).max(10000).optional(),
   assignmentImport: assignmentImportSchema.optional(), evidenceImport: evidenceImportSchema.optional(), importCommit: importCommitSchema.optional(),

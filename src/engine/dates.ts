@@ -64,6 +64,49 @@ export function monthBounds(month: string): { start: ISODate; end: ISODate } {
   return { start: iso(y, m, 1), end: iso(y, m, new Date(Date.UTC(y, m, 0)).getUTCDate()) }
 }
 
+export type WeekSlice = {
+  /** Stable calendar identity shared by both months when the week crosses a boundary. */
+  weekStart: ISODate
+  weekEnd: ISODate
+  /** Portion visible in the selected month. */
+  displayStart: ISODate
+  displayEnd: ISODate
+  index: number
+  crossesMonth: boolean
+}
+
+export function weekStartForDate(date: ISODate): ISODate {
+  const day = weekday(date)
+  return addDays(date, day === 0 ? -6 : 1 - day)
+}
+
+export function weekRange(weekStart: ISODate): { start: ISODate; end: ISODate } {
+  if (weekday(weekStart) !== 1) throw new Error('weekStart harus tanggal Senin')
+  return { start: weekStart, end: addDays(weekStart, 6) }
+}
+
+/** Calendar weeks are Monday–Sunday; every date in the month appears in exactly one slice. */
+export function weeksInMonth(month: string): WeekSlice[] {
+  const bounds = monthBounds(month)
+  const slices: WeekSlice[] = []
+  let start = weekStartForDate(bounds.start)
+  while (start <= bounds.end) {
+    const end = addDays(start, 6)
+    const displayStart = start < bounds.start ? bounds.start : start
+    const displayEnd = end > bounds.end ? bounds.end : end
+    slices.push({
+      weekStart: start,
+      weekEnd: end,
+      displayStart,
+      displayEnd,
+      index: slices.length + 1,
+      crossesMonth: start < bounds.start || end > bounds.end,
+    })
+    start = addDays(start, 7)
+  }
+  return slices
+}
+
 type Partial3 = { d: number; m?: number; y?: number }
 
 function parsePart(text: string): Partial3 | null {
@@ -108,8 +151,31 @@ export function parseDateRange(value: Cell, fallbackYear?: number): { start: ISO
 }
 
 export function parseSingleDate(value: Cell, fallbackYear?: number): ISODate | null {
+  if (typeof value === 'number') {
+    if (value >= 20000 && value <= 80000) return excelSerialToISO(value)
+    return null
+  }
+  const text = String(value ?? '').replace(/[​-‍⁠﻿]/g, '').trim()
+  const isoDate = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  if (isoDate && validDate(Number(isoDate[1]), Number(isoDate[2]), Number(isoDate[3]))) return iso(Number(isoDate[1]), Number(isoDate[2]), Number(isoDate[3]))
+  const slash = text.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/)
+  if (slash) {
+    const first = Number(slash[1]), second = Number(slash[2]), year = Number(slash[3])
+    if (first > 12) return validDate(year, second, first) ? iso(year, second, first) : null
+    if (second > 12) return validDate(year, first, second) ? iso(year, first, second) : null
+    return null
+  }
   const r = parseDateRange(value, fallbackYear)
   return r ? r.start : null
+}
+
+/** Parses attendance dates with an optional file-level slash-date profile. */
+export function parseAttendanceDate(value: Cell, order?: 'MDY' | 'DMY', fallbackYear?: number): ISODate | null {
+  if (typeof value === 'number') return parseSingleDate(value, fallbackYear)
+  const text = String(value ?? '').replace(/[​-‍⁠﻿]/g, '').trim()
+  const slash = text.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/)
+  if (slash && order) return slashToISO(text, order)
+  return parseSingleDate(value, fallbackYear)
 }
 
 /** Decides whether slash dates in a file are M/D/Y or D/M/Y by checking which reading keeps them in the fewest months. */
@@ -150,13 +216,13 @@ export const toMinutes = (t?: string) => { if (!t) return undefined; const [h, m
 /** "1 Jam 44 Menit", "38 Menit", "02:18:59", "00:04" → minutes */
 export function parseDuration(value: Cell): number | undefined {
   if (value === null || value === undefined || value === '') return undefined
-  if (typeof value === 'number') return Math.round((value % 1) * 1440) || undefined
+  if (typeof value === 'number') return Math.round((value % 1) * 1440)
   const s = String(value).trim()
   const clock = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/)
-  if (clock) return Number(clock[1]) * 60 + Number(clock[2]) || undefined
+  if (clock) return Number(clock[1]) * 60 + Number(clock[2])
   const h = s.match(/(\d+)\s*jam/i), m = s.match(/(\d+)\s*menit/i)
   if (!h && !m) return undefined
-  return (h ? Number(h[1]) * 60 : 0) + (m ? Number(m[1]) : 0) || undefined
+  return (h ? Number(h[1]) * 60 : 0) + (m ? Number(m[1]) : 0)
 }
 
 const ID_MONTHS = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']

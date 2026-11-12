@@ -37,8 +37,9 @@ test('source preview, confirm and renamed identical reupload do not duplicate so
  await app.open('/')
  const account=credentials.user('admin')
  await screen.getByLabel('Email akun').fill(account.username);await screen.getByLabel('Password').fill(account.password);await screen.getByRole('button','Masuk',{exact:true}).tap()
- await screen.getByRole('button','Impor Sumber',{exact:true}).tap()
+ await screen.getByRole('button','Setoran & Review',{exact:true}).tap()
  const countBefore=await browser.evaluate(async()=>{const r=await fetch('/api/workspace');const data=await r.json();return data.state.files.filter((f:any)=>f.active!==false).length})
+ await screen.getByRole('button','Unggah Mesin Offline Pusat',{exact:true}).tap()
  await browser.locator('input[type="file"]').setInputFiles(['.e2e/fixtures/E2E_Pusat.xlsx'])
  await expect(browser.locator('.import-results')).toBeVisible()
  // Re-runs may already contain this exact fixture; both paths must preserve idempotency.
@@ -46,6 +47,7 @@ test('source preview, confirm and renamed identical reupload do not duplicate so
  if(!exists){await confirmImport(screen);await expect(browser.locator('.sidebar-footer')).toContainText('Tersimpan di server')}
  const count=await browser.evaluate(async()=>{const r=await fetch('/api/workspace');const data=await r.json();return data.state.files.filter((f:any)=>f.active!==false).length})
  expect(count).toBe(exists?countBefore:countBefore+1)
+ await screen.getByRole('button','Unggah Mesin Offline Pusat',{exact:true}).tap()
  await browser.locator('input[type="file"]').setInputFiles(['.e2e/fixtures/E2E_Renamed.xlsx'])
  await expect(screen.getByText('Duplikat identik; tidak ditambahkan',{exact:true})).toBeVisible()
  expect(await browser.evaluate(async()=>{const r=await fetch('/api/workspace');const d=await r.json();return d.state.files.filter((f:any)=>f.active!==false).length})).toBe(count)
@@ -59,7 +61,8 @@ test('admin selects and persists the explicit 08:00 boundary',async({app,screen,
  let seedId:string|undefined
  try{
   if(!original.files){
-   await screen.getByRole('button','Impor Sumber',{exact:true}).tap()
+   await screen.getByRole('button','Setoran & Review',{exact:true}).tap()
+   await screen.getByRole('button','Unggah Mesin Offline Pusat',{exact:true}).tap()
    await browser.locator('input[type="file"]').setInputFiles(['.e2e/fixtures/E2E_Withdraw_Pusat.xlsx'])
    await confirmImport(screen,'E2E sumber sintetis untuk uji pengaturan batas kedatangan')
    seedId=await browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json();return w.state.files.find((f:any)=>f.fileName==='E2E_Withdraw_Pusat.xlsx')?.id})
@@ -115,12 +118,14 @@ test('bulk master validates all rows, requires confirmation and persists one mer
 test('source withdrawal confirms server success and preserves the archived dataset',async({app,screen,browser})=>{
  await app.open('/');const account=credentials.user('admin')
  await screen.getByLabel('Email akun').fill(account.username);await screen.getByLabel('Password').fill(account.password);await screen.getByRole('button','Masuk',{exact:true}).tap()
- await screen.getByRole('button','Impor Sumber',{exact:true}).tap()
+ await screen.getByRole('button','Setoran & Review',{exact:true}).tap()
  const before=await browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json();return w.state.files.filter((f:any)=>f.active!==false).length})
+ await screen.getByRole('button','Unggah Mesin Offline Pusat',{exact:true}).tap()
  await browser.locator('input[type="file"]').setInputFiles(['.e2e/fixtures/E2E_Withdraw_Pusat.xlsx'])
  await confirmImport(screen,'E2E impor dataset sintetis sebelum menguji penarikan')
  await expect.poll(()=>browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json();return w.state.files.filter((f:any)=>f.active!==false).length}),{timeout:10000}).toBe(before+1)
  await expect(browser.locator('.sidebar-footer')).toContainText('Tersimpan di server')
+ await browser.locator('details').filter({has:browser.locator('summary').filter({hasText:/^File sumber/})}).locator('summary').first().tap()
  await screen.getByRole('button','Tarik sumber E2E_Withdraw_Pusat.xlsx',{exact:true}).tap()
  await expect(screen.getByText('E2E_Withdraw_Pusat.xlsx ditarik dari perhitungan; arsip tetap tersimpan',{exact:true})).toBeVisible()
  const result=await browser.evaluate(async()=>{const w=await(await fetch('/api/workspace')).json();return {active:w.state.files.filter((f:any)=>f.active!==false).length,archive:w.state.files.filter((f:any)=>f.fileName==='E2E_Withdraw_Pusat.xlsx'&&f.active===false).length}})
@@ -129,7 +134,7 @@ test('source withdrawal confirms server success and preserves the archived datas
 test('participant review previews impact, preserves original ST and requires a new reason to reactivate',async({app,screen,browser})=>{
  await app.open('/');const account=credentials.user('admin')
  await screen.getByLabel('Email akun').fill(account.username);await screen.getByLabel('Password').fill(account.password);await screen.getByRole('button','Masuk',{exact:true}).tap()
- await expect(screen.getByRole('button','Impor Sumber',{exact:true})).toBeVisible()
+ await expect(screen.getByRole('button','Setoran & Review',{exact:true})).toBeVisible()
  const cleanup=async()=>browser.evaluate(async()=>{
   let w=await(await fetch('/api/workspace')).json()
   for(const f of w.state.files.filter((s:any)=>s.fileName==='E2E_Review_ST_Pusat.xlsx'&&s.active!==false)){
@@ -140,12 +145,13 @@ test('participant review previews impact, preserves original ST and requires a n
  })
  await cleanup();await browser.reload()
  try {
- await screen.getByRole('button','Impor Sumber',{exact:true}).tap()
+ await screen.getByRole('button','Setoran & Review',{exact:true}).tap()
  await browser.locator('input[type="file"]').setInputFiles(['.e2e/fixtures/E2E_Review_ST_Pusat.xlsx'])
  await confirmImport(screen,'E2E bukti ST sintetis sebelum menguji tinjauan peserta')
  await expect(browser.locator('.sidebar-footer')).toContainText('Tersimpan di server')
  const rowSelector='.file-row:has(.file-name strong[title="E2E_Review_ST_Pusat.xlsx"])',editorSelector=`${rowSelector} .record-review`
  const row=browser.locator(rowSelector)
+ await browser.locator('details').filter({has:browser.locator('summary').filter({hasText:/^File sumber/})}).locator('summary').first().tap()
  await browser.locator(`${rowSelector} .warn-toggle`).tap()
  const editor=browser.locator(editorSelector)
  await browser.locator(`${editorSelector} button[aria-expanded]`).tap()

@@ -11,6 +11,10 @@ export type Evidence = {
   fileId: string
   kind: SourceKind
   office: string
+  officePending?: boolean
+  officeConflict?: boolean
+  officeCandidates?: string[]
+  officeCandidate?: string
   name: string
   identityPending?: boolean
   ids: { nip?: string; nika?: string; mesin?: string; appId?: string; nonAsn?: boolean }
@@ -25,6 +29,16 @@ export type Evidence = {
   codeLabel?: string
   mode?: 'WFO' | 'WFA'
   approved?: boolean
+  approvalStatus?: 'approved' | 'rejected' | 'pending' | 'unknown' | 'not-reported'
+  sourceDurationMin?: number
+  minimumDurationMin?: number
+  targetPekerjaan?: string
+  hasilPekerjaan?: string
+  sourceValues?: {
+    name?: string; identifier?: string; employeeNumber?: string; machineId?: string; date?: string
+    schedule?: string; scheduleStart?: string; scheduleEnd?: string; duration?: string; minimumDuration?: string
+    exception?: string; mode?: string; approval?: string; office?: string; unit?: string
+  }
   location?: string
   coordIn?: [number, number]
   coordOut?: [number, number]
@@ -41,6 +55,10 @@ export type EvidenceNote = 'jadwal-puasa' | 'jam-sama-hari-sebelumnya' | 'jam-ma
 export type Assignment = {
   id: string
   fileId: string
+  /** Set by the controlled manual ST form; imports continue to resolve by identifiers/name. */
+  employeeId?: string
+  createdBy?: string
+  createdAt?: string
   office: string
   unit?: string
   letterNo?: string
@@ -89,12 +107,23 @@ export type ImportCommit = {
   replacedScopes?: { sourceId: string; registerKey: string; label: string }[]
 }
 
+export type CoverageStatus = 'complete' | 'partial' | 'nil' | 'not-applicable'
+export type CoverageDeclaration = {
+  start: ISODate
+  end: ISODate
+  status: CoverageStatus
+  basis: string
+  actorId: string
+  at: string
+}
+
 export type SourceFile = {
   id: string
   fileName: string
   kind: SourceKind
   label: string
   office: string
+  officeCandidate?: string
   importedAt: string
   period: { start: ISODate; end: ISODate } | null
   evidence: Evidence[]
@@ -109,6 +138,8 @@ export type SourceFile = {
   revision?: number
   supersedes?: string
   active?: boolean
+  /** Explicit, auditable intervals. Legacy completeThrough is not sufficient to prove coverage. */
+  coverageDeclarations?: CoverageDeclaration[]
   completeThrough?: ISODate
   declaration?: { actorId: string; basis: string; at: string }
   master?: Partial<Employee>[]
@@ -134,6 +165,8 @@ export type Employee = {
   statusKepegawaian: StatusKepegawaian
   golongan: string
   jabatan: string
+  peringkatJabatan?: string
+  jenisJabatan?: string
   tanggalLahir: string
   jenisKelamin: 'Laki-laki' | 'Perempuan' | ''
   tempatLahir: string
@@ -149,6 +182,8 @@ export type Employee = {
   nomorWhatsApp: string
   email: string
   statusPegawai: 'Aktif' | 'Cuti' | 'Tugas Belajar' | 'Nonaktif'
+  tanggalPensiun?: string
+  tanggalPengunduranDiri?: string
   aliases: Alias[]
   sources: string[]
   derived: string[]

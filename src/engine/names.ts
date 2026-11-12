@@ -37,6 +37,9 @@ export function nameTokens(raw: string): string[] {
 
 export const nameKey = (raw: string) => nameTokens(raw).join(' ')
 
+/** Penanda peserta di lampiran surat ("Daftar Terlampir"), bukan nama orang. */
+export const isAttachmentMarker = (raw: string) => /^\s*(?:daftar\s+)?(?:ter)?lampir(?:an)?\b|^\s*daftar\s+nama\b/i.test(String(raw ?? ''))
+
 export function isTitleOnly(raw: string) {
   const t = cleanText(raw).toLowerCase().replace(/[^a-z ]/g, ' ').split(/\s+/).filter(Boolean)
   return t.length === 0 || t.every(x => PREFIX_TITLES.has(x))

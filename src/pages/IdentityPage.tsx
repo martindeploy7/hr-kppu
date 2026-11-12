@@ -81,14 +81,15 @@ function IdentityRow({ item, toast, decided, compact, absensi }: { item: Identit
     </div>
     {compact || (item.status === 'linked' && !absensi) ? <div className="id-linked">
       <ArrowRight size={14} />
-      {linked ? <div><strong>{linked.nama}</strong><small>{linked.nip || 'tanpa NIP'} · {linked.kantor}{item.score ? ` · skor ${Math.round(item.score * 100)}` : ''}{item.method === 'manual' ? ' · keputusan HR' : ''}</small></div> : <span className="muted">{item.status === 'ignored' ? 'Diabaikan (bukan pegawai)' : '—'}</span>}
+      {linked ? <div><strong>{linked.nama}</strong><small>{linked.nip || 'tanpa NIP'} · {linked.kantor}{item.score ? ` · skor ${Math.round(item.score * 100)}` : ''}{item.method === 'manual' ? ' · keputusan HR' : ''}{item.reason ? ` · otomatis: ${item.reason}` : ''}</small></div> : <span className="muted">{item.status === 'ignored' ? 'Diabaikan (bukan pegawai)' : '—'}</span>}
       {decided ? <button className="icon-btn" title="Batalkan keputusan" onClick={() => hr.undoDecision(item.key)}><Undo2 size={14} /></button> : <button className="icon-btn" title="Ganti" onClick={() => setSearch(s => !s)}><Search size={14} /></button>}
     </div> : <div className="id-cands">
+      {item.status === 'unmatched' && item.candidates.length > 0 && <small className="cand-hint">Tidak ada nama yang cocok. Usulan dari absensi:</small>}
       {item.candidates.slice(0, 3).map(c => {
         const e = hr.roster.byId.get(c.employeeId)
         return e && <button key={c.employeeId} className="cand" onClick={() => pick(c.employeeId)}>
           <span className="score">{Math.round(c.score * 100)}</span>
-          <span><strong>{e.nama}</strong><small>{e.nip ? `NIP …${e.nip.slice(-6)}` : 'tanpa NIP'} · {e.kantor}{e.unit ? ` · ${e.unit.replace(/ - Sekretaris Jenderal$/, '')}` : ''}</small></span>
+          <span><strong>{e.nama}</strong><small>{e.nip ? `NIP …${e.nip.slice(-6)}` : 'tanpa NIP'} · {e.kantor}{e.unit ? ` · ${e.unit.replace(/ - Sekretaris Jenderal$/, '')}` : ''}</small>{c.hint && <small className="cand-hint">{c.hint}</small>}</span>
         </button>
       })}
       <button className="cand ghost" onClick={() => setSearch(s => !s)}><Search size={13} /> Cari lain</button>

@@ -35,6 +35,8 @@ const SATPEL: Record<string, string> = {
 }
 export function officeFromUnit(unit?: string): string | undefined {
   if (!unit) return undefined
+  const explicit = officeFromText(unit)
+  if (explicit) return explicit
   const m = unit.toLowerCase().match(/satuan pelaksana\s+([a-z]+)/)
   if (m) return SATPEL[m[1]]
   return undefined
@@ -43,12 +45,12 @@ export function officeFromUnit(unit?: string): string | undefined {
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII']
 export function officeFromText(text: string): string | undefined {
   const s = text.replace(/[_]/g, ' ')
-  const roman = s.match(/kanw?il?\s*(VII|VI|IV|V|III|II|I)\b/i) ?? s.match(/wil\.?\s*(VII|VI|IV|V|III|II|I)\b/i)
+  const roman = s.match(/kanw?il?\s*(VII|VI|IV|V|III|II|I)\b/i) ?? s.match(/(?:kantor\s+)?wilayah\s+(VII|VI|IV|V|III|II|I)\b/i) ?? s.match(/wil\.?\s*(VII|VI|IV|V|III|II|I)\b/i)
   if (roman) return `Kanwil ${roman[1].toUpperCase()}`
-  const arabic = s.match(/kanwil\s*(\d)\b/i)
+  const arabic = s.match(/kanwil\s*(\d)\b/i) ?? s.match(/(?:kantor\s+)?wilayah\s+(\d)\b/i)
   if (arabic && Number(arabic[1]) >= 1 && Number(arabic[1]) <= 7) return `Kanwil ${ROMAN[Number(arabic[1]) - 1]}`
   for (const [city, office] of Object.entries(SATPEL)) if (new RegExp(`\\b${city}\\b`, 'i').test(s)) return office
-  if (/pusat|kesekjenan|kedeputian|sekretariat jenderal/i.test(s)) return 'Pusat'
+  if (/lobby\s+utama\s+kppu|pusat|kesekjenan|sekretaris jenderal|sekretariat jenderal|kedeputian|biro administrasi/i.test(s)) return 'Pusat'
   return undefined
 }
 

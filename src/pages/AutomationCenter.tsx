@@ -9,7 +9,7 @@ import { nextBirthdayDays, tenureYears } from '../lib/format.ts'
 import type { WhatsAppStatus } from '../../shared/whatsapp.ts'
 
 const initialAutomations: AutomationRule[] = [
-  { id: 'forgotout', title: 'Pengingat lupa scan pulang', description: 'Dikirim sore hari ke pegawai yang punya jam masuk tetapi belum ada jam pulang — penyebab utama hari "bukti tidak lengkap".', trigger: 'Hari kerja • 16:45 WIB', audience: 'Pegawai dengan scan masuk tanpa scan pulang', enabled: true, category: 'Absensi', scope: 'personal', privacy: 'standard' },
+  { id: 'forgotout', title: 'Pengingat lupa scan pulang', description: 'Pengingat dikirim sore kepada pegawai dengan scan masuk tanpa scan pulang.', trigger: 'Hari kerja • 16:45 WIB', audience: 'Pegawai dengan scan masuk tanpa scan pulang', enabled: true, category: 'Absensi', scope: 'personal', privacy: 'standard' },
   { id: 'rejected', title: 'Presensi daring ditolak', description: 'Memberi tahu pegawai bahwa presensi aplikasinya berstatus Reject agar segera dikoreksi sebelum rekap bulanan.', trigger: 'Saat status Reject terdeteksi', audience: 'Pegawai pemilik presensi', enabled: false, category: 'Absensi', scope: 'personal', privacy: 'standard' },
   { id: 'birthday', title: 'Ucapan ulang tahun personal', description: 'Pesan otomatis berisi ucapan, doa, harapan, dan semangat kerja yang dipersonalisasi.', trigger: 'Setiap hari • 07:00 WIB', audience: 'Pegawai yang berulang tahun', enabled: true, category: 'Celebration', scope: 'personal', privacy: 'standard' },
   { id: 'religion', title: 'Hari raya keagamaan', description: 'Segmentasi berdasarkan agama agar setiap pegawai menerima ucapan perayaan yang relevan.', trigger: 'Kalender hari raya • 07:00 WIB', audience: 'Berdasarkan agama pegawai', enabled: true, category: 'Celebration', scope: 'segmented', privacy: 'standard' },
@@ -48,7 +48,7 @@ export function AutomationCenter({ toast }: { toast: (m: string) => void }) {
   const [waStatus,setWaStatus]=useState<WhatsAppStatus>({ configured:false,status:'not_configured',message:'Memuat status koneksi…' })
   const [waBusy,setWaBusy]=useState(false)
   const [waError,setWaError]=useState('')
-  const isAdmin=user.role==='admin'
+  const isAdmin=user.role==='superadmin'
   useEffect(()=>{
     if(!isAdmin)return
     let active=true
@@ -89,10 +89,10 @@ export function AutomationCenter({ toast }: { toast: (m: string) => void }) {
   const waConnected=waStatus.status==='connected'
   const connectionLabel:Record<WhatsAppStatus['status'],string>={not_configured:'Perlu konfigurasi',disconnected:'Belum terhubung',connecting:'Menghubungkan',qr:'Pindai QR',connected:'Terhubung',reconnecting:'Menyambung ulang',logged_out:'Sesi keluar',error:'Perlu tindakan'}
   return <>
-    <div className="page-heading"><div><h2>WhatsApp Automation Center</h2><p>Kelola pengumuman, pesan tersegmentasi, komunikasi personal, dan template HR.</p></div><span className={`connection-chip ${waConnected?'online':''}`}><span></span>{isAdmin?connectionLabel[waStatus.status]:'Koneksi dikelola admin'}</span></div>
+    <div className="page-heading"><div><h2>WhatsApp Automation Center</h2><p>Kelola pengumuman, pesan tersegmentasi, komunikasi personal, dan template HR.</p></div><span className={`connection-chip ${waConnected?'online':''}`}><span></span>{isAdmin?connectionLabel[waStatus.status]:'Koneksi dikelola Superadmin'}</span></div>
     <section className="auto-facts">
-      <div><strong>{employees.filter(e => e.tanggalLahir).length}</strong><span>pegawai punya tanggal lahir (dibaca dari NIP) — bahan pratinjau ulang tahun, belum ada pengiriman</span></div>
-      <div><strong>{forgot}</strong><span>hari periode ini dengan scan masuk tanpa scan pulang — sasaran pengingat sore</span></div>
+      <div><strong>{employees.filter(e => e.tanggalLahir).length}</strong><span>pegawai punya tanggal lahir (dibaca dari NIP) untuk pratinjau ulang tahun. Pesan belum dikirim.</span></div>
+      <div><strong>{forgot}</strong><span>hari periode ini dengan scan masuk tanpa scan pulang. Ini sasaran pengingat sore.</span></div>
       <div><strong>{readiness}%</strong><span>pegawai sudah punya nomor WhatsApp; agama {employees.length ? Math.round(employees.filter(e => e.agama).length / employees.length * 100) : 0}% (untuk ucapan hari raya)</span></div>
     </section>
     <section className="blast-overview" aria-label="Kategori komunikasi WhatsApp HR">
@@ -102,7 +102,7 @@ export function AutomationCenter({ toast }: { toast: (m: string) => void }) {
     </section>
     <div className="automation-layout">
       <section className="card wa-connect"><div className="card-head"><div><h3>Koneksi WhatsApp HR</h3><p>Login perangkat tertaut dengan QR WhatsApp Web.</p></div><MessageCircleMore/></div>
-        {!isAdmin ? <div className="wa-setup-note"><ShieldCheck size={20}/><p>Hanya administrator yang dapat melihat QR dan mengelola perangkat tertaut WhatsApp.</p></div> : <>
+        {!isAdmin ? <div className="wa-setup-note"><ShieldCheck size={20}/><p>Status perangkat dan kredensial WhatsApp hanya dapat diakses Superadmin.</p></div> : <>
           {waConnected ? <div className="connected-state"><div className="connected-icon"><CheckCircle2/></div><h3>WhatsApp terhubung</h3><p>{waStatus.phoneNumber?`Nomor +${waStatus.phoneNumber}`:'Perangkat HR aktif'}</p><div className="connection-meta"><div><span>Status</span><strong>Terhubung</strong></div><div><span>Sesi</span><strong>Tersimpan terenkripsi</strong></div><div><span>Terhubung sejak</span><strong>{waStatus.connectedAt?new Intl.DateTimeFormat('id-ID',{dateStyle:'medium',timeStyle:'short'}).format(new Date(waStatus.connectedAt)):'Baru saja'}</strong></div></div><button type="button" className="btn secondary" disabled={waBusy} onClick={disconnectWhatsApp}><ShieldCheck size={16}/> Putuskan perangkat</button></div> : waStatus.qr ? <div className="qr-area"><div className="qr-box"><QRCodeSVG value={waStatus.qr} size={190} level="M" fgColor="#072c52" bgColor="#ffffff"/></div><strong>Pindai dari WhatsApp</strong><p>Buka WhatsApp di ponsel admin → <b>Perangkat tertaut</b> → <b>Tautkan perangkat</b>. QR akan diperbarui otomatis bila kedaluwarsa.</p><button type="button" className="btn secondary" disabled={waBusy} onClick={disconnectWhatsApp}>Batalkan login</button></div> : <div className="qr-area"><div className="qr-box qr-placeholder"><QrCode size={88}/></div><strong>{waStatus.status==='connecting'?'Menghubungkan ke WhatsApp…':waStatus.status==='reconnecting'?'Mencoba menyambungkan kembali…':waStatus.status==='logged_out'?'Sesi WhatsApp sudah keluar':waStatus.status==='error'?'Koneksi perlu diatur ulang':'Tautkan perangkat WhatsApp HR'}</strong><p>{waStatus.message??'Klik tombol untuk meminta QR langsung dari sesi WhatsApp.'}</p>{waStatus.status==='not_configured' ? <div className="wa-setup-note"><ShieldCheck size={18}/><p>Tambahkan <code>WHATSAPP_SESSION_ENCRYPTION_KEY</code> di Render, lalu restart service. Buat nilainya dengan <code>openssl rand -base64 32</code> dan simpan aman.</p></div> : <button type="button" className="btn primary" disabled={waBusy||waStatus.status==='connecting'||waStatus.status==='reconnecting'} onClick={connectWhatsApp}>{waBusy||waStatus.status==='connecting'||waStatus.status==='reconnecting'?<LoaderCircle size={17} className="spin-icon"/>:<QrCode size={17}/>} {waStatus.status==='error'?'Coba login ulang':'Mulai tautkan WhatsApp'}</button>}{waStatus.status==='error'&&waStatus.configured&&<button type="button" className="btn secondary wa-reset-button" disabled={waBusy} onClick={disconnectWhatsApp}>Hapus sesi tersimpan</button>}</div>}
           {waError&&<p className="wa-inline-error" role="alert">{waError}</p>}
         </>}
@@ -116,7 +116,7 @@ export function AutomationCenter({ toast }: { toast: (m: string) => void }) {
             <span className="rule-icon">{r.id==='forgotout'||r.id==='rejected'?<Clock3/>:r.id==='birthday'?<Cake/>:r.id==='religion'||r.id==='workday'?<CalendarDays/>:r.id==='training'?<BookOpenCheck/>:r.id==='datarefresh'||r.id==='payslip'?<Database/>:r.id==='safety'||r.id==='medicalclaim'?<ShieldCheck/>:r.id==='childbirth'||r.id==='condolence'?<HeartHandshake/>:r.id==='performance'?<FileSpreadsheet/>:r.id==='anniversary'?<BriefcaseBusiness/>:<Activity/>}</span>
             <span className="rule-copy"><span className="rule-title-line"><strong>{r.title}</strong><span className="category-tag">{r.category}</span><span className={`scope-tag ${r.scope}`}>{scopeLabels[r.scope]}</span>{r.privacy==='sensitive'&&<span className="privacy-tag">Privat</span>}</span><span className="rule-description">{r.description}</span><small>{r.trigger} • {r.audience}</small></span>
           </button>
-          <button type="button" className={`switch ${r.enabled?'on':''}`} aria-label={`${r.enabled?'Nonaktifkan':'Aktifkan'} ${r.title} (simulasi)`} aria-pressed={r.enabled} onClick={()=>toggle(r.id)}><span/></button>
+          <button type="button" className={`switch ${r.enabled?'on':''}`} aria-label={`${r.enabled?'Nonaktifkan':'Aktifkan'} ${r.title} (simulasi)`} aria-pressed={r.enabled} disabled={user.role !== 'superadmin'} onClick={()=>toggle(r.id)}><span/></button>
         </div>)}{visibleRules.length===0&&<p className="rules-empty">Belum ada aturan pada kategori ini.</p>}</div>
         <small className="rules-hint">{scopeFilter==='all'?`${rules.length} aturan total · gulir daftar untuk melihat lainnya.`:`${visibleRules.length} aturan ${scopeLabels[scopeFilter].toLowerCase()} ditampilkan.`}</small>
       </section>
