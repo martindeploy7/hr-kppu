@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { ListSkeleton } from '../components/Skeleton.tsx'
 import { FileText, LogOut, ShieldCheck } from 'lucide-react'
 import { ROLE_LABEL, type User } from '../../shared/workspace.ts'
 import { monthBounds } from '../engine/dates.ts'
@@ -40,6 +41,7 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
   const [period, setPeriod] = useState(hr?.activePeriod || currentMonth())
   const [filterOffice, setFilterOffice] = useState(user.role === 'operator_st' ? user.offices?.[0] ?? 'Pusat' : initialOffice ?? 'Semua')
   const [registerOffice, setRegisterOffice] = useState(user.role === 'operator_st' ? user.offices?.[0] ?? 'Pusat' : initialOffice ?? 'Pusat')
+  const [recordsLoaded, setRecordsLoaded] = useState(false)
   const [data, setData] = useState<RekapResponse>({ revision: hr?.revision ?? 0, records: [], sourceIds: [] })
   const [employees, setEmployees] = useState<EmployeeOption[]>([])
   const [employeeQuery, setEmployeeQuery] = useState('')
@@ -63,12 +65,12 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
     const query = new URLSearchParams({ period })
     if (officeForQuery && officeForQuery !== 'Semua') query.set('office', officeForQuery)
     const response = await api<RekapResponse>(`/rekap-st?${query}`)
-    setData(response)
+    setData(response); setRecordsLoaded(true)
   }, [period, officeForQuery])
 
   useEffect(() => {
     let active = true
-    loadRecords().catch(e => { if (active) setError((e as Error).message) })
+    loadRecords().catch(e => { if (active) { setError((e as Error).message); setRecordsLoaded(true) } })
     return () => { active = false }
   }, [loadRecords])
 
@@ -211,7 +213,7 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
         <span className="count-line">{data.records.length} catatan</span>
         <button className="btn secondary" disabled={busy} onClick={() => void loadRecords().catch(e => setError((e as Error).message))}>Muat ulang</button>
       </div>
-      {data.records.length ? <div className="table-wrap"><table className="data">
+      {!recordsLoaded ? <ListSkeleton rows={5} cols={6} label="Memuat rekap ST…" /> : data.records.length ? <div className="table-wrap"><table className="data">
         <thead><tr><th>No. ST</th><th>Tanggal ST</th><th>Pegawai</th><th>Tanggal Kegiatan</th><th>Tujuan</th><th>Kantor</th><th>Status</th><th /></tr></thead>
         <tbody>{data.records.map(record => <tr key={record.id}>
           <td><strong>{record.letterNo}</strong><small>Diinput {idDate(record.createdAt.slice(0, 10))} oleh {record.createdBy}</small></td>

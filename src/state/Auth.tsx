@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { AppSkeleton } from '../components/Skeleton.tsx'
 import type { User } from '../../shared/workspace.ts'
 import { api, ApiError } from '../lib/api.ts'
 const Auth = createContext<{ user: User; logout: () => Promise<void> } | null>(null)
@@ -12,7 +13,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try { const r = await api<{ user: User }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }); setPassword(''); setUser(r.user) }
     catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
-  if (loading) return <main className="auth-shell"><p role="status">Memeriksa sesi…</p></main>
+  if (loading) return <AppSkeleton />
   if (!user) return <main className="auth-shell"><section className="auth-panel">
     <img src="/kppu-logo.png" alt="KPPU" width="72" />
     <p className="auth-caption">Sistem Kepegawaian KPPU</p><h1>Masuk ke ruang kerja SDM</h1>

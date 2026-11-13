@@ -7,6 +7,7 @@ import {
 import { AuthProvider, useAuth } from './state/Auth.tsx'
 import { HrDataProvider, useHr } from './state/HrData.tsx'
 import { ROLE_LABEL } from '../shared/workspace.ts'
+import { PageSkeleton, type SkeletonVariant } from './components/Skeleton.tsx'
 import { weeksInMonth } from './engine/dates.ts'
 import { inspectSourceCoverage } from './engine/monthlyFlow.ts'
 const AttendanceOverview = lazy(() => import('./pages/AttendanceOverview.tsx').then(m => ({ default: m.AttendanceOverview })))
@@ -23,6 +24,12 @@ const RekapSTPage = lazy(() => import('./pages/RekapSTPage.tsx').then(m => ({ de
 const RekapSTOperator = lazy(() => import('./pages/RekapSTPage.tsx').then(m => ({ default: m.RekapSTOperator })))
 
 export type Page = 'overview' | 'import' | 'reconcile' | 'identity' | 'meal' | 'dashboard' | 'employees' | 'add' | 'automation' | 'ideas' | 'settings' | 'rekap-st'
+/** Bentuk skeleton per halaman agar loading menyerupai tata letak tujuan (tanpa lompatan layout). */
+const SKELETON: Record<Page, SkeletonVariant> = { overview: 'board', reconcile: 'cards', meal: 'meal', identity: 'identity', dashboard: 'dashboard', employees: 'table', 'rekap-st': 'table', settings: 'table', add: 'form', automation: 'grid', ideas: 'grid', import: 'board' }
+
+// Pratinjau skeleton khusus mode pengembangan: ?skeleton=board|cards|meal|identity|table|dashboard|form|grid
+const skeletonPreview = import.meta.env.DEV ? (new URLSearchParams(window.location.search).get('skeleton') as SkeletonVariant | null) : null
+
 export type Nav = (page: Page, focus?: string) => void
 
 const NAV: { group: string; items: { id: Page; label: string; icon: LucideIcon }[] }[] = [
@@ -109,10 +116,10 @@ function Shell() {
       </header>
       <div className="content-wrap">
         {hr.saveError && <div className="sync-error" role="alert"><strong>Perubahan belum tersimpan</strong><p>{hr.saveError}</p><button className="btn secondary" onClick={hr.backup}>Backup pekerjaan</button> <button className="btn secondary" onClick={hr.retrySave}>Coba simpan</button> <button className="btn secondary" onClick={() => { if (confirm('Muat data server dan lepaskan perubahan lokal yang belum tersimpan? Unduh backup terlebih dahulu.')) void hr.reload() }}>Muat data server</button></div>}
-        {!hr.ready ? <div className="loading-state">Memuat data tersimpan…</div> :
+        {skeletonPreview ? <PageSkeleton variant={skeletonPreview} /> : !hr.ready ? <PageSkeleton variant={SKELETON[page]} label="Memuat data tersimpan…" /> :
           <AnimatePresence mode="wait">
             <motion.div key={page} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} transition={{ duration: .2 }}>
-              <Suspense fallback={<div className="loading-state" role="status">Memuat halaman…</div>}>
+              <Suspense fallback={<PageSkeleton variant={SKELETON[page]} />}>
               {page === 'overview' && <AttendanceOverview nav={nav} toast={show} />}
               {page === 'reconcile' && <ReconcilePage nav={nav} toast={show} focus={focus} />}
               {page === 'identity' && <IdentityPage nav={nav} toast={show} />}

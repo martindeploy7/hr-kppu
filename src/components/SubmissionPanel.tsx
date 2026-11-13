@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { ListSkeleton } from './Skeleton.tsx'
 import { useHr } from '../state/HrData.tsx'
 import { useAuth } from '../state/Auth.tsx'
 import { api } from '../lib/api.ts'
@@ -11,8 +12,9 @@ export function SubmissionPanel() {
   const [items, setItems] = useState<Submission[]>([]), [note, setNote] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [detail, setDetail] = useState<(Submission & { snapshot: MealSnapshot }) | null>(null)
   const id = useRef(crypto.randomUUID())
-  const load = async () => setItems((await api<{ submissions: Submission[] }>('/meal-submissions')).submissions)
-  useEffect(() => { void load().catch(e => setError(e.message)) }, [])
+  const [loaded, setLoaded] = useState(false)
+  const load = async () => { setItems((await api<{ submissions: Submission[] }>('/meal-submissions')).submissions); setLoaded(true) }
+  useEffect(() => { void load().catch(e => { setError(e.message); setLoaded(true) }) }, [])
   const view = async (s: Submission) => {
     try { setDetail((await api<{ submission: Submission & { snapshot: MealSnapshot } }>(`/meal-submissions/${s.id}`)).submission) }
     catch (e) { setError((e as Error).message) }
@@ -49,7 +51,7 @@ export function SubmissionPanel() {
       {user.role === 'superadmin' && ['submitted', 'approved'].includes(s.status) && <button className="link" disabled={busy || note.trim().length < 3} onClick={() => action(s, 'cancel')}>Batalkan pengajuan</button>}
       {user.role === 'superadmin' && s.office === 'Semua' && s.status === 'locked' && !s.correctionId && <button className="link" disabled={busy || note.trim().length < 10 || hr.saveStatus !== 'saved'} onClick={() => action(s, 'correct')}>Ajukan koreksi v{s.version + 1}</button>}
     </td></tr>)}</tbody></table></div>
-    {!items.length && <p className="muted">Belum ada pengajuan. Lengkapi seluruh bukti, review, tarif dan coverage ST sebelum mengajukan.</p>}
+    {!loaded ? <ListSkeleton rows={2} cols={5} label="Memuat riwayat pengajuan…" /> : !items.length && <p className="muted">Belum ada pengajuan. Lengkapi seluruh bukti, review, tarif dan coverage ST sebelum mengajukan.</p>}
     {detail && <section className="import-preview" aria-label="Rincian snapshot pengajuan">
       <div className="preview-head"><div><strong>{detail.period} · {detail.office} · v{detail.version} · {detail.status}</strong><p>{detail.supersededBy ? 'Versi arsip telah digantikan. Gunakan versi terkunci terbaru.' : 'Nominatif merupakan versi penuh. Selisih koreksi menjadi bahan pemeriksaan, bukan pembayaran tambahan otomatis.'}</p></div><button className="btn secondary" onClick={() => setDetail(null)}>Tutup rincian</button></div>
       <p>{detail.snapshot.months.length} pegawai · netto nominatif Rp{money(detail.snapshot.months.reduce((s, m) => s + m.netto, 0))} · revisi data {detail.workspaceRevision}</p>

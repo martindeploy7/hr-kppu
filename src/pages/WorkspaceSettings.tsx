@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ListSkeleton } from '../components/Skeleton.tsx'
 import { useHr } from '../state/HrData.tsx'
 import { useAuth } from '../state/Auth.tsx'
 import { api, downloadJson } from '../lib/api.ts'
@@ -13,11 +14,12 @@ export function WorkspaceSettings() {
   const hr = useHr(), { user } = useAuth()
   const [currentPassword, setCurrentPassword] = useState(''), [newPassword, setNewPassword] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null), [error, setError] = useState(''), [message, setMessage] = useState(''), [busy, setBusy] = useState(false), [ack, setAck] = useState(false)
+  const [accountsLoaded, setAccountsLoaded] = useState(false)
   const [events, setEvents] = useState<Audit[]>([]), [accounts, setAccounts] = useState<Account[]>([]), [drafts, setDrafts] = useState<Record<string, { role: Role; office: string }>>({})
   const [email, setEmail] = useState(''), [name, setName] = useState(''), [password, setPassword] = useState(''), [role, setRole] = useState<Role>('admin'), [accountOffice, setAccountOffice] = useState('')
   const loadAccounts = async () => {
     const response = await api<{ users: Account[] }>('/users')
-    setAccounts(response.users)
+    setAccounts(response.users); setAccountsLoaded(true)
     setDrafts(Object.fromEntries(response.users.map(account => [account.id, { role: account.role, office: account.offices?.[0] ?? '' }])))
   }
   useEffect(() => { if (user.role === 'superadmin') void loadAccounts().catch(e => setError((e as Error).message)) }, [user.role])
@@ -72,12 +74,12 @@ export function WorkspaceSettings() {
         </form>
       </Panel>
       <Panel title={`Akun terdaftar (${accounts.length})`} sub="Perubahan peran mencabut sesi akun tersebut. Akun Superadmin terakhir tidak dapat diturunkan atau dinonaktifkan.">
-        <div className="table-wrap"><table className="data"><thead><tr><th>Akun</th><th>Peran</th><th>Kantor</th><th>Status</th><th>Tindakan</th></tr></thead><tbody>{accounts.map(account => {
+        {!accountsLoaded && !error ? <ListSkeleton rows={3} cols={5} label="Memuat akun…" /> : <div className="table-wrap"><table className="data"><thead><tr><th>Akun</th><th>Peran</th><th>Kantor</th><th>Status</th><th>Tindakan</th></tr></thead><tbody>{accounts.map(account => {
           const draft = drafts[account.id] ?? { role: account.role, office: account.offices?.[0] ?? '' }
           return <tr key={account.id}><td>{account.name}<small>{account.email}</small></td><td><select aria-label={`Peran ${account.email}`} disabled={account.id === user.id || busy} value={draft.role} onChange={e => setDrafts(current => ({ ...current, [account.id]: { ...draft, role: e.target.value as Role, office: e.target.value === 'operator_st' ? draft.office || 'Pusat' : '' } }))}>{roles.map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}</select></td><td>{draft.role === 'operator_st' ? <select aria-label={`Kantor ${account.email}`} disabled={account.id === user.id || busy} value={draft.office} onChange={e => setDrafts(current => ({ ...current, [account.id]: { ...draft, office: e.target.value } }))}>{OFFICES.map(o => <option key={o}>{o}</option>)}</select> : 'Semua kantor'}</td><td>{account.active ? 'Aktif' : 'Nonaktif'}</td><td className="account-actions">
             {account.id !== user.id && account.active && <><button className="link" disabled={busy || (draft.role === account.role && (draft.role !== 'operator_st' || draft.office === (account.offices?.[0] ?? '')))} onClick={async () => { setBusy(true); setError(''); try { await api(`/users/${account.id}/role`, { method: 'POST', body: JSON.stringify({ role: draft.role, offices: draft.role === 'operator_st' ? [draft.office] : null }) }); setMessage(`Peran ${account.email} diperbarui.`); await loadAccounts() } catch (e) { setError((e as Error).message) } finally { setBusy(false) } }}>Simpan peran</button><button className="link danger" disabled={busy} onClick={async () => { const reason = window.prompt(`Alasan menonaktifkan ${account.email} (minimal 3 karakter):`); if (!reason || reason.trim().length < 3) return; setBusy(true); setError(''); try { await api(`/users/${account.id}/disable`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) }); setMessage(`Akun ${account.email} dinonaktifkan.`); await loadAccounts() } catch (e) { setError((e as Error).message) } finally { setBusy(false) } }}>Nonaktifkan</button></>}
           </td></tr>
-        })}</tbody></table></div>
+        })}</tbody></table></div>}
       </Panel>
     </>}
     {!user.offices?.length && ['admin', 'superadmin'].includes(user.role) && <Panel title="Riwayat perubahan server" sub="100 perubahan material terakhir. Riwayat ini terpisah dari label reviewer yang dipulihkan dari backup lama.">
