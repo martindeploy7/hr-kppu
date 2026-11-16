@@ -9,9 +9,11 @@ export const emptyWorkspace = (): Workspace => ({ version: 2, files: [], master:
 export const roles = ['superadmin', 'admin', 'operator_st'] as const
 export type Role = typeof roles[number]
 export const ROLE_LABEL: Record<Role, string> = { superadmin: 'Superadmin', admin: 'Admin · rekonsiliasi', operator_st: 'Operator Rekap ST' }
-/** Legacy accounts keep read access until a superadmin assigns one of the current roles. */
+export const isRole = (value: string | null | undefined): value is Role => (roles as readonly string[]).includes(value ?? '')
+/** Display-only mapping for account lists. Legacy roles (hr, viewer, reviewer, …) cannot sign in
+ *  until a superadmin assigns a current role; see the session gate in server/app.ts. */
 export function canonicalRole(value: string | null | undefined): Role {
-  return value === 'superadmin' || value === 'operator_st' || value === 'admin' ? value : 'admin'
+  return isRole(value) ? value : 'admin'
 }
 export type User = { id: string; email: string; name: string; role: Role; offices?: string[] | null }
 export type WorkspaceResponse = { state: Workspace; revision: number }

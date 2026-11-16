@@ -17,6 +17,7 @@ import { OFFICES } from '../src/engine/ids.ts'
 import { sourceRecordState } from '../src/engine/recordReviews.ts'
 import { users, auditEvents } from '../server/schema.ts'
 import * as XLSX from 'xlsx'
+import { eq } from 'drizzle-orm'
 const URL = process.env.TEST_DATABASE_URL ?? 'postgres://kppu:kppu-local@127.0.0.1:5544/kppu_test'
 const parsed = new globalThis.URL(URL)
 if (!parsed.pathname.endsWith('_test') || !['localhost','127.0.0.1'].includes(parsed.hostname)) throw new Error('Integration tests require a local database ending in _test')
@@ -56,7 +57,9 @@ beforeAll(async()=>{
  try{const exists=await base`select 1 from pg_database where datname='kppu_test'`;if(!exists.length)await base.unsafe('create database kppu_test')}finally{await base.end()}
  await migrateDatabase(URL)
  await connection.sql.unsafe('TRUNCATE hr_internal.audit_events, hr_internal.sessions, hr_internal.uploads, hr_internal.users, hr_internal.workspaces, hr_internal.login_attempts, hr_internal.whatsapp_auth_state CASCADE')
- for(const role of ['admin','hr','reviewer','finance','viewer'] as const){await createUser(connection.db,`${role}@kppu.test`,`${role} Test`,password,role);const response=await request('/auth/login','POST',{email:`${role}@kppu.test`,password});expect(response.status).toBe(200);cookies[role]=response.headers.get('set-cookie')!.split(';')[0]}
+ // Cookie keys are historical fixture names; each maps to one of the three current roles.
+ const ROLE_OF={admin:'superadmin',hr:'admin',reviewer:'admin',finance:'superadmin',viewer:'admin'} as const
+ for(const role of ['admin','hr','reviewer','finance','viewer'] as const){await createUser(connection.db,`${role}@kppu.test`,`${role} Test`,password,ROLE_OF[role]);const response=await request('/auth/login','POST',{email:`${role}@kppu.test`,password});expect(response.status).toBe(200);cookies[role]=response.headers.get('set-cookie')!.split(';')[0]}
 })
 afterAll(async()=>{await connection.sql.end()})
 describe('Authenticated PostgreSQL API',()=>{
@@ -92,17 +95,18 @@ describe('Authenticated PostgreSQL API',()=>{
    expect((await request('/backup/preview','POST',{state:{...w.state,overrides:{[person.id]:{rateHistory:[rateA,rateB]}}}},'admin')).status).toBe(400)
 
    const overlappingStatus=[{kind:'tugas-belajar' as const,start:'2026-10-05',end:'2026-10-12',basis:'Surat tugas belajar sintetis'},{kind:'diperbantukan' as const,start:'2026-10-12',end:'2026-10-20',basis:'Surat perbantuan sintetis'}]
-   const invalidStatus=await request('/workspace','PUT',{expectedRevision:w.revision,patch:{overrides:{[person.id]:{rateHistory:[rateA],workStatusPeriods:overlappingStatus}}},reason:'Reject overlapping work status'},'hr')
+   const invalidStatus=await request('/workspace','PUT',{expectedRevision:w.revision,patch:{overrides:{[person.id]:{rateHistory:[rateA],workStatusPeriods:overlappingStatus}}},reason:'Reject overlapping work status'},'admin')
    expect(invalidStatus.status).toBe(400);expect((await workspace()).revision).toBe(w.revision)
 
    const status=[{kind:'tugas-belajar' as const,start:'2026-10-05',end:'2026-10-11',basis:'Surat tugas belajar sintetis'}]
    const currentOverride=w.state.overrides[person.id]??{}
    expect(currentOverride.rateHistory).toEqual([rateA])
-   const hrSave=await request('/workspace','PUT',{expectedRevision:w.revision,patch:{overrides:{[person.id]:{...currentOverride,workStatusPeriods:status}}},reason:'HR adds effective work status'},'hr');expect(hrSave.status,await hrSave.clone().text()).toBe(200)
+   expect((await request('/workspace','PUT',{expectedRevision:w.revision,patch:{overrides:{[person.id]:{...currentOverride,workStatusPeriods:status}}},reason:'Admin is read-only outside reconciliation'},'hr')).status).toBe(403)
+   const superSave=await request('/workspace','PUT',{expectedRevision:w.revision,patch:{overrides:{[person.id]:{...currentOverride,workStatusPeriods:status}}},reason:'Superadmin adds effective work status'},'admin');expect(superSave.status,await superSave.clone().text()).toBe(200)
    w=await workspace()
    const savedOverride=w.state.overrides[person.id]??{}
-   expect((await request('/workspace','PUT',{expectedRevision:w.revision,patch:{overrides:{[person.id]:{...savedOverride,jabatan:'Tidak berwenang'}}},reason:'Finance profile edit must fail'},'finance')).status).toBe(403)
-   expect((await request('/workspace','PUT',{expectedRevision:w.revision,patch:{overrides:{[person.id]:{...savedOverride,rateHistory:[rateB]}}},reason:'HR rate edit must fail'},'hr')).status).toBe(403)
+   expect((await request('/workspace','PUT',{expectedRevision:w.revision,patch:{overrides:{[person.id]:{...savedOverride,jabatan:'Tidak berwenang'}}},reason:'Admin profile edit must fail'},'viewer')).status).toBe(403)
+   expect((await request('/workspace','PUT',{expectedRevision:w.revision,patch:{overrides:{[person.id]:{...savedOverride,rateHistory:[rateB]}}},reason:'Admin rate edit must fail'},'hr')).status).toBe(403)
   } finally {
    const current=await workspace();expect((await request('/backup/restore','POST',{expectedRevision:current.revision,state:before.state,reason:'Restore original workspace after effective profile test'})).status).toBe(200)
   }
@@ -155,21 +159,9 @@ describe('Authenticated PostgreSQL API',()=>{
    const current=await workspace(),wb=XLSX.utils.book_new()
    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['No. ST','Nama Pegawai','NIP','Tanggal Kegiatan','Tanggal ST','Tujuan'],['001/ST/2026','Pegawai Satu',people[0].nip,'15/10/2026','01/10/2026','Jakarta'],['001/ST/2026','Pegawai Satu',people[0].nip,'15/10/2026','01/10/2026','Jakarta']]),'Register')
    const form=new FormData();form.set('file',new File([XLSX.write(wb,{type:'buffer',bookType:'xlsx'})],'Kesekjenan ST revisi.xlsx'))
-   const upload=await app.request('http://kppu.test/api/imports/preview',{method:'POST',headers:{origin:'http://kppu.test',cookie:cookies.admin},body:form});expect(upload.status,await upload.clone().text()).toBe(200);const file=(await upload.json()).file
-   const nextState=await workspace(),old=nextState.state.files.find((f:any)=>f.id===oldId)!,incoming=groupAssignments(file.assignments)[0],target=groupAssignments(old.assignments.filter((a:any)=>a.letterNo==='001/ST/2026'))[0]
-   const intent={uploadId:file.id,expectedRevision:nextState.revision,office:'Pusat',mode:'replace-registers',coverage:{start:'2026-10-15',end:'2026-10-15',status:'complete',basis:'Complete ST coverage for the selected date range'},completeSnapshot:true,selections:[{incomingKey:incoming.key,targets:[{sourceId:oldId,registerKey:target.key}]}],reason:'Ganti register lengkap ST 001/2026'}
-   expect((await request('/imports/impact','POST',{...intent,expectedRevision:intent.expectedRevision-1})).status).toBe(409)
-   const preview=await request('/imports/impact','POST',intent);expect(preview.status).toBe(200);const diff=await preview.json();expect(diff.counts.removed).toBe(1);expect(diff.counts.unchanged).toBe(1);expect(diff.counts.duplicate).toBe(1);expect(diff.review.computed).toBe(true)
-   expect((await request('/imports/commit','POST',{...intent,confirmedImpact:'0'.repeat(64)})).status).toBe(409)
-   const commit=await request('/imports/commit','POST',{...intent,confirmedImpact:diff.checksum});expect(commit.status).toBe(200)
-   const saved=await workspace(),archived=saved.state.files.find((f:any)=>f.id===oldId)!,newSource=saved.state.files.find((f:any)=>f.id===file.id)!
-   expect(archived.active).not.toBe(false);expect(archived.assignments).toHaveLength(3)
-   expect(sourceRecordState(archived,'assignment','old-a')).toBe('superseded');expect(sourceRecordState(archived,'assignment','old-b')).toBe('superseded');expect(sourceRecordState(archived,'assignment','old-c')).toBe('active')
-   expect(newSource.assignments).toHaveLength(2);expect(newSource.assignmentImport.selectedIds).toHaveLength(1);expect(sourceRecordState(newSource,'assignment',newSource.assignments.find((a:any)=>!newSource.assignmentImport.selectedIds.includes(a.id)).id)).toBe('not-selected')
-   const roster=buildRoster(saved.state.files,saved.state.master,saved.state.overrides,saved.state.decisions)
-   expect(roster.assignmentLink.has('old-a')).toBe(false);expect(roster.assignmentLink.has('old-b')).toBe(false);expect(roster.assignmentLink.has('old-c')).toBe(true);expect(roster.assignmentLink.has(newSource.assignmentImport.selectedIds[0])).toBe(true);expect(newSource.assignments.filter((a:any)=>!newSource.assignmentImport.selectedIds.includes(a.id)).every((a:any)=>!roster.assignmentLink.has(a.id))).toBe(true)
-   const events=await connection.db.select().from(auditEvents),event=events.filter((e:any)=>e.action==='import.replace-registers').at(-1)!
-   expect((event.details as any).assignmentScopeChanges.some((x:any)=>x.sourceId===oldId&&x.supersessionsAdded[0].recordIds.includes('old-b'))).toBe(true)
+   // ST registers are entered on the Rekap ST page now; an ST workbook upload is refused and changes nothing.
+   const upload=await app.request('http://kppu.test/api/imports/preview',{method:'POST',headers:{origin:'http://kppu.test',cookie:cookies.admin},body:form});expect(upload.status).toBe(422);expect((await upload.json()).error).toContain('halaman Rekap ST')
+   const after=await workspace();expect(after.revision).toBe(current.revision);expect(after.state.files.find((f:any)=>f.id===oldId).assignments).toHaveLength(3)
   } finally {
    const current=await workspace();expect((await request('/backup/restore','POST',{expectedRevision:current.revision,state:before.state,reason:'Restore original API test workspace'})).status).toBe(200)
   }
@@ -287,20 +279,22 @@ describe('Authenticated PostgreSQL API',()=>{
  test('office-scoped account cannot read, edit or submit another office',async()=>{
   const before=await workspace(),p={...blankEmployee('other-office-person'),nama:'Kanwil I Uji',nip:'199001012020011001',kantor:'Kanwil I'}
   expect((await request('/workspace','PUT',{expectedRevision:before.revision,patch:{master:[...before.state.master,p]},reason:'Additional office test'})).status).toBe(200)
-  await createUser(connection.db,'office-one@kppu.test','Office One',password,'hr',['Kanwil I'])
+  // Only Operator Rekap ST accounts are office-scoped; they reach nothing but their office's Rekap ST.
+  await createUser(connection.db,'office-one@kppu.test','Office One',password,'operator_st',['Kanwil I'])
   const login=await request('/auth/login','POST',{email:'office-one@kppu.test',password});cookies.officeOne=login.headers.get('set-cookie')!.split(';')[0]
-  const scoped=await (await request('/workspace','GET',undefined,'officeOne')).json();expect(scoped.state.master.map((e:any)=>e.id)).toEqual(['other-office-person']);expect(scoped.state.files.some((f:any)=>f.kind==='surat-tugas'&&f.office==='Kanwil I')).toBe(true);expect(scoped.state.files.every((f:any)=>['Kanwil I','Semua kantor'].includes(f.office))).toBe(true);expect(scoped.state.files.flatMap((f:any)=>[...f.evidence,...f.assignments,...f.master??[]]).every((row:any)=>row.office==='Kanwil I'||row.kantor==='Kanwil I')).toBe(true)
-  const reject=await request('/workspace','PUT',{expectedRevision:scoped.revision,patch:{overrides:{'snapshot-person':{nama:'Unauthorized'}}},reason:'Cross office rejected'},'officeOne');expect(reject.status).toBe(403)
-  const update=await request('/workspace','PUT',{expectedRevision:scoped.revision,patch:{master:[{...p,jabatan:'Updated own office'}]},reason:'Own office update'},'officeOne');expect(update.status).toBe(200)
-  const global=await workspace();expect(global.state.master.some((e:any)=>e.id==='snapshot-person')).toBe(true);expect(global.state.master.find((e:any)=>e.id===p.id).jabatan).toBe('Updated own office')
+  expect((await request('/workspace','GET',undefined,'officeOne')).status).toBe(403)
+  const st=await request('/rekap-st/employees','GET',undefined,'officeOne');expect(st.status).toBe(200)
+  expect(JSON.stringify(await st.json())).not.toContain('snapshot-person')
+  const reject=await request('/workspace','PUT',{expectedRevision:before.revision+1,patch:{overrides:{'snapshot-person':{nama:'Unauthorized'}}},reason:'Cross office rejected'},'officeOne');expect(reject.status).toBe(403)
+  const global=await workspace();expect(global.state.master.some((e:any)=>e.id==='snapshot-person')).toBe(true)
   expect((await request('/coverage/nil-st','POST',{expectedRevision:global.revision,office:'Pusat',period:'2026-09',basis:'Outside scope test should fail'},'officeOne')).status).toBe(403)
   expect((await request('/meal-submissions','POST',{id:randomUUID(),period:'2026-09',office:'Pusat',expectedRevision:global.revision},'officeOne')).status).toBe(403)
-  const hidden=(await (await request('/meal-submissions','GET',undefined,'officeOne')).json()).submissions;expect(hidden).toHaveLength(0)
+  expect((await request('/meal-submissions','GET',undefined,'officeOne')).status).toBe(403)
   const snapshots=(await (await request('/meal-submissions')).json()).submissions
   expect((await request(`/meal-submissions/${snapshots[0].id}`,'GET',undefined,'officeOne')).status).toBe(403)
   expect((await request(`/meal-submissions/${snapshots[0].id}/export`,'GET',undefined,'officeOne')).status).toBe(403)
-  const calculation=await (await request('/calculations/2026-09','GET',undefined,'officeOne')).json();expect(calculation.calculation.months.every((m:any)=>m.employee.kantor==='Kanwil I')).toBe(true)
-  const backup=await (await request('/backup','GET',undefined,'officeOne')).json();expect(backup.state.master).toHaveLength(1)
+  expect((await request('/calculations/2026-09','GET',undefined,'officeOne')).status).toBe(403)
+  expect((await request('/backup','GET',undefined,'officeOne')).status).toBe(403)
  })
  test('record review previews impact, keeps participants separate and audits cancellation/reinstatement',async()=>{
   const original=await workspace(),state=structuredClone(original.state),people=state.master.filter((p:any)=>p.kantor==='Pusat'),id='review-st-source'
@@ -312,13 +306,13 @@ describe('Authenticated PostgreSQL API',()=>{
   expect((await request('/backup/restore','POST',{expectedRevision:original.revision,state,reason:'Synthetic multi-participant ST review fixture'})).status).toBe(200)
   let w=await workspace(),body={id:randomUUID(),expectedRevision:w.revision,kind:'assignment',recordId:'review-st-0',disposition:'excluded',reason:'Pembatalan peserta pertama dikonfirmasi dokumen revisi'}
   const path=`/sources/${id}/record-review`
-  expect((await request(path+'/preview','POST',body,'reviewer')).status).toBe(403)
+  expect((await request(path+'/preview','POST',body,'reviewer')).status).not.toBe(403) // admin helps with reconciliation
   expect((await request(path+'/preview','POST',body,'officeOne')).status).toBe(403)
   expect((await request(path+'/preview','POST',{...body,actorId:'spoof'})).status).toBe(400)
   expect((await request(path+'/preview','POST',{...body,reason:'short'})).status).toBe(400)
   expect((await request(path,'POST',body)).status).toBe(400)
   const response=await request(path+'/preview','POST',body);expect(response.status).toBe(200);const preview=await response.json()
-  expect(preview.affected).toHaveLength(1);expect(preview.affected[0]).toMatchObject({employeeId:people[0].id,before:{mealState:'excluded'},after:{mealState:'held',amount:0}})
+  expect(preview.affected).toHaveLength(1);expect(preview.affected[0]).toMatchObject({employeeId:people[0].id,before:{mealState:'excluded'},after:{mealState:'eligible'}});expect(preview.affected[0].after.amount).toBeGreaterThan(0) // no clash left → UM computed directly (weekly-flow rule)
   expect((await workspace()).revision).toBe(w.revision)
   expect((await request(path,'POST',{...body,confirmedImpact:'0'.repeat(64)})).status).toBe(409)
   const changed=await request('/workspace','PUT',{expectedRevision:w.revision,patch:{period:'2026-09'},reason:'Concurrent change invalidates preview'});expect(changed.status).toBe(200)
@@ -360,6 +354,22 @@ describe('Authenticated PostgreSQL API',()=>{
   expect((await request('/auth/password','POST',{currentPassword:password,newPassword:password+'-new'},'reviewer')).status).toBe(200)
   expect((await app.request('http://kppu.test/api/auth/me',{headers:{cookie:oldCookie}})).status).toBe(401)
   expect((await request('/auth/me','GET',undefined,'reviewer')).status).toBe(200)
+ })
+ test('legacy role cannot sign in or keep a session; superadmin sees it and can reassign',async()=>{
+  await createUser(connection.db,'legacy@kppu.test','Legacy Viewer',password,'admin')
+  const login=await request('/auth/login','POST',{email:'legacy@kppu.test',password});expect(login.status).toBe(200);cookies.legacy=login.headers.get('set-cookie')!.split(';')[0]
+  await connection.db.update(users).set({role:'viewer'}).where(eq(users.email,'legacy@kppu.test'))
+  const w=await workspace()
+  expect((await request('/workspace','PUT',{expectedRevision:w.revision,patch:{resolutions:[]},reason:'legacy write attempt'},'legacy')).status).toBe(403)
+  expect((await request('/auth/login','POST',{email:'legacy@kppu.test',password})).status).toBe(403)
+  const listed=(await (await request('/users')).json()).users.find((u:any)=>u.email==='legacy@kppu.test');expect(listed.legacyRole).toBe('viewer')
+  expect((await request(`/users/${listed.id}/role`,'POST',{role:'admin',offices:null})).status).toBe(200)
+  expect((await request('/auth/login','POST',{email:'legacy@kppu.test',password})).status).toBe(200)
+ })
+ test('admin can preview a campaign but cannot change automation',async()=>{
+  expect((await request('/automation/campaigns/preview','POST',{},'hr')).status).not.toBe(403)
+  expect((await request('/automation/run','POST',{},'hr')).status).toBe(403)
+  expect((await request('/automation/campaigns/preview','POST',{},'officeOne')).status).toBe(403)
  })
  test('logout revokes session on server',async()=>{expect((await request('/auth/logout','POST',{},'viewer')).status).toBe(200);expect((await request('/workspace','GET',undefined,'viewer')).status).toBe(401)})
 })

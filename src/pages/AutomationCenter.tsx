@@ -19,10 +19,9 @@ const roleLabel = { leader: 'Berjalan', standby: 'Standby — instance lain meme
 
 export function AutomationCenter({ toast }: { toast: (m: string) => void }) {
   const { user } = useAuth()
-  const role: string = user.role // 'hr' ada di kontrak server tetapi belum di tipe peran klien
-  const isSuper = role === 'superadmin'
-  const canRead = isSuper || role === 'hr' || role === 'admin'
-  const canWrite = isSuper || role === 'hr'
+  const isSuper = user.role === 'superadmin'
+  const canRead = isSuper || user.role === 'admin'
+  const canWrite = isSuper
   const [overview, setOverview] = useState<AutomationOverview>()
   const [loadError, setLoadError] = useState('')
   const [nowMs, setNowMs] = useState(() => Date.now())

@@ -1,0 +1,17 @@
+.st-multi { display: grid; gap: 10px; margin-top: 12px }
+.st-multi-label { font-weight: 600; font-size: 13px }
+.st-picker { position: relative }
+.st-picker-list { list-style: none; margin: 4px 0 0; padding: 4px; border: 1px solid var(--line, #d0d5dd); border-radius: 8px; background: var(--surface, #fff); max-height: 240px; overflow: auto }
+.st-picker-list button { display: grid; width: 100%; text-align: left; gap: 2px; padding: 6px 8px; border: 0; background: none; border-radius: 6px; cursor: pointer; color: inherit; font: inherit }
+.st-picker-list button:hover, .st-picker-list button:focus-visible { background: rgba(127, 127, 127, .12) }
+.st-picker-list small, .st-chip small { opacity: .7 }
+.st-chips { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)) }
+.st-chip { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 6px 10px; border: 1px solid var(--line, #d0d5dd); border-radius: 8px }
+.st-chip > span { display: grid; gap: 1px; min-width: 0 }
+.st-chip button { border: 0; background: none; cursor: pointer; font-size: 18px; line-height: 1; color: inherit }
+.st-summary { padding: 10px 12px; border-radius: 8px; border: 1px dashed var(--line, #d0d5dd); display: grid; gap: 4px }
+.st-summary p { margin: 0; overflow-wrap: anywhere }
+.st-group-toggle { border: 0; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left; padding: 0 }
+.st-group-detail td { background: rgba(127, 127, 127, .06) }
+.st-group-people { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px }
+.st-group-people li { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap }
