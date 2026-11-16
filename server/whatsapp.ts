@@ -13,6 +13,22 @@ export interface WhatsAppConnector {
   connect(): Promise<void>
   disconnect(): Promise<void>
   close(): Promise<void>
+  /** Siap mengirim: socket terbuka dan sudah login. */
+  isReady(): boolean
+  /** Kirim pesan teks ke nomor 62…; melempar WhatsAppNotReadyError / WhatsAppRecipientError. */
+  sendText(to: string, text: string): Promise<{ id?: string }>
+  /** Dipanggil berkala oleh scheduler: memulihkan koneksi yang mati tanpa menunggu admin. */
+  ensureConnected(): Promise<void>
+}
+
+/** WhatsApp belum terhubung: pesan tetap menunggu di antrean tanpa menghabiskan jatah percobaan. */
+export class WhatsAppNotReadyError extends Error {}
+/** Nomor tujuan tidak terdaftar/tidak valid: tidak ada gunanya diulang. */
+export class WhatsAppRecipientError extends Error {}
+
+const withTimeout = <T>(promise: Promise<T>, ms: number, message: string): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms) })]).finally(() => clearTimeout(timer))
 }
 
 const sessionId = 'primary'
@@ -45,6 +61,9 @@ export class WhatsAppService implements WhatsAppConnector {
   private persistenceQueue: Promise<void> = Promise.resolve()
   private stopping = false
   private opening = false
+  /** Admin menginginkan koneksi tetap hidup (sesi tersimpan & tidak di-logout); dipakai watchdog. */
+  private wantConnected = false
+  private reconnectAttempts = 0
 
   constructor(private readonly db: Database, encryptionSecret = process.env.WHATSAPP_SESSION_ENCRYPTION_KEY) {
     try {
@@ -59,6 +78,21 @@ export class WhatsAppService implements WhatsAppConnector {
   }
 
   status(): WhatsAppStatus { return { ...this.current } }
+  isReady(): boolean { return this.current.status === 'connected' && !!this.socket }
+
+  async sendText(to: string, text: string): Promise<{ id?: string }> {
+    const socket = this.socket
+    if (!socket || this.current.status !== 'connected') throw new WhatsAppNotReadyError('WhatsApp belum terhubung')
+    const [hit] = await withTimeout(socket.onWhatsApp(`${to}@s.whatsapp.net`), 20_000, 'Pemeriksaan nomor WhatsApp melewati batas waktu') ?? []
+    if (!hit?.exists) throw new WhatsAppRecipientError('Nomor tidak terdaftar di WhatsApp')
+    const sent = await withTimeout(socket.sendMessage(hit.jid, { text }), 30_000, 'Pengiriman WhatsApp melewati batas waktu')
+    return { id: sent?.key?.id ?? undefined }
+  }
+
+  async ensureConnected(): Promise<void> {
+    if (!this.encryptionKey || this.stopping || !this.wantConnected || this.socket || this.opening || this.reconnectTimer) return
+    this.scheduleReconnect()
+  }
 
   async restore(): Promise<void> {
     if (!this.encryptionKey) return
@@ -66,15 +100,23 @@ export class WhatsAppService implements WhatsAppConnector {
       const [saved] = await this.db.select({ encryptedState: whatsappAuthState.encryptedState }).from(whatsappAuthState).where(eq(whatsappAuthState.id, sessionId))
       if (!saved) return
       const state = this.decrypt(saved.encryptedState)
+      this.wantConnected = true
       await this.openSocket(state)
-    } catch {
-      this.current = { configured: true, status: 'error', message: 'Sesi tersimpan tidak dapat dipulihkan. Periksa kunci enkripsi atau reset sesi untuk login ulang.' }
+    } catch (error) {
+      // Database belum siap → watchdog mencoba lagi; kunci salah → admin perlu bertindak.
+      if (error instanceof Error && /tidak valid|decrypt|auth/i.test(error.message)) {
+        this.current = { configured: true, status: 'error', message: 'Sesi tersimpan tidak dapat dipulihkan. Periksa kunci enkripsi atau reset sesi untuk login ulang.' }
+      } else {
+        this.wantConnected = true
+        this.scheduleReconnect()
+      }
     }
   }
 
   async connect(): Promise<void> {
     if (!this.encryptionKey) throw new Error(this.current.message ?? 'Konfigurasi WhatsApp belum lengkap.')
-    if (this.socket || this.current.status === 'connected' || this.current.status === 'connecting' || this.current.status === 'qr' || this.current.status === 'reconnecting') return
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined }
+    if (this.socket || this.opening || this.current.status === 'connected' || this.current.status === 'connecting' || this.current.status === 'qr') return
     this.stopping = false
     let saved: { encryptedState: Buffer } | undefined
     try { [saved] = await this.db.select({ encryptedState: whatsappAuthState.encryptedState }).from(whatsappAuthState).where(eq(whatsappAuthState.id, sessionId)) }
@@ -85,11 +127,13 @@ export class WhatsAppService implements WhatsAppConnector {
       this.current = { configured: true, status: 'error', message: 'Sesi tersimpan tidak dapat dibuka. Periksa kunci enkripsi atau hapus sesi untuk login ulang.' }
       throw new Error(this.current.message)
     }
+    this.wantConnected = true
     await this.openSocket(state)
   }
 
   async disconnect(): Promise<void> {
     this.stopping = true
+    this.wantConnected = false
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = undefined
     const socket = this.socket
@@ -197,6 +241,7 @@ export class WhatsAppService implements WhatsAppConnector {
       socket.ev.on('connection.update', update => {
         if (update.qr) this.current = { configured: true, status: 'qr', qr: update.qr, message: 'Pindai QR dari WhatsApp di ponsel admin.' }
         if (update.connection === 'open') {
+          this.reconnectAttempts = 0
           const phoneNumber = socket.user?.id?.split(':')[0]?.split('@')[0]
           this.current = { configured: true, status: 'connected', phoneNumber, connectedAt: new Date().toISOString(), message: 'WhatsApp berhasil terhubung.' }
         }
@@ -205,27 +250,52 @@ export class WhatsAppService implements WhatsAppConnector {
           if (this.stopping) return
           const code = (update.lastDisconnect?.error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode
           if (code === DisconnectReason.loggedOut) {
+            this.wantConnected = false
             this.current = { configured: true, status: 'logged_out', message: 'Sesi keluar dari WhatsApp. Hubungkan ulang untuk login.' }
             void this.db.delete(whatsappAuthState).where(eq(whatsappAuthState.id, sessionId)).catch(() => undefined)
+          } else if (code === DisconnectReason.connectionReplaced) {
+            // Sesi yang sama dibuka di server lain; menyambung ulang hanya akan saling merebut.
+            this.wantConnected = false
+            this.current = { configured: true, status: 'error', message: 'Sesi WhatsApp dibuka di tempat lain. Tutup instance lain lalu hubungkan kembali.' }
+          } else if (code === DisconnectReason.restartRequired) {
+            this.scheduleReconnect(true) // wajib setelah QR dipindai
+          } else if (!auth.creds.me) {
+            // QR tidak dipindai sampai kedaluwarsa: jangan memutar QR baru tanpa henti.
+            this.wantConnected = false
+            this.current = { configured: true, status: 'disconnected', message: 'QR kedaluwarsa sebelum dipindai. Klik Hubungkan untuk menampilkan QR baru.' }
           } else this.scheduleReconnect()
         }
       })
     } catch {
-      this.current = { configured: true, status: 'error', message: 'Koneksi WhatsApp gagal dimulai. Coba ulang beberapa saat lagi.' }
+      this.current = { configured: true, status: 'error', message: 'Koneksi WhatsApp gagal dimulai. Mencoba lagi otomatis.' }
+      this.socket = undefined
+      this.opening = false
+      if (this.wantConnected) this.scheduleReconnect()
     } finally {
       this.opening = false
     }
   }
 
-  private scheduleReconnect(): void {
+  /** Backoff eksponensial tanpa batas (2 dtk → maks 5 menit) selama sesi masih diinginkan. */
+  private scheduleReconnect(immediate = false): void {
     if (this.stopping || this.reconnectTimer) return
-    this.current = { configured: true, status: 'reconnecting', message: 'Koneksi terputus; mencoba menyambung kembali…' }
+    const delay = immediate ? 500 : Math.min(300_000, 2000 * 2 ** Math.min(this.reconnectAttempts, 8)) + Math.floor(Math.random() * 1000)
+    this.reconnectAttempts++
+    this.current = { configured: true, status: 'reconnecting', message: `Koneksi terputus; menyambung ulang dalam ${Math.max(1, Math.round(delay / 1000))} dtk (percobaan ke-${this.reconnectAttempts}).` }
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined
-      this.current = { configured: true, status: 'disconnected' }
-      void this.connect().catch(() => {
-        this.current = { configured: true, status: 'error', message: 'Koneksi ulang gagal. Coba hubungkan kembali dari halaman ini.' }
-      })
-    }, 3000)
+      if (this.stopping) return
+      void this.reopen().catch(() => this.scheduleReconnect())
+    }, delay)
+  }
+
+  private async reopen(): Promise<void> {
+    const [saved] = await this.db.select({ encryptedState: whatsappAuthState.encryptedState }).from(whatsappAuthState).where(eq(whatsappAuthState.id, sessionId))
+    if (!saved) {
+      this.wantConnected = false
+      this.current = { configured: true, status: 'disconnected', message: 'Sesi tersimpan tidak ditemukan. Hubungkan kembali untuk menampilkan QR baru.' }
+      return
+    }
+    await this.openSocket(this.decrypt(saved.encryptedState))
   }
 }

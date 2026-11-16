@@ -2,6 +2,8 @@ import { pgSchema, text, integer, jsonb, timestamp, boolean, customType, index, 
 import type { SourceFile } from '../src/engine/types.ts'
 import type { Role, Workspace } from '../shared/workspace.ts'
 import type { MealSnapshot } from '../shared/submissions.ts'
+import type { AutomationRuleId, AutomationRuleOptions, AutomationSettings, CampaignAudience, CampaignStatus, OutboxStatus } from '../shared/automation.ts'
+import type { Religion } from '../src/engine/types.ts'
 // Private schema is not exposed by Supabase's public Data API.
 export const hr = pgSchema('hr_internal')
 const time = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' })
@@ -34,4 +36,34 @@ export const mealSubmissions = hr.table('meal_submissions', {
 })
 export const mealClaimedDays = hr.table('meal_claimed_days', {
   key: text('key').primaryKey(), submissionId: text('submission_id').references(() => mealSubmissions.id).notNull(), employeeId: text('employee_id').notNull(), date: text('date').notNull(),
+})
+// ===== Automation WhatsApp =====
+export const waAutomationSettings = hr.table('wa_automation_settings', {
+  id: text('id').primaryKey(), settings: jsonb('settings').$type<Partial<AutomationSettings>>().notNull(), updatedAt: time('updated_at').defaultNow().notNull(), updatedBy: text('updated_by'),
+})
+export const waAutomationRules = hr.table('wa_automation_rules', {
+  id: text('id').primaryKey(), enabled: boolean('enabled').notNull(), sendTime: text('send_time').notNull(), template: text('template').notNull(),
+  options: jsonb('options').$type<AutomationRuleOptions>().default({}).notNull(), updatedAt: time('updated_at').defaultNow().notNull(), updatedBy: text('updated_by'),
+})
+export const waHolidays = hr.table('wa_holidays', {
+  id: text('id').primaryKey(), date: text('date').notNull(), name: text('name').notNull(), religions: jsonb('religions').$type<Religion[]>().notNull(),
+  greeting: text('greeting').notNull(), confirmed: boolean('confirmed').default(false).notNull(), enabled: boolean('enabled').default(true).notNull(),
+})
+export const waCampaigns = hr.table('wa_campaigns', {
+  id: text('id').primaryKey(), ruleId: text('rule_id').$type<AutomationRuleId>().notNull(), title: text('title').notNull(), template: text('template').notNull(),
+  variables: jsonb('variables').$type<Record<string, string>>().default({}).notNull(), audience: jsonb('audience').$type<CampaignAudience>().notNull(),
+  sendAt: time('send_at').notNull(), repeatMonthly: boolean('repeat_monthly').default(false).notNull(), status: text('status').$type<CampaignStatus>().default('scheduled').notNull(),
+  createdBy: text('created_by').references(() => users.id).notNull(), createdAt: time('created_at').defaultNow().notNull(), lastRunOn: text('last_run_on'), recipients: integer('recipients'),
+}, t => [index('wa_campaigns_status_idx').on(t.status, t.sendAt)])
+export const waOutbox = hr.table('wa_outbox', {
+  id: text('id').primaryKey(), dedupeKey: text('dedupe_key').notNull().unique(), ruleId: text('rule_id').$type<AutomationRuleId>().notNull(),
+  campaignId: text('campaign_id'), employeeId: text('employee_id'), recipientName: text('recipient_name').notNull(),
+  phone: text('phone').notNull(), deliverTo: text('deliver_to').notNull(), test: boolean('test').default(false).notNull(), message: text('message').notNull(),
+  scheduledFor: time('scheduled_for').notNull(), expiresAt: time('expires_at').notNull(), status: text('status').$type<OutboxStatus>().notNull(),
+  attempts: integer('attempts').default(0).notNull(), nextAttemptAt: time('next_attempt_at'), lastError: text('last_error'), waMessageId: text('wa_message_id'),
+  sentAt: time('sent_at'), createdAt: time('created_at').defaultNow().notNull(), updatedAt: time('updated_at').defaultNow().notNull(),
+}, t => [index('wa_outbox_due_idx').on(t.status, t.scheduledFor), index('wa_outbox_created_idx').on(t.createdAt)])
+/** Sidik data jabatan terakhir per pegawai, pembanding untuk aturan perubahan jabatan. */
+export const waEmployeeSnapshots = hr.table('wa_employee_snapshots', {
+  employeeId: text('employee_id').primaryKey(), fingerprint: text('fingerprint').notNull(), updatedAt: time('updated_at').defaultNow().notNull(),
 })

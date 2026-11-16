@@ -29,6 +29,7 @@ import { validateMasterChange } from './master.ts'
 import { previewRecordReview, recordReviewInput } from './recordReviews.ts'
 import { canRetryImport, importCommitSchema, importIntentSchema, previewImport } from './imports.ts'
 import type { WhatsAppConnector } from './whatsapp.ts'
+import { AutomationInputError, AutomationService, canReadAutomation, canWriteAutomation } from './automation.ts'
 
 const digest = (s: string | Buffer) => createHash('sha256').update(s).digest('hex')
 const stableValue = (value: unknown): unknown => Array.isArray(value)
@@ -65,7 +66,7 @@ function publicStRecord(file: SourceFile, assignment: Assignment, createdBy?: st
     createdBy: createdBy ?? assignment.createdBy ?? 'Akun lama',
   }
 }
-export function createApp(db: Database, config: { origin: string; production: boolean }, whatsapp?: WhatsAppConnector) {
+export function createApp(db: Database, config: { origin: string; production: boolean }, whatsapp?: WhatsAppConnector, automation: AutomationService = new AutomationService(db, whatsapp)) {
   const app = new Hono<{ Variables: { user: User; sessionHash: string } }>()
   const cookie = config.production ? '__Host-kppu_session' : 'kppu_session'
   const dummyHash = hash(randomBytes(32).toString('hex'))
@@ -140,6 +141,28 @@ export function createApp(db: Database, config: { origin: string; production: bo
     catch { throw new HTTPException(503, { message: 'Sesi WhatsApp gagal dihapus. Coba kembali.' }) }
     return c.json(whatsapp.status())
   })
+  // ===== Automation WhatsApp =====
+  const automationRead = (user: User) => { if (!canReadAutomation(user.role)) throw new HTTPException(403, { message: 'Automation WhatsApp hanya dapat dilihat Superadmin dan Admin' }) }
+  const automationWrite = (user: User) => { if (!canWriteAutomation(user.role)) throw new HTTPException(403, { message: 'Hanya Superadmin yang dapat mengubah automation WhatsApp' }) }
+  const guarded = async <T>(work: () => Promise<T>): Promise<T> => {
+    try { return await work() }
+    catch (error) { if (error instanceof AutomationInputError) throw new HTTPException(400, { message: error.message }); throw error }
+  }
+  const body = async (c: { req: { json: () => Promise<unknown> } }) => { try { return (await c.req.json()) as Record<string, any> } catch { throw new HTTPException(400, { message: 'Body JSON tidak valid' }) } }
+  app.get('/api/automation', async c => { automationRead(c.get('user')); return c.json(await automation.overview()) })
+  app.put('/api/automation/settings', async c => { const u = c.get('user'); automationWrite(u); const b = await body(c); await guarded(() => automation.updateSettings(b, u)); return c.json(await automation.overview()) })
+  app.put('/api/automation/rules/:id', async c => { const u = c.get('user'); automationWrite(u); const b = await body(c); await guarded(() => automation.updateRule(c.req.param('id'), b, u)); return c.json(await automation.overview()) })
+  app.put('/api/automation/holidays', async c => { const u = c.get('user'); automationWrite(u); const b = await body(c); await guarded(() => automation.setHolidays(b.holidays, u)); return c.json(await automation.overview()) })
+  app.get('/api/automation/outbox', async c => { automationRead(c.get('user')); return c.json({ items: await automation.outbox({ status: c.req.query('status') || undefined, ruleId: c.req.query('ruleId') || undefined, limit: Number(c.req.query('limit') ?? 100) || 100 }) }) })
+  app.post('/api/automation/outbox/:id/retry', async c => { const u = c.get('user'); automationWrite(u); return c.json({ item: await guarded(() => automation.retry(c.req.param('id'), u)) }) })
+  app.post('/api/automation/outbox/:id/cancel', async c => { const u = c.get('user'); automationWrite(u); return c.json({ item: await guarded(() => automation.cancel(c.req.param('id'), u)) }) })
+  app.get('/api/automation/preview', async c => { automationRead(c.get('user')); return c.json(await guarded(() => automation.preview(c.req.query('ruleId') ?? '', c.req.query('date') ?? ''))) })
+  app.post('/api/automation/test', async c => { const u = c.get('user'); automationWrite(u); const b = await body(c); return c.json({ item: await guarded(() => automation.sendTest(String(b.ruleId ?? ''), b.employeeId ? String(b.employeeId) : undefined, u)) }) })
+  app.get('/api/automation/campaigns', async c => { automationRead(c.get('user')); return c.json({ campaigns: await automation.campaigns() }) })
+  app.post('/api/automation/campaigns/preview', async c => { automationRead(c.get('user')); const b = await body(c); return c.json(await guarded(() => automation.previewCampaign(b))) })
+  app.post('/api/automation/campaigns', async c => { const u = c.get('user'); automationWrite(u); const b = await body(c); return c.json({ campaign: await guarded(() => automation.createCampaign(b, u)) }, 201) })
+  app.post('/api/automation/campaigns/:id/cancel', async c => { const u = c.get('user'); automationWrite(u); return c.json({ campaign: await guarded(() => automation.cancelCampaign(c.req.param('id'), u)) }) })
+  app.post('/api/automation/run', async c => { const u = c.get('user'); automationWrite(u); await automation.tick(); return c.json(await automation.overview()) })
   app.post('/api/auth/password', async c => {
     const v = z.object({ currentPassword: z.string().min(1).max(256), newPassword: z.string().min(14).max(256) }).parse(await c.req.json()), actor = c.get('user')
     const [account] = await db.select().from(users).where(eq(users.id, actor.id))
