@@ -46,7 +46,7 @@ export function DayDetail({ day, showMeal = true, canReview = false }: { day: Da
         </td>
         <td><small title={fileName(e.fileId)}>{fileName(e.fileId)}</small><small>{e.ref}</small>{hr.files.find(f => f.id === e.fileId) && <RecordReview file={hr.files.find(f => f.id === e.fileId)!} kind="evidence" recordId={e.id} />}</td>
       </tr>)}</tbody>
-    </table></div> : <p className="muted small">Tidak ada catatan absensi pada tanggal ini.</p>}
+    </table></div> : <p className="muted small">Tidak ada catatan absensi pada tanggal ini. Periksa apakah setoran pekan ini sudah lengkap.</p>}
     {day.evidence.some(e => e.present) && <p className="muted small">* Sumber hanya mencatat kode "Normal" tanpa jam.</p>}
     {assignments.length > 0 && <div className="st-list">{assignments.map(a => <div key={a.id}>
       <FileText size={14} />
@@ -61,6 +61,6 @@ export function DayDetail({ day, showMeal = true, canReview = false }: { day: Da
       {day.overtimeMin > 0 && <span>Lembur <b>{Math.round(day.overtimeMin / 6) / 10} jam</b></span>}
       {showMeal && <span className={`meal-tag m-${day.meal.state}`}>Uang makan: {day.meal.state === 'eligible' ? day.meal.amountReady ? 'hari memenuhi syarat' : 'hari memenuhi syarat, nominal pending' : day.meal.state === 'held' ? 'ditahan' : 'tidak memenuhi syarat'} · {day.meal.reason}</span>}
     </div>
-    {day.resolved.length > 0 && <div className="audit">{day.resolved.map(r => <p key={r.issueId}>✓ {r.reviewer} · {new Date(r.at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })} · {r.decision.replace('-', ' ')}{r.note ? ` — "${r.note}"` : ''}</p>)}</div>}
+    {day.resolved.length > 0 && <div className="audit">{day.resolved.map(r => <p key={r.issueId}>✓ {r.reviewer} · {new Date(r.at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })} · {r.decision.replace('-', ' ')}{r.note ? ` · "${r.note}"` : ''}</p>)}</div>}
   </div>
 }

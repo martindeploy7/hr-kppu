@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
 import {
   BarChart3, CheckCircle2, ChevronRight, ClipboardCheck, Fingerprint, LayoutDashboard, Lightbulb, Menu,
   MessageCircleMore, Plus, Trash2, UploadCloud, UsersRound, WalletCards, X, type LucideIcon,
@@ -10,25 +10,44 @@ import { ROLE_LABEL } from '../shared/workspace.ts'
 import { PageSkeleton, type SkeletonVariant } from './components/Skeleton.tsx'
 import { weeksInMonth } from './engine/dates.ts'
 import { inspectSourceCoverage } from './engine/monthlyFlow.ts'
-const AttendanceOverview = lazy(() => import('./pages/AttendanceOverview.tsx').then(m => ({ default: m.AttendanceOverview })))
-const ReconcilePage = lazy(() => import('./pages/ReconcilePage.tsx').then(m => ({ default: m.ReconcilePage })))
-const IdentityPage = lazy(() => import('./pages/IdentityPage.tsx').then(m => ({ default: m.IdentityPage })))
-const MealPage = lazy(() => import('./pages/MealPage.tsx').then(m => ({ default: m.MealPage })))
-const PeopleDashboard = lazy(() => import('./pages/PeopleDashboard.tsx').then(m => ({ default: m.PeopleDashboard })))
-const EmployeesPage = lazy(() => import('./pages/EmployeesPage.tsx').then(m => ({ default: m.EmployeesPage })))
-const AddDataPage = lazy(() => import('./pages/AddDataPage.tsx').then(m => ({ default: m.AddDataPage })))
-const AutomationCenter = lazy(() => import('./pages/AutomationCenter.tsx').then(m => ({ default: m.AutomationCenter })))
-const WorkspaceSettings = lazy(() => import('./pages/WorkspaceSettings.tsx').then(m => ({ default: m.WorkspaceSettings })))
-const FeatureMap = lazy(() => import('./pages/FeatureMap.tsx').then(m => ({ default: m.FeatureMap })))
-const RekapSTPage = lazy(() => import('./pages/RekapSTPage.tsx').then(m => ({ default: m.RekapSTPage })))
-const RekapSTOperator = lazy(() => import('./pages/RekapSTPage.tsx').then(m => ({ default: m.RekapSTOperator })))
+// Satu sumber untuk lazy() dan pemanasan chunk: import() yang sama dipakai bersama, jadi hover/fokus di menu cukup memanggil loader.
+const LOAD = {
+  overview: () => import('./pages/AttendanceOverview.tsx'),
+  reconcile: () => import('./pages/ReconcilePage.tsx'),
+  identity: () => import('./pages/IdentityPage.tsx'),
+  meal: () => import('./pages/MealPage.tsx'),
+  dashboard: () => import('./pages/PeopleDashboard.tsx'),
+  employees: () => import('./pages/EmployeesPage.tsx'),
+  add: () => import('./pages/AddDataPage.tsx'),
+  automation: () => import('./pages/AutomationCenter.tsx'),
+  settings: () => import('./pages/WorkspaceSettings.tsx'),
+  ideas: () => import('./pages/FeatureMap.tsx'),
+  'rekap-st': () => import('./pages/RekapSTPage.tsx'),
+}
+const AttendanceOverview = lazy(() => LOAD.overview().then(m => ({ default: m.AttendanceOverview })))
+const ReconcilePage = lazy(() => LOAD.reconcile().then(m => ({ default: m.ReconcilePage })))
+const IdentityPage = lazy(() => LOAD.identity().then(m => ({ default: m.IdentityPage })))
+const MealPage = lazy(() => LOAD.meal().then(m => ({ default: m.MealPage })))
+const PeopleDashboard = lazy(() => LOAD.dashboard().then(m => ({ default: m.PeopleDashboard })))
+const EmployeesPage = lazy(() => LOAD.employees().then(m => ({ default: m.EmployeesPage })))
+const AddDataPage = lazy(() => LOAD.add().then(m => ({ default: m.AddDataPage })))
+const AutomationCenter = lazy(() => LOAD.automation().then(m => ({ default: m.AutomationCenter })))
+const WorkspaceSettings = lazy(() => LOAD.settings().then(m => ({ default: m.WorkspaceSettings })))
+const FeatureMap = lazy(() => LOAD.ideas().then(m => ({ default: m.FeatureMap })))
+const RekapSTPage = lazy(() => LOAD['rekap-st']().then(m => ({ default: m.RekapSTPage })))
+const RekapSTOperator = lazy(() => LOAD['rekap-st']().then(m => ({ default: m.RekapSTOperator })))
+/** Hangatkan chunk halaman sebelum diklik (hover, fokus, atau awal sentuhan); galat diabaikan karena klik akan mencoba lagi. */
+const warm = (page: Page) => { const load = (LOAD as Partial<Record<Page, () => Promise<unknown>>>)[page]; if (load) void load().catch(() => {}) }
 
 export type Page = 'overview' | 'import' | 'reconcile' | 'identity' | 'meal' | 'dashboard' | 'employees' | 'add' | 'automation' | 'ideas' | 'settings' | 'rekap-st'
 /** Bentuk skeleton per halaman agar loading menyerupai tata letak tujuan (tanpa lompatan layout). */
-const SKELETON: Record<Page, SkeletonVariant> = { overview: 'board', reconcile: 'cards', meal: 'meal', identity: 'identity', dashboard: 'dashboard', employees: 'table', 'rekap-st': 'table', settings: 'table', add: 'form', automation: 'grid', ideas: 'grid', import: 'board' }
+const SKELETON: Record<Page, SkeletonVariant> = { overview: 'board', reconcile: 'cards', meal: 'meal', identity: 'identity', dashboard: 'dashboard', employees: 'employees', 'rekap-st': 'rekap', settings: 'settings', add: 'form', automation: 'automation', ideas: 'features', import: 'board' }
 
-// Pratinjau skeleton khusus mode pengembangan: ?skeleton=board|cards|meal|identity|table|dashboard|form|grid
+// Pratinjau skeleton khusus mode pengembangan: ?skeleton=board|cards|meal|identity|table|dashboard|form|grid|automation|features|employees|rekap|settings
 const skeletonPreview = import.meta.env.DEV ? (new URLSearchParams(window.location.search).get('skeleton') as SkeletonVariant | null) : null
+
+// Sama dengan --ease-out di theme.css (framer-motion butuh nilai JS).
+const EASE_OUT = [0.23, 1, 0.32, 1] as const
 
 export type Nav = (page: Page, focus?: string) => void
 
@@ -60,7 +79,20 @@ function Shell() {
   const [focus, setFocus] = useState<string | undefined>()
   const [menu, setMenu] = useState(false)
   const [toast, setToast] = useState('')
+  const menuButton = useRef<HTMLButtonElement>(null)
+  const menuWasOpen = useRef(false)
   useEffect(() => { if (!toast) return; const t = window.setTimeout(() => setToast(''), 3200); return () => clearTimeout(t) }, [toast])
+  // Menu seluler: Escape menutup; fokus masuk ke menu saat dibuka dan kembali ke tombol menu saat tertutup.
+  useEffect(() => {
+    if (menu) {
+      menuWasOpen.current = true
+      document.querySelector<HTMLElement>('#primary-navigation button.active, #primary-navigation button')?.focus({ preventScroll: true })
+      const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(false) }
+      document.addEventListener('keydown', onKey)
+      return () => document.removeEventListener('keydown', onKey)
+    }
+    if (menuWasOpen.current) { menuWasOpen.current = false; menuButton.current?.focus({ preventScroll: true }) }
+  }, [menu])
   const nav: Nav = (p, f) => {
     if (user.role !== 'superadmin' && p === 'add') return
     setPage(p === 'import' ? 'overview' : p); setFocus(f); setMenu(false); window.scrollTo({ top: 0 })
@@ -91,7 +123,7 @@ function Shell() {
       <nav id="primary-navigation" className="nav-groups">
         {NAV.map(g => <div key={g.group} className="nav-group">
           <span className="nav-group-label">{g.group}</span>
-          {g.items.filter(item => user.role === 'superadmin' || item.id !== 'add').map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => nav(item.id)}>
+          {g.items.filter(item => user.role === 'superadmin' || item.id !== 'add').map(item => <button key={item.id} type="button" className={page === item.id ? 'active' : ''} aria-current={page === item.id ? 'page' : undefined} onClick={() => nav(item.id)} onPointerEnter={() => warm(item.id)} onPointerDown={() => warm(item.id)} onFocus={() => warm(item.id)}>
             <item.icon size={17} /><span>{item.label}</span>
             {badge[item.id] ? <em className="nav-badge">{badge[item.id]! > 99 ? '99+' : badge[item.id]}</em> : page === item.id ? <ChevronRight size={15} className="nav-chevron" /> : null}
           </button>)}
@@ -105,7 +137,7 @@ function Shell() {
     </aside>
     <main className="main">
       <header className="topbar">
-        <button className="mobile-menu" aria-label={menu ? 'Tutup menu' : 'Buka menu'} aria-expanded={menu} aria-controls="primary-navigation" onClick={() => setMenu(v => !v)}>{menu ? <X size={20} /> : <Menu size={20} />}</button>
+        <button ref={menuButton} type="button" className="mobile-menu" aria-label={menu ? 'Tutup menu' : 'Buka menu'} aria-expanded={menu} aria-controls="primary-navigation" onClick={() => setMenu(v => !v)}>{menu ? <X size={20} /> : <Menu size={20} />}</button>
         <div><p>Sistem Absensi Terintegrasi KPPU</p><h1>{title}</h1></div>
         <div className="top-actions">
           {hr.ready && <label className="period-pick"><span>Periode KPPU</span>
@@ -117,9 +149,9 @@ function Shell() {
       <div className="content-wrap">
         {hr.saveError && <div className="sync-error" role="alert"><strong>Perubahan belum tersimpan</strong><p>{hr.saveError}</p><button className="btn secondary" onClick={hr.backup}>Backup pekerjaan</button> <button className="btn secondary" onClick={hr.retrySave}>Coba simpan</button> <button className="btn secondary" onClick={() => { if (confirm('Muat data server dan lepaskan perubahan lokal yang belum tersimpan? Unduh backup terlebih dahulu.')) void hr.reload() }}>Muat data server</button></div>}
         {skeletonPreview ? <PageSkeleton variant={skeletonPreview} /> : !hr.ready ? <PageSkeleton variant={SKELETON[page]} label="Memuat data tersimpan…" /> :
-          <AnimatePresence mode="wait">
-            <motion.div key={page} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} transition={{ duration: .2 }}>
-              <Suspense fallback={<PageSkeleton variant={SKELETON[page]} />}>
+          // Pindah halaman = tindakan sering: tanpa animasi keluar, skeleton tampil seketika (key per halaman), isi baru hanya memudar masuk ≤150ms.
+          <Suspense key={page} fallback={<PageSkeleton variant={SKELETON[page]} />}>
+            <div className="page-swap">
               {page === 'overview' && <AttendanceOverview nav={nav} toast={show} />}
               {page === 'reconcile' && <ReconcilePage nav={nav} toast={show} focus={focus} />}
               {page === 'identity' && <IdentityPage nav={nav} toast={show} />}
@@ -131,12 +163,13 @@ function Shell() {
               {page === 'rekap-st' && <RekapSTPage key={focus} toast={show} office={focus} />}
               {page === 'settings' && <WorkspaceSettings />}
               {page === 'ideas' && <FeatureMap nav={nav} />}
-              </Suspense>
-            </motion.div>
-          </AnimatePresence>}
+            </div>
+          </Suspense>}
       </div>
     </main>
-    <AnimatePresence>{toast && <motion.div className="toast" role="status" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}><CheckCircle2 size={18} />{toast}</motion.div>}</AnimatePresence>
+    <div role="status" aria-live="polite">
+      <AnimatePresence>{toast && <motion.div className="toast" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0, transition: { duration: .22, ease: EASE_OUT } }} exit={{ opacity: 0, y: 4, transition: { duration: .14, ease: EASE_OUT } }}><CheckCircle2 size={18} aria-hidden="true" />{toast}</motion.div>}</AnimatePresence>
+    </div>
     {menu && <div className="sidebar-overlay" onClick={() => setMenu(false)} />}
   </div>
 }
@@ -148,5 +181,5 @@ function AuthenticatedApp() {
 }
 
 export default function App() {
-  return <AuthProvider><AuthenticatedApp /></AuthProvider>
+  return <MotionConfig reducedMotion="user"><AuthProvider><AuthenticatedApp /></AuthProvider></MotionConfig>
 }

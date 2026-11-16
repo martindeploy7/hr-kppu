@@ -43,14 +43,14 @@ export function RecordReview({ file, kind, recordId }: { file: SourceFile; kind:
       {currentState === 'not-selected' && <p>Catatan asli tetap disimpan bersama workbook, tetapi tidak termasuk register yang dipilih saat impor. Unggah ulang lalu pilih register ini untuk mengaktifkannya.</p>}
       {editable && <><p>{excluded ? 'Aktifkan kembali catatan asli. Bukti lain dan aturan UM tetap diperiksa.' : kind === 'assignment' ? 'Keluarkan peserta ST ini bila batal atau salah peserta/tanggal. Peserta lain tetap aktif.' : 'Tolak bukti ini bila tidak sah; pasangan jam dari bukti lain tetap diperiksa tanpa menggabungkan jam antarbaris.'} Catatan asli tetap diarsipkan.</p>
         <label>Dasar koreksi {record.ref}<textarea rows={2} value={reason} onChange={e => setReason(e.target.value)} maxLength={2000} placeholder="Alasan dan rujukan dokumen pendukung, minimal 10 karakter" disabled={busy} /></label>
-        <button className="btn secondary" disabled={busy || reason.trim().length < 10 || hr.saveStatus !== 'saved'} onClick={() => void inspect()}>Preview dampak</button>
+        <button className="btn secondary" disabled={busy || reason.trim().length < 10 || hr.saveStatus !== 'saved'} onClick={() => void inspect()}>Lihat dampak</button>
         {preview && <div>
           <p><strong>{preview.affected.length} hari pegawai berubah</strong> · {preview.record.start}–{preview.record.end}</p>
           <p>Perubahan berikut berlaku pada kalkulasi ruang kerja. Snapshot terkunci tetap utuh dan memerlukan pengajuan versi koreksi.</p>
           {preview.affected.length > 0 ? <><div className="table-wrap"><table className="data"><thead><tr><th>Pegawai / tanggal</th><th>Sebelum</th><th>Sesudah</th></tr></thead><tbody>{preview.affected.slice(page * 10, (page + 1) * 10).map(row => <tr key={`${row.employeeId}|${row.date}`}><td>{row.name}<br />{row.date}</td><td>{facts(row.before)}</td><td>{facts(row.after)}</td></tr>)}</tbody></table></div>
             {preview.affected.length > 10 && <div className="form-actions"><button className="btn secondary" disabled={!page} onClick={() => setPage(p => p - 1)}>Sebelumnya</button><span>Halaman {page + 1}/{Math.ceil(preview.affected.length / 10)}</span><button className="btn secondary" disabled={(page + 1) * 10 >= preview.affected.length} onClick={() => setPage(p => p + 1)}>Berikutnya</button></div>}</> : <p>Tidak ada perubahan status, jam atau hak terhitung. Keputusan tetap dicatat untuk sumber ini.</p>}
           <label className="review-confirm"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} disabled={busy} /> Saya telah memeriksa dampak dan dasar koreksi.</label>
-          <button className="btn primary" disabled={busy || !confirmed || hr.saveStatus !== 'saved'} onClick={() => void save()}>{busy ? 'Menyimpan…' : excluded ? 'Aktifkan kembali catatan' : kind === 'assignment' ? 'Keluarkan peserta ST' : 'Tolak bukti ini'}</button>
+          <button className={`btn ${excluded ? 'primary' : 'danger'}`} disabled={busy || !confirmed || hr.saveStatus !== 'saved'} onClick={() => void save()}>{busy ? 'Menyimpan…' : excluded ? 'Aktifkan kembali catatan' : kind === 'assignment' ? 'Keluarkan peserta ST' : 'Tolak bukti ini'}</button>
         </div>}
       </>}
       {error && <p role="alert" className="form-error">{error}</p>}

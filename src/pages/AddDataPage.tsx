@@ -39,7 +39,7 @@ export function AddDataPage({ toast }: { toast: (m: string) => void }) {
   }
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    const result = previewMasterImport({ rows: [{ ref: 'Input manual', value: form, errors: [] }], notices: [] }, hr.roster.employees, allowedOffices)
+    const result = previewMasterImport({ rows: [{ ref: 'Isi manual', value: form, errors: [] }], notices: [] }, hr.roster.employees, allowedOffices)
     if (result.invalid) { toast(result.entries[0].errors.join(' · ')); return }
     if (!result.rows.length) { toast('Tidak ada perubahan data'); return }
     try {
@@ -51,17 +51,17 @@ export function AddDataPage({ toast }: { toast: (m: string) => void }) {
     { name: 'Master Pegawai', rows: [COLUMNS.map(c => c.header), COLUMNS.map(c => c.example)], widths: COLUMNS.map(c => Math.max(14, c.header.length + 2)) },
     { name: 'Petunjuk', rows: [['Kolom', 'Keterangan'], ['NIP', 'Kunci utama pencocokan (18 digit, simpan sebagai teks).'], ['NIKA', 'Dipakai bila NIP belum ada (mis. data mesin Kanwil).'], ['Golongan', 'PNS: III/b dsb. PPPK: I–XVII. Menentukan tarif & PPh uang makan.'], ['Peringkat Jabatan', 'Diisi sesuai data resmi penetapan peringkat jabatan.'], ['Jenis Jabatan', 'Tulis Fungsional untuk memasukkan jabatan ke kelompok jabatan fungsional.'], ['Tanggal Pensiun', 'Tanggal resmi dari sumber kepegawaian. Tidak dihitung dari usia.'], ['Tanggal Pengunduran Diri', 'Tanggal resmi pengunduran diri. Status Nonaktif saja tidak dihitung sebagai pengunduran diri.'], ['Kantor', OFFICES.join(', ')], ['Baris yang NIP/NIKA-nya sudah ada', 'akan MEMPERBARUI data pegawai tersebut, bukan membuat duplikat.']], widths: [34, 80] },
   ])
-  const field = (k: keyof Employee, label: string, type = 'text') => <label><span>{label}</span><input type={type} value={String(form[k] ?? '')} onChange={e => setForm({ ...form, [k]: e.target.value })} /></label>
+  const field = (k: keyof Employee, label: string, type = 'text') => <label><span>{label}</span><input type={type} lang={type === 'date' ? 'id' : undefined} value={String(form[k] ?? '')} onChange={e => setForm({ ...form, [k]: e.target.value })} /></label>
 
   return <div className="page">
-    <PageHeader title="Tambah & lengkapi data pegawai" actions={<Seg label="Mode" value={tab} onChange={setTab} options={[{ value: 'bulk', label: 'Bulk import' }, { value: 'manual', label: 'Input manual' }]} />}>
-      Pegawai sudah terbentuk dari sumber absensi. Lengkapi master pegawai untuk melihat sebaran pendidikan dan jabatan serta tanggal pegawai baru, pensiun, atau mengundurkan diri.
+    <PageHeader title="Tambah Data" actions={<Seg label="Mode" value={tab} onChange={setTab} options={[{ value: 'bulk', label: 'Impor massal' }, { value: 'manual', label: 'Isi manual' }]} />}>
+      Lengkapi master pegawai untuk melihat sebaran pendidikan dan jabatan, serta tanggal pegawai baru, pensiun, atau mundur. Pegawai sudah terbentuk dari sumber absensi.
     </PageHeader>
     {tab === 'bulk' ? <section className="panel">
-      <div className="bulk-top"><div className="upload-icon"><UploadCloud /></div><div><h3>Bulk import master pegawai</h3><p>Excel atau CSV; semua sheet master dikenali. Pencocokan memakai NIP/NIKA. Nama tidak menggabungkan pegawai.</p></div><button className="btn secondary" onClick={template}><Download size={16} /> Download template</button></div>
+      <div className="bulk-top"><div className="upload-icon"><UploadCloud /></div><div><h3>Impor massal master pegawai</h3><p>Excel atau CSV. Pencocokan memakai NIP/NIKA; nama tidak menggabungkan pegawai.</p></div><button className="btn secondary" onClick={template}><Download size={16} /> Unduh templat</button></div>
       <label className="dropzone"><input type="file" accept=".xlsx,.xls,.csv" disabled={busy} onChange={onFile} /><div><FileSpreadsheet size={32} /><strong>{busy ? 'Membaca file…' : 'Pilih file master'}</strong><span>.xlsx, .xls, .csv</span></div></label>
       {preview.rows.length > 0 && <div className="import-preview">
-        <div className="preview-head"><div><strong>{fileName} · {plan.entries.length} baris</strong><span>{plan.updated} pegawai diperbarui · {plan.added} pegawai baru · {plan.invalid} baris perlu diperiksa</span></div><button className="btn secondary" onClick={() => setPreview({ rows: [], notices: [] })}>Batalkan preview</button></div>
+        <div className="preview-head"><div><strong>{fileName} · {plan.entries.length} baris</strong><span>{plan.updated} pegawai diperbarui · {plan.added} pegawai baru · {plan.invalid} baris perlu diperiksa</span></div><button className="btn secondary" onClick={() => setPreview({ rows: [], notices: [] })}>Batalkan pratinjau</button></div>
         {preview.notices.map((notice, i) => <Note key={i}>{notice}</Note>)}
         {plan.invalid > 0 && <Note>{plan.invalid} baris bermasalah. Tidak ada baris disimpan. Perbaiki seluruh masalah di file lalu unggah ulang.</Note>}
         <div className="table-wrap"><table className="data"><thead><tr><th>Sumber</th><th>Nama / NIP / NIKA</th><th>Hasil & perubahan</th></tr></thead>
@@ -74,9 +74,9 @@ export function AddDataPage({ toast }: { toast: (m: string) => void }) {
         <label><input type="checkbox" checked={confirmed} disabled={plan.invalid > 0 || !plan.rows.length} onChange={e => setConfirmed(e.target.checked)} /> Saya telah memeriksa perubahan semua baris dan sheet. Field kosong tidak menghapus data lama.</label>
         <div className="form-actions"><span>{plan.rows.length ? `${plan.rows.length} pegawai siap disimpan` : plan.invalid ? 'Perbaiki file sebelum menyimpan' : 'Tidak ada perubahan'}</span><button className="btn primary" disabled={!confirmed || plan.invalid > 0 || !plan.rows.length || hr.saveStatus !== 'saved'} onClick={commit}><Database size={16} /> Simpan ke master</button></div>
       </div>}
-      <Note>Data di file Dashboard_Data_Pegawai_KPPU_V3.xlsx adalah contoh sintetis (NIP tidak cocok dengan absensi). Untuk produksi, sumber master idealnya ekspor SIASN/BKN atau sistem kepegawaian internal.</Note>
+      <details className="add-note"><summary>Catatan data contoh</summary><Note>Data di file Dashboard_Data_Pegawai_KPPU_V3.xlsx adalah contoh sintetis (NIP tidak cocok dengan absensi). Untuk produksi, sumber master idealnya ekspor SIASN/BKN atau sistem kepegawaian internal.</Note></details>
     </section> : <form className="panel form-card" onSubmit={submit}>
-      <div className="form-section"><div className="form-title"><CircleUserRound /><div><h3>Identitas</h3><p>NIP dipakai sebagai kunci; tanggal lahir & jenis kelamin dibaca otomatis dari NIP bila kosong.</p></div></div>
+      <div className="form-section"><div className="form-title"><CircleUserRound /><div><h3>Identitas</h3><p>NIP jadi kunci. Tanggal lahir dan jenis kelamin dibaca dari NIP bila kosong.</p></div></div>
         <div className="form-grid">{field('nama', 'Nama lengkap')}{field('nip', 'NIP (18 digit)')}{field('nika', 'NIKA')}{field('tanggalLahir', 'Tanggal lahir', 'date')}{field('tempatLahir', 'Tempat lahir')}
           <label><span>Agama</span><select value={form.agama ?? ''} onChange={e => setForm({ ...form, agama: e.target.value as Employee['agama'] })}><option value="">Pilih agama</option>{['Islam', 'Kristen', 'Katolik', 'Hindu', 'Buddha', 'Konghucu', 'Lainnya'].map(x => <option key={x}>{x}</option>)}</select></label>
           {field('nomorWhatsApp', 'Nomor WhatsApp')}{field('email', 'Email', 'email')}</div></div>
@@ -87,7 +87,7 @@ export function AddDataPage({ toast }: { toast: (m: string) => void }) {
           <label><span>Status</span><select value={form.statusKepegawaian} onChange={e => setForm({ ...form, statusKepegawaian: e.target.value as Employee['statusKepegawaian'] })}>{['PPPK', 'PNS', 'Non-ASN', 'Belum diketahui'].map(x => <option key={x}>{x}</option>)}</select></label>
           {field('golongan', 'Golongan')}{field('jabatan', 'Jabatan')}{field('peringkatJabatan', 'Peringkat jabatan')}{field('jenisJabatan', 'Jenis jabatan (mis. Fungsional)')}
           {field('tanggalMulaiKerja', 'Tanggal mulai kerja', 'date')}{field('tanggalPensiun', 'Tanggal pensiun', 'date')}{field('tanggalPengunduranDiri', 'Tanggal pengunduran diri', 'date')}</div></div>
-      <div className="form-actions"><span>Perubahan disimpan ke server; periksa status penyimpanan.</span><button className="btn primary" type="submit" disabled={hr.saveStatus !== 'saved'}><Plus size={16} /> Simpan pegawai</button></div>
+      <div className="form-actions"><span>Disimpan ke server. Periksa status penyimpanan setelahnya.</span><button className="btn primary" type="submit" disabled={hr.saveStatus !== 'saved'}><Plus size={16} /> Simpan pegawai</button></div>
     </form>}
   </div>
 }

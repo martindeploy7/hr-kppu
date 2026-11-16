@@ -1,0 +1,17 @@
+/* Peta Fitur & Data: tabel temuan (desktop rapat, mobile jadi kartu) */
+.fm-how { margin-top: 6px; max-width: 68ch; color: var(--ink-soft); font-size: var(--fs-sm) }
+.fm-how summary { cursor: pointer; font-weight: 600; color: var(--ink-muted) }
+.fm-how p { margin: 6px 0 0; line-height: 1.5 }
+table.data.findings { table-layout: fixed }
+table.data.findings th { font-size: var(--fs-2xs) }
+table.data.findings td { font-size: var(--fs-sm); line-height: 1.45; vertical-align: top; padding-block: 9px; overflow-wrap: anywhere }
+table.data.findings th:nth-child(1), table.data.findings td:nth-child(1) { width: 38% }
+table.data.findings th:nth-child(2), table.data.findings td:nth-child(2) { width: 22% }
+@media (max-width: 760px) {
+  table.data.findings, table.data.findings tbody, table.data.findings tr, table.data.findings td { display: block; width: 100% }
+  table.data.findings thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%) }
+  table.data.findings tr { margin-bottom: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface) }
+  table.data.findings td, table.data.findings td:nth-child(n) { width: 100%; padding: 0 0 10px; border: 0; font-size: var(--fs-md) }
+  table.data.findings td:last-child { padding-bottom: 0 }
+  table.data.findings td::before { content: attr(data-label); display: block; margin-bottom: 2px; color: var(--ink-muted); font-size: var(--fs-2xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase }
+}

@@ -54,7 +54,7 @@ export function HolidaysSection({ overview, canWrite, onOverview, notify }: { ov
             <span className="ac-sw"><Switch on={h.enabled} label={`Aktif: ${h.name || 'hari raya baru'}`} disabled={!canWrite} onClick={() => patch(h.id, { enabled: !h.enabled })} /> Aktif</span>
             {canWrite && <button type="button" className="btn secondary ac-sm" aria-label={`Hapus ${h.name || 'baris baru'}`} onClick={() => setRows(rs => rs.filter(r => r.id !== h.id))}><Trash2 size={14} /> Hapus</button>}
           </div>
-          {unconfirmed && <p className="ac-warn-text"><AlertTriangle size={14} /> Belum dikonfirmasi — ucapan tidak dikirim sampai tanggal dicocokkan dengan SKB</p>}
+          {unconfirmed && <p className="ac-warn-text"><AlertTriangle size={14} /> Belum dikonfirmasi. Ucapan tidak dikirim sampai tanggal dicocokkan dengan SKB.</p>}
         </div>
       })}
     </div>

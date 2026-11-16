@@ -1,5 +1,6 @@
 import { ChevronRight, Database, Lightbulb, SearchCheck } from 'lucide-react'
 import type { Nav, Page } from '../App.tsx'
+import './featuremap.css'
 
 const FINDINGS: { found: string; impact: string; handled: string }[] = [
   { found: 'Tidak ada ID bersama: mesin pusat & HP memakai NIP, mesin Kanwil II memakai NIKA, Kanwil I/VI nomor mesin, Kanwil V & rekap ST hanya nama.', impact: 'Rekap gabungan tidak bisa sekadar VLOOKUP NIK.', handled: 'Pencocokan berjenjang NIP → NIKA/ID aplikasi → No. mesin → nama, dengan antrean keputusan HR yang diingat sebagai alias.' },
@@ -48,19 +49,20 @@ export function FeatureMap({ nav }: { nav: Nav }) {
   ]
   return <div className="feature-studio">
     <header className="studio-intro">
-      <div><span className="studio-kicker"><SearchCheck size={15} /> Diselaraskan dengan data nyata</span><h2>Apa yang ditemukan di data, dan langkah berikutnya</h2><p>Disusun dari 11 file rapat absensi September 2026 (pusat, Kanwil I, II, V, VI, rekap sekretaris Kesekjenan & Kedeputian).</p></div>
+      <div><span className="studio-kicker"><SearchCheck size={15} /> Diselaraskan dengan data nyata</span><h2>Peta Fitur & Data</h2><p>Temuan dari 11 file absensi September 2026 dan langkah berikutnya.</p>
+      <details className="fm-how"><summary>Cara kerja</summary><p>Sumbernya: mesin pusat, Kanwil I, II, V, VI, serta rekap sekretaris Kesekjenan dan Kedeputian.</p></details></div>
       <span className="studio-status"><span /> Prototype berbasis data riil</span>
     </header>
 
     <section className="panel">
-      <div className="panel-head"><div><h3>Temuan data → penanganan di sistem</h3><p>Masalah yang selama ini membuat rekap manual lambat dan rawan salah.</p></div></div>
+      <div className="panel-head"><div><h3>Temuan data → penanganan di sistem</h3><p>Masalah yang membuat rekap manual lambat dan rawan salah.</p></div></div>
       <div className="table-wrap"><table className="data findings">
         <thead><tr><th>Temuan</th><th>Dampak</th><th>Ditangani dengan</th></tr></thead>
-        <tbody>{FINDINGS.map((f, i) => <tr key={i}><td>{f.found}</td><td>{f.impact}</td><td>{f.handled}</td></tr>)}</tbody>
+        <tbody>{FINDINGS.map((f, i) => <tr key={i}><td data-label="Temuan">{f.found}</td><td data-label="Dampak">{f.impact}</td><td data-label="Ditangani dengan">{f.handled}</td></tr>)}</tbody>
       </table></div>
     </section>
 
-    <div className="studio-section-heading"><div><h3><Lightbulb size={16} /> Fitur berikutnya</h3><p>Prioritas kedua — memanfaatkan data yang sekarang sudah tersatukan.</p></div><span>{NEXT.length} usulan</span></div>
+    <div className="studio-section-heading"><div><h3><Lightbulb size={16} /> Fitur berikutnya</h3><p>Prioritas kedua: memanfaatkan data yang sudah tersatukan.</p></div><span>{NEXT.length} usulan</span></div>
     <div className="opportunity-grid">{NEXT.map(item => <article className="opportunity-card" key={item.n}>
       <header className="opportunity-card-heading"><div><span className="opportunity-number">{item.n}</span><h3>{item.title}</h3></div><span className={`opportunity-status ${item.status}`}>{item.statusLabel}</span></header>
       <div className="opportunity-notes">
@@ -71,12 +73,13 @@ export function FeatureMap({ nav }: { nav: Nav }) {
     </article>)}</div>
 
     <section className="panel">
-      <div className="panel-head"><div><h3><Database size={16} /> Rancangan database relasional</h3><p>Kunci utama memakai ID internal; NIP, NIKA, dan NIK KTP disimpan sebagai kolom unik opsional. Alasannya: kolom "NIK" di mesin pusat ternyata berisi NIP, NIK KTP tidak ada di sumber absensi mana pun, dan sebagian pegawai Kanwil belum punya NIP di data. DDL lengkap: <code>docs/rancangan-database.sql</code>.</p></div></div>
+      <div className="panel-head"><div><h3><Database size={16} /> Rancangan database relasional</h3><p>Kunci utama memakai ID internal; NIP, NIKA, dan NIK KTP menjadi kolom unik opsional.</p>
+        <details className="fm-how"><summary>Cara kerja</summary><p>Kolom "NIK" di mesin pusat ternyata berisi NIP, NIK KTP tidak ada di sumber absensi mana pun, dan sebagian pegawai Kanwil belum punya NIP di data. DDL lengkap: <code>docs/rancangan-database.sql</code>.</p></details></div></div>
       <div className="schema-grid">{TABLES.map(t => <div key={t.name}><strong>{t.name}</strong><p>{t.cols}</p></div>)}</div>
     </section>
 
     <section className="presentation-plan">
-      <div className="presentation-heading"><div><h3>Alur demo</h3><p>Urutan yang menceritakan masalah nyata → solusi.</p></div><span>±7 menit</span></div>
+      <div className="presentation-heading"><div><h3>Alur demo</h3><p>Urutan dari masalah nyata ke solusi.</p></div><span>±7 menit</span></div>
       <div className="presentation-steps">{demo.map((s, i) => <button type="button" className="presentation-step" key={s.title} onClick={() => nav(s.page)}><span>{String(i + 1).padStart(2, '0')}</span><div><strong>{s.title}</strong><p>{s.description}</p></div><ChevronRight size={15} /></button>)}</div>
     </section>
   </div>

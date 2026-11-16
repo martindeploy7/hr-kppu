@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import { Search } from 'lucide-react'
 import { fmt } from '../../lib/format.ts'
 import { orderGroups, share, type AgeBand, type EmployeeGroup, type MonthBucket } from './data.ts'
@@ -7,13 +7,13 @@ import { orderGroups, share, type AgeBand, type EmployeeGroup, type MonthBucket 
    every value is printed (never tooltip-only), and zero-value marks are inert. */
 
 export const SEGMENT_COLORS: Record<string, { bg: string; fg: string }> = {
-  'Laki-laki': { bg: '#2a78d6', fg: '#ffffff' },
-  Perempuan: { bg: '#eb6834', fg: '#1c2b3a' },
-  PNS: { bg: '#6250d6', fg: '#ffffff' },
-  PPPK: { bg: '#1baf7a', fg: '#1c2b3a' },
-  'Non-ASN': { bg: '#eda100', fg: '#1c2b3a' },
+  'Laki-laki': { bg: 'var(--info)', fg: 'var(--surface)' },
+  Perempuan: { bg: 'var(--src-st)', fg: 'var(--surface)' },
+  PNS: { bg: 'var(--duty)', fg: 'var(--surface)' },
+  PPPK: { bg: 'var(--ok)', fg: 'var(--surface)' },
+  'Non-ASN': { bg: 'var(--warn)', fg: 'var(--surface)' },
 }
-const MISSING_COLOR = { bg: '#a9b1b9', fg: '#1c2b3a' }
+const MISSING_COLOR = { bg: 'color-mix(in srgb, var(--ink-muted) 55%, var(--surface))', fg: 'var(--ink)' }
 export const colorOf = (group: EmployeeGroup) => SEGMENT_COLORS[group.name] ?? MISSING_COLOR
 
 /* ---------- ranked horizontal bars ---------- */
@@ -62,7 +62,7 @@ export function RankedBars({ title, groups, total, onSelect, initial, scroll, no
       </div>}
     </div>}
     {rows.length ? <ul className={`pd-bars${scroll ? ' is-scroll' : ''}`}>
-      {visible.map(group => {
+      {visible.map((group, index) => {
         const count = group.employees.length
         const dim = selected !== undefined && selected !== group.name
         return <li key={group.name}>
@@ -70,7 +70,7 @@ export function RankedBars({ title, groups, total, onSelect, initial, scroll, no
             aria-label={`Lihat ${count} pegawai dalam ${group.name}, ${title}, ${share(count, total)}`}
             title={`${group.name}: ${fmt.format(count)} pegawai (${share(count, total)})`} onClick={() => onSelect(group)}>
             <span className="pd-bar-name">{group.name}</span>
-            <span className="pd-bar-track" aria-hidden="true"><span className="pd-bar-fill" style={{ width: `${count ? Math.max(2, (count / max) * 100) : 0}%` }} /></span>
+            <span className="pd-bar-track" aria-hidden="true"><span className="pd-bar-fill" style={{ width: `${count ? Math.max(2, (count / max) * 100) : 0}%`, '--i': Math.min(index, 9) } as CSSProperties} /></span>
             <span className="pd-bar-val"><strong>{fmt.format(count)}</strong><small>{share(count, total)}</small></span>
           </button>
         </li>
@@ -127,7 +127,7 @@ export function Pyramid({ bands, onSelect }: {
 }) {
   const max = Math.max(1, ...bands.flatMap(band => [band.male.length, band.female.length]))
   const rows = [...bands].reverse() // oldest on top, like a pyramid
-  const side = (band: AgeBand, kind: 'male' | 'female') => {
+  const side = (band: AgeBand, kind: 'male' | 'female', rowIndex: number) => {
     const list = kind === 'male' ? band.male : band.female
     const count = list.length
     const width = (count / max) * 82
@@ -136,7 +136,7 @@ export function Pyramid({ bands, onSelect }: {
       aria-label={`Lihat ${count} pegawai ${who} usia ${band.label} tahun`} title={`${kind === 'male' ? 'Laki-laki' : 'Perempuan'}, ${band.label}: ${count} pegawai`}
       onClick={() => onSelect(band, kind)}>
       {count > 0 && <>
-        <span className="pd-pyr-bar" style={{ width: `${Math.max(1.5, width)}%` }} />
+        <span className="pd-pyr-bar" style={{ width: `${Math.max(1.5, width)}%`, '--i': Math.min(rowIndex, 9) } as CSSProperties} />
         <span className="pd-pyr-n" style={kind === 'male' ? { right: `calc(${Math.max(1.5, width)}% + 6px)` } : { left: `calc(${Math.max(1.5, width)}% + 6px)` }}>{fmt.format(count)}</span>
       </>}
     </button>
@@ -145,12 +145,12 @@ export function Pyramid({ bands, onSelect }: {
     <div className="pd-pyr-head" aria-hidden="true">
       <span><i className="is-male" />Laki-laki</span><span>Usia</span><span>Perempuan<i className="is-female" /></span>
     </div>
-    {rows.map(band => <div className="pd-pyr-row" key={band.label}>
-      {side(band, 'male')}
+    {rows.map((band, rowIndex) => <div className="pd-pyr-row" key={band.label}>
+      {side(band, 'male', rowIndex)}
       <button type="button" className="pd-pyr-age" disabled={!band.employees.length}
         aria-label={`Lihat ${band.employees.length} pegawai usia ${band.label} tahun, semua jenis kelamin`}
         title={`Usia ${band.label}: ${band.employees.length} pegawai`} onClick={() => onSelect(band, 'all')}>{band.label}</button>
-      {side(band, 'female')}
+      {side(band, 'female', rowIndex)}
     </div>)}
   </div>
 }

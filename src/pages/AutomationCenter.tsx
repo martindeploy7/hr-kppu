@@ -15,7 +15,7 @@ import { SettingsSection } from './automation/Settings.tsx'
 import './automation.css'
 
 const connectionLabel: Record<WhatsAppStatus['status'], string> = { not_configured: 'Perlu konfigurasi', disconnected: 'Belum terhubung', connecting: 'Menghubungkan', qr: 'Pindai QR', connected: 'Terhubung', reconnecting: 'Menyambung ulang', logged_out: 'Sesi keluar', error: 'Perlu tindakan' }
-const roleLabel = { leader: 'Berjalan', standby: 'Standby — instance lain memegang jadwal', stopped: 'Berhenti' } as const
+const roleLabel = { leader: 'Berjalan', standby: 'Siaga: server lain memegang jadwal', stopped: 'Berhenti' } as const
 
 export function AutomationCenter({ toast }: { toast: (m: string) => void }) {
   const { user } = useAuth()
@@ -55,14 +55,15 @@ export function AutomationCenter({ toast }: { toast: (m: string) => void }) {
   }
   const applyOverview = (o: AutomationOverview) => { setOverview(o); setOutboxKey(k => k + 1) }
 
-  const heading = <div className="page-heading"><div><h2>WhatsApp Automation Center</h2><p>Pantau kesehatan pengiriman, atur aturan otomatis, dan kelola kampanye HR.</p></div></div>
+  const heading = <div className="page-heading"><div><h2>Automation Center</h2><p>Pantau pengiriman WhatsApp, atur aturan otomatis, dan kelola kampanye HR.</p>
+    <details className="ac-how"><summary>Cara kerja</summary><p>Halaman ini diperbarui otomatis tiap 10 detik. Mode uji mengalihkan semua pesan ke nomor uji. Simulasi menandai pesan terkirim tanpa menghubungi WhatsApp. Jeda menahan seluruh antrean.</p></details></div></div>
   if (!canRead) return <>{heading}<div className="card ac-notice"><ShieldCheck size={22} /><p>Halaman ini dikelola oleh HR dan Superadmin.</p></div></>
 
   return <div className="ac-page">
     {heading}
     {!overview ? (loadError
       ? <div className="card ac-notice"><ErrorLine message={loadError} /><button type="button" className="btn secondary" onClick={() => void load()}>Coba lagi</button></div>
-      : <div className="ac-loading" role="status" aria-busy="true"><span className="sk-sr">Memuat automation…</span><Bone h={150} r={14} /><Bone h={220} r={14} /><ListSkeleton rows={5} cols={4} label="Memuat aturan…" /></div>)
+      : <div className="ac-loading" role="status" aria-busy="true"><span className="sk-sr">Memuat Automation Center…</span><Bone h={150} r={14} /><Bone h={220} r={14} /><ListSkeleton rows={5} cols={4} label="Memuat aturan…" /></div>)
       : <>
         {!canWrite && <p className="ac-readonly"><ShieldCheck size={16} /> Anda memiliki akses baca saja. Perubahan dilakukan HR atau Superadmin.</p>}
         <div className="ac-top">
@@ -117,7 +118,7 @@ function Upcoming({ overview, onOpen }: { overview: AutomationOverview; onOpen: 
   const items = [...overview.upcoming].sort((a, b) => a.date.localeCompare(b.date))
   const today = overview.today || todayWib()
   const title = (id: string) => overview.rules.find(r => r.id === id)?.title ?? id
-  return <Section id="ac-upcoming" title="Hari ini & 30 hari ke depan" subtitle="Klik baris untuk melihat pesan yang akan dikirim" icon={<CalendarRange />}>
+  return <Section id="ac-upcoming" title="Hari ini & 30 hari ke depan" subtitle="Pilih baris untuk melihat pesan yang akan dikirim" icon={<CalendarRange />}>
     {items.length === 0 ? <p className="ac-note">Tidak ada pesan terjadwal dalam 30 hari ke depan.</p> : <ol className="ac-agenda">
       {items.map((u, i) => <li key={`${u.date}-${u.ruleId}-${i}`}>
         <button type="button" className={`ac-ag hue-${ruleHue(u.ruleId)} ${u.date === today ? 'today' : ''}`} onClick={() => onOpen(u.ruleId, u.date)}>
@@ -156,19 +157,19 @@ function WhatsAppCard({ toast }: { toast: (m: string) => void }) {
   const connected = waStatus.status === 'connected'
   const loading = waStatus.message === 'Memuat status koneksi…' && !waError
   const connecting = waStatus.status === 'connecting' || waStatus.status === 'reconnecting'
-  return <section className="card wa-connect ac-wa"><div className="card-head"><div><h3>Koneksi WhatsApp HR</h3><p>Login perangkat tertaut dengan QR WhatsApp Web.</p></div>
+  return <section className="card wa-connect ac-wa"><div className="card-head"><div><h3>Koneksi WhatsApp HR</h3><p>Tautkan perangkat HR lewat QR WhatsApp.</p></div>
     <span className={`connection-chip ${connected ? 'online' : ''}`}><span></span>{connectionLabel[waStatus.status]}</span></div>
     {loading ? <div className="sk-stack" role="status" aria-busy="true" style={{ padding: '8px 0' }}><span className="sk-sr">Memuat status koneksi…</span><Bone w={56} h={56} r={14} /><Bone w="55%" h={16} /><Bone w="80%" h={11} /><Bone w={170} h={38} r={9} /></div>
       : connected ? <div className="connected-state"><div className="connected-icon"><CheckCircle2 /></div><h3>WhatsApp terhubung</h3><p>{waStatus.phoneNumber ? `Nomor +${waStatus.phoneNumber}` : 'Perangkat HR aktif'}</p>
         <div className="connection-meta"><div><span>Status</span><strong>Terhubung</strong></div><div><span>Sesi</span><strong>Tersimpan terenkripsi</strong></div><div><span>Terhubung sejak</span><strong>{waStatus.connectedAt ? new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(waStatus.connectedAt)) : 'Baru saja'}</strong></div></div>
-        <button type="button" className="btn secondary" disabled={waBusy} onClick={disconnect}><ShieldCheck size={16} /> Putuskan perangkat</button></div>
+        <button type="button" className="btn danger" disabled={waBusy} onClick={disconnect}><ShieldCheck size={16} /> Putuskan perangkat</button></div>
       : waStatus.qr ? <div className="qr-area"><div className="qr-box"><QRCodeSVG value={waStatus.qr} size={190} level="M" fgColor="#072c52" bgColor="#ffffff" /></div><strong>Pindai dari WhatsApp</strong><p>Buka WhatsApp di ponsel admin → <b>Perangkat tertaut</b> → <b>Tautkan perangkat</b>. QR akan diperbarui otomatis bila kedaluwarsa.</p><button type="button" className="btn secondary" disabled={waBusy} onClick={disconnect}>Batalkan login</button></div>
       : <div className="qr-area"><div className="qr-box qr-placeholder"><QrCode size={88} /></div>
         <strong>{waStatus.status === 'connecting' ? 'Menghubungkan ke WhatsApp…' : waStatus.status === 'reconnecting' ? 'Mencoba menyambungkan kembali…' : waStatus.status === 'logged_out' ? 'Sesi WhatsApp sudah keluar' : waStatus.status === 'error' ? 'Koneksi perlu diatur ulang' : 'Tautkan perangkat WhatsApp HR'}</strong>
-        <p>{waStatus.message ?? 'Klik tombol untuk meminta QR langsung dari sesi WhatsApp.'}</p>
-        {waStatus.status === 'not_configured' ? <div className="wa-setup-note"><ShieldCheck size={18} /><p>Tambahkan <code>WHATSAPP_SESSION_ENCRYPTION_KEY</code> di Render, lalu restart service. Buat nilainya dengan <code>openssl rand -base64 32</code> dan simpan aman.</p></div>
-          : <button type="button" className="btn primary" disabled={waBusy || connecting} onClick={connect}>{waBusy || connecting ? <LoaderCircle size={17} className="spin-icon" /> : <QrCode size={17} />} {waStatus.status === 'error' ? 'Coba login ulang' : 'Mulai tautkan WhatsApp'}</button>}
-        {waStatus.status === 'error' && waStatus.configured && <button type="button" className="btn secondary wa-reset-button" disabled={waBusy} onClick={disconnect}>Hapus sesi tersimpan</button>}</div>}
+        <p>{waStatus.status === 'not_configured' ? 'Koneksi WhatsApp belum dikonfigurasi di server. Hubungi pengelola sistem.' : waStatus.message ?? 'Pilih tombol di bawah untuk meminta QR dari sesi WhatsApp.'}</p>
+        {waStatus.status === 'not_configured' ? <details className="wa-setup-note ac-tech"><summary>Detail teknis</summary><p>Untuk pengelola sistem: tambahkan <code>WHATSAPP_SESSION_ENCRYPTION_KEY</code> di dasbor hosting (Render), lalu mulai ulang layanan. Buat nilainya dengan <code>openssl rand -base64 32</code> dan simpan dengan aman.</p>{waStatus.message && <p>Pesan server: {waStatus.message}</p>}</details>
+          : <button type="button" className="btn primary" disabled={waBusy || connecting} onClick={connect}>{waBusy || connecting ? <LoaderCircle size={17} className="spin-icon" /> : <QrCode size={17} />} {waStatus.status === 'error' ? 'Coba tautkan ulang' : 'Mulai tautkan WhatsApp'}</button>}
+        {waStatus.status === 'error' && waStatus.configured && <button type="button" className="btn danger wa-reset-button" disabled={waBusy} onClick={disconnect}>Hapus sesi tersimpan</button>}</div>}
     {waError && <p className="wa-inline-error" role="alert">{waError}</p>}
   </section>
 }

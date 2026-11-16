@@ -3,7 +3,7 @@ import { Save, Send, Settings2, LoaderCircle } from 'lucide-react'
 import { Bone } from '../../components/Skeleton.tsx'
 import { api } from '../../lib/api.ts'
 import { isHHMM, type AutomationKind, type AutomationOverview, type AutomationRule, type AutomationRuleOptions, type OutboxItem, type RulePreview } from '../../../shared/automation.ts'
-import { Bubbles, ErrorLine, Notify, Section, Switch, ago, ruleIcon, scopeLabels, todayWib } from './common.tsx'
+import { Bubbles, ErrorLine, Notify, Section, Switch, ago, ruleIcon, categoryLabel, scopeLabels, todayWib } from './common.tsx'
 
 const groups: { kind: AutomationKind; title: string; hint: string }[] = [
   { kind: 'scheduled', title: 'Terjadwal harian', hint: 'Dijalankan otomatis setiap hari sesuai jam kirim' },
@@ -41,7 +41,7 @@ export function RulesSection({ overview, canWrite, selectedId, onSelect, onOverv
                 <button type="button" className="ac-rule-main" aria-pressed={selected?.id === r.id} onClick={() => onSelect(r.id)}>
                   <span className={`ac-rule-icon k-${r.kind}`}>{ruleIcon(r.id)}</span>
                   <span className="ac-rule-copy">
-                    <span className="ac-tags"><strong>{r.title}</strong><span className="ac-tag">{r.category}</span><span className={`ac-tag scope-${r.scope}`}>{scopeLabels[r.scope]}</span>{r.privacy === 'sensitive' && <span className="ac-tag sensitive">Privat</span>}</span>
+                    <span className="ac-tags"><strong>{r.title}</strong><span className="ac-tag">{categoryLabel(r.category)}</span><span className={`ac-tag scope-${r.scope}`}>{scopeLabels[r.scope]}</span>{r.privacy === 'sensitive' && <span className="ac-tag sensitive">Privat</span>}</span>
                     <small>{r.kind === 'event' ? 'Mulai' : 'Kirim'} {r.sendTime} WIB{planned ? ` · terakhir diantrikan ${new Date(planned.at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta', hour12: false }).replace('.', ':')} · ${planned.queued} pesan (${ago(planned.at, nowMs)})` : r.kind === 'campaign' ? '' : ' · belum pernah diantrikan'}</small>
                   </span>
                 </button>
@@ -116,7 +116,7 @@ function RuleDetail({ rule, overview, canWrite, onOverview, notify, previewDate 
     <ErrorLine message={error} />
     {canWrite && <div className="ac-actions"><button type="button" className="btn primary" disabled={saving || !dirty} onClick={() => void save()}>{saving ? <LoaderCircle size={16} className="spin-icon" /> : <Save size={16} />} Simpan aturan</button>
       {dirty && <button type="button" className="btn secondary" onClick={() => { setTemplate(rule.template); setSendTime(rule.sendTime); setOptions(rule.options); setMilestonesText((rule.options.milestones ?? []).join(', ')) }}>Batalkan perubahan</button>}
-      {dirty && <small className="ac-hint">Pratinjau memakai template yang tersimpan; simpan dulu untuk melihat perubahan.</small>}</div>}
+      {dirty && <small className="ac-hint">Pratinjau memakai versi tersimpan. Simpan dulu untuk melihat perubahan.</small>}</div>}
     {isCampaign
       ? <div className="ac-preview-box"><strong>Kampanye HR</strong>
         <p className="ac-desc">Aturan ini tidak berjalan harian. Susun dan jadwalkan pesannya di bagian Kampanye HR.</p>

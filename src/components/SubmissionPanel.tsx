@@ -48,10 +48,10 @@ export function SubmissionPanel() {
       <button className="link" disabled={busy} onClick={() => void view(s)}>Lihat rincian v{s.version}</button>
       {user.role === 'superadmin' && s.createdBy !== user.id && s.status === 'submitted' && <button className="link" disabled={busy || note.trim().length < 3} onClick={() => action(s, 'approve')}>Setujui</button>}
       {user.role === 'superadmin' && s.createdBy !== user.id && s.status === 'approved' && <button className="link" disabled={busy || note.trim().length < 3} onClick={() => action(s, 'lock')}>Kunci</button>}
-      {user.role === 'superadmin' && ['submitted', 'approved'].includes(s.status) && <button className="link" disabled={busy || note.trim().length < 3} onClick={() => action(s, 'cancel')}>Batalkan pengajuan</button>}
+      {user.role === 'superadmin' && ['submitted', 'approved'].includes(s.status) && <button className="link danger" disabled={busy || note.trim().length < 3} onClick={() => action(s, 'cancel')}>Batalkan pengajuan</button>}
       {user.role === 'superadmin' && s.office === 'Semua' && s.status === 'locked' && !s.correctionId && <button className="link" disabled={busy || note.trim().length < 10 || hr.saveStatus !== 'saved'} onClick={() => action(s, 'correct')}>Ajukan koreksi v{s.version + 1}</button>}
     </td></tr>)}</tbody></table></div>
-    {!loaded ? <ListSkeleton rows={2} cols={5} label="Memuat riwayat pengajuan…" /> : !items.length && <p className="muted">Belum ada pengajuan. Lengkapi seluruh bukti, review, tarif dan coverage ST sebelum mengajukan.</p>}
+    {!loaded ? <ListSkeleton rows={2} cols={5} label="Memuat riwayat pengajuan…" /> : !items.length && <p className="muted">Belum ada pengajuan. Lengkapi bukti, review, tarif, dan cakupan ST, lalu pilih Ajukan.</p>}
     {detail && <section className="import-preview" aria-label="Rincian snapshot pengajuan">
       <div className="preview-head"><div><strong>{detail.period} · {detail.office} · v{detail.version} · {detail.status}</strong><p>{detail.supersededBy ? 'Versi arsip telah digantikan. Gunakan versi terkunci terbaru.' : 'Nominatif merupakan versi penuh. Selisih koreksi menjadi bahan pemeriksaan, bukan pembayaran tambahan otomatis.'}</p></div><button className="btn secondary" onClick={() => setDetail(null)}>Tutup rincian</button></div>
       <p>{detail.snapshot.months.length} pegawai · netto nominatif Rp{money(detail.snapshot.months.reduce((s, m) => s + m.netto, 0))} · revisi data {detail.workspaceRevision}</p>

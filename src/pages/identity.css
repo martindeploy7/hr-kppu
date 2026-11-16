@@ -1,0 +1,24 @@
+.id-page { min-width: 0; }
+.id-how { padding: 0; margin: 0; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); }
+.id-how > summary { cursor: pointer; padding: 12px 16px; min-height: 20px; color: var(--info); font-size: var(--fs-sm); font-weight: 600; }
+.id-how > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-card); }
+.id-how > p { margin: 0; padding: 0 16px 12px; color: var(--ink-soft); font-size: var(--fs-md); line-height: 1.6; max-width: 80ch; }
+.id-how .ladder { margin: 0 16px 16px; }
+.src-list { overflow-wrap: anywhere; font-family: 'DM Sans', system-ui, sans-serif; font-size: var(--fs-xs); color: var(--ink-muted); }
+.src-list .link { font-size: inherit; }
+.id-page .panel-head { flex-wrap: wrap; min-width: 0; }
+.id-page .seg { max-width: 100%; overflow-x: auto; }
+.id-page .id-row > * { min-width: 0; }
+.id-page .cand { max-width: 100%; }
+.id-page .cand > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.id-page .row-actions .btn { white-space: normal; text-align: left; max-width: 100%; }
+.id-page .search { min-width: 0; }
+.id-page .picker { min-width: 0; }
+.id-page .picker button { max-width: 100%; }
+@media (max-width: 760px) {
+  .id-page .id-row { grid-template-columns: minmax(0, 1fr); }
+  .id-page .id-name small { white-space: normal; overflow-wrap: anywhere; }
+  .id-page .id-linked { flex-wrap: wrap; }
+  .id-page .cand, .id-page .icon-btn { min-height: 44px; }
+  .id-page .icon-btn { min-width: 44px; }
+}

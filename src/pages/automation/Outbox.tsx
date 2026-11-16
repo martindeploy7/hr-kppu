@@ -40,7 +40,7 @@ export function OutboxSection({ rules, canWrite, notify, refreshKey }: { rules: 
       <label className="ac-inline">Aturan <select value={ruleId} onChange={e => setRuleId(e.target.value)}><option value="">Semua aturan</option>{rules.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}</select></label>
     </div>
     <ErrorLine message={error} />
-    {!items ? <ListSkeleton rows={5} cols={6} label="Memuat antrean…" /> : items.length === 0 ? <p className="ac-note">Tidak ada pesan untuk filter ini.</p> : <div className="ac-table-wrap"><table className="ac-table">
+    {!items ? <ListSkeleton rows={5} cols={6} label="Memuat antrean…" /> : items.length === 0 ? <p className="ac-note">Tidak ada pesan untuk filter ini. Pilih filter lain atau tunggu jadwal berikutnya.</p> : <div className="ac-table-wrap"><table className="ac-table">
       <thead><tr><th>Waktu</th><th>Aturan</th><th>Penerima</th><th>Dikirim ke</th><th>Status</th><th>Coba</th><th>Aksi</th></tr></thead>
       <tbody>{items.map(i => <tr key={i.id}>
         <td data-l="Waktu">{fmtDateTime(i.sentAt ?? i.scheduledFor)}</td>
@@ -51,7 +51,7 @@ export function OutboxSection({ rules, canWrite, notify, refreshKey }: { rules: 
         <td data-l="Coba">{i.attempts}</td>
         <td data-l="Aksi">{canWrite && <span className="ac-row-actions">
           {(i.status === 'failed' || i.status === 'expired' || i.status === 'cancelled') && <button type="button" className="btn secondary ac-sm" disabled={busyId === i.id} onClick={() => void act(i, 'retry')}><RotateCcw size={14} /> Coba lagi</button>}
-          {i.status === 'pending' && <button type="button" className="btn secondary ac-sm" disabled={busyId === i.id} onClick={() => void act(i, 'cancel')}><X size={14} /> Batalkan</button>}
+          {i.status === 'pending' && <button type="button" className="btn danger ac-sm" disabled={busyId === i.id} onClick={() => void act(i, 'cancel')}><X size={14} /> Batalkan pesan</button>}
         </span>}</td>
       </tr>)}</tbody></table></div>}
   </Section>

@@ -16,7 +16,7 @@ test('login, master persists after reload, logout revokes session',async({app,sc
  await screen.getByRole('button','Masuk',{exact:true}).tap()
  await expect(screen.getByRole('button','Tambah Data',{exact:true})).toBeVisible()
  await screen.getByRole('button','Tambah Data',{exact:true}).tap()
- await screen.getByRole('button','Input manual',{exact:true}).tap()
+ await screen.getByRole('button','Isi manual',{exact:true}).tap()
  await screen.getByLabel('Nama lengkap').fill('E2E Pegawai Sintetis')
  await screen.getByLabel('NIP (18 digit)',{exact:true}).fill('198001012020011999')
  await screen.getByRole('button','Simpan pegawai',{exact:true}).tap()

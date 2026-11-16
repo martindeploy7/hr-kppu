@@ -25,6 +25,9 @@ export function PeopleDashboard({ nav }: { nav: Nav }) {
   const [office, setOffice] = useState<string>(ALL_OFFICES)
   const [months, setMonths] = useState<WindowMonths>(12)
   const [selectedGroup, setSelectedGroup] = useState<SelectedGroup | null>(null)
+  // Bar masuk dianimasikan sekali saat halaman pertama dibuka; perubahan filter tidak mengulangnya.
+  const [entering, setEntering] = useState(true)
+  useEffect(() => { const t = window.setTimeout(() => setEntering(false), 900); return () => window.clearTimeout(t) }, [])
   const focusOrigin = useRef<HTMLElement | null>(null)
   const closeSelectedGroup = () => {
     setSelectedGroup(null)
@@ -56,7 +59,7 @@ export function PeopleDashboard({ nav }: { nav: Nav }) {
   const movement = useMemo(() => buildMovement(emps, months, today), [emps, months, today])
   const yearAhead = useMemo(() => buildMovement(emps, 12, today).pensions, [emps, today])
 
-  if (!allEmps.length) return <div className="page"><Empty icon={UploadCloud} title="Belum ada data pegawai" action={<div className="row-actions"><button className="btn primary" onClick={() => nav('import')}>Impor file absensi</button><button className="btn secondary" onClick={() => nav('add')}>Tambah data master</button></div>}>Daftar pegawai dibentuk dari sumber absensi, lalu dapat dilengkapi melalui input manual atau impor master.</Empty></div>
+  if (!allEmps.length) return <div className="page"><Empty icon={UploadCloud} title="Belum ada data pegawai" action={<div className="row-actions"><button className="btn primary" onClick={() => nav('import')}>Impor file absensi</button><button className="btn secondary" onClick={() => nav('add')}>Tambah data pegawai</button></div>}>Daftar pegawai dibentuk dari sumber absensi, lalu dilengkapi lewat isi manual atau impor massal.</Empty></div>
 
   const todayLabel = new Intl.DateTimeFormat('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())
   const monthFmt = new Intl.DateTimeFormat('id-ID', { month: 'short' })
@@ -77,17 +80,17 @@ export function PeopleDashboard({ nav }: { nav: Nav }) {
   const bandsMissingGender = stats.bands.reduce((sum, band) => sum + band.employees.length - band.male.length - band.female.length, 0)
   const scopeLabel = activeOffice === ALL_OFFICES ? 'Semua kantor' : activeOffice
 
-  return <div className="pd-page">
-    <section className="pd-hero">
+  return <div className={`pd-page${entering ? ' is-entering' : ''}`}>
+    <section className="pd-hero on-dark">
       <div className="pd-hero-copy">
         <div className="pd-hero-date"><CalendarDays size={15} aria-hidden="true" /><span>{todayLabel}</span></div>
-        <h2>Ringkasan pegawai KPPU</h2>
-        <p>Setiap batang, segmen, dan angka dapat dipilih untuk melihat daftar pegawainya, lalu membuka profil lengkap. Data yang kosong ditampilkan apa adanya sebagai “Belum diisi”.</p>
+        <h2>People Dashboard</h2>
+        <p>Ringkasan pegawai KPPU. Pilih batang, segmen, atau angka untuk melihat daftar pegawainya; data kosong tampil sebagai “Belum diisi”.</p>
         <span className="pd-hero-note"><Database size={14} aria-hidden="true" /> Master pegawai · sumber impor dan pelengkapan admin</span>
       </div>
       <div className="pd-hero-actions">
-        <button className="btn secondary" onClick={() => nav('employees')}><UsersRound size={17} /> Direktori pegawai</button>
-        <button className="btn primary" onClick={() => nav('add')}><Plus size={17} /> Lengkapi data</button>
+        <button className="btn secondary" onClick={() => nav('employees')}><UsersRound size={17} /> Buka Data Pegawai</button>
+        <button className="btn primary" onClick={() => nav('add')}><Plus size={17} /> Lengkapi data pegawai</button>
       </div>
     </section>
 
@@ -97,7 +100,7 @@ export function PeopleDashboard({ nav }: { nav: Nav }) {
         <button type="button" className="pd-chip" aria-pressed={activeOffice === ALL_OFFICES} onClick={() => setOffice(ALL_OFFICES)}>Semua<small>{fmt.format(allEmps.length)}</small></button>
         {offices.map(group => <button type="button" key={group.name} className="pd-chip" aria-pressed={activeOffice === group.name} onClick={() => setOffice(group.name)}>{group.name}<small>{fmt.format(group.employees.length)}</small></button>)}
       </div>
-      <p className="pd-filter-status" aria-live="polite">{activeOffice === ALL_OFFICES ? `Menampilkan seluruh ${fmt.format(emps.length)} pegawai.` : `Menampilkan ${fmt.format(emps.length)} pegawai di ${activeOffice}. Semua panel di bawah mengikuti pilihan ini.`}</p>
+      <p className="pd-filter-status" aria-live="polite">{activeOffice === ALL_OFFICES ? `Menampilkan seluruh ${fmt.format(emps.length)} pegawai.` : `Menampilkan ${fmt.format(emps.length)} pegawai di ${activeOffice}. Semua panel mengikuti pilihan ini.`}</p>
     </div>
 
     <section className="pd-kpis" aria-label={`Ringkasan kepegawaian, ${scopeLabel}`}>
@@ -107,9 +110,9 @@ export function PeopleDashboard({ nav }: { nav: Nav }) {
       <Kpi label="Akan pensiun · 12 bulan" value={fmt.format(yearAhead.length)} sub={yearAhead.length ? `Terdekat ${formatID(yearAhead[0].date, { short: true })}` : 'Belum ada tanggal pensiun terisi'} onClick={() => open('Akan pensiun dalam 12 bulan', `${yearAhead.length} pegawai`, yearAhead.map(item => item.employee), DEFAULT_DESCRIPTION, dated(e => e.tanggalPensiun))} action={`Lihat ${yearAhead.length} pegawai yang akan pensiun`} disabled={!yearAhead.length} />
     </section>
 
-    <Section title="Komposisi" hint="Siapa saja pegawai KPPU: sebaran kantor, status kepegawaian, dan jenis kelamin.">
+    <Section title="Komposisi" hint="Sebaran kantor, status kepegawaian, dan jenis kelamin.">
       <div className="pd-grid pd-grid-comp">
-        <Panel title="Per kantor" sub="Pusat dan seluruh kantor wilayah. Selalu menampilkan semua kantor; filter di atas menyorot satu kantor." aside={`${offices.length} kantor`}>
+        <Panel title="Per kantor" sub="Pusat dan semua kantor wilayah. Filter di atas menyorot satu kantor." aside={`${offices.length} kantor`}>
           <RankedBars title="Per kantor" groups={offices} total={allEmps.length} noun="kantor" selected={activeOffice === ALL_OFFICES ? undefined : activeOffice} onSelect={pick('Per kantor')} />
         </Panel>
         <div className="pd-stack">
@@ -123,26 +126,26 @@ export function PeopleDashboard({ nav }: { nav: Nav }) {
       </div>
     </Section>
 
-    <Section title="Struktur organisasi" hint="Unit, peringkat, jabatan fungsional, dan pendidikan. Cari atau urutkan, lalu pilih baris untuk membuka daftar pegawai.">
+    <Section title="Struktur organisasi" hint="Unit, peringkat, jabatan fungsional, dan pendidikan. Pilih baris untuk membuka daftar pegawai.">
       <div className="pd-grid pd-grid-struct">
-        <Panel title="Per unit" sub="Seluruh unit dari data pegawai, tanpa dipotong." aside={`${fmt.format(stats.units.length)} unit`}>
+        <Panel title="Per unit" sub="Semua unit dari data pegawai." aside={`${fmt.format(stats.units.length)} unit`}>
           <RankedBars title="Per unit" groups={stats.units} total={emps.length} noun="unit" searchable sortable scroll onSelect={pick('Per unit')} />
         </Panel>
-        <Panel title="Jabatan fungsional" sub={<>{fmt.format(stats.functionalCount)} pegawai berjenis jabatan Fungsional. Yang jenis jabatannya kosong dipisah, tidak dihitung diam-diam.</>} aside={`${fmt.format(stats.functional.length)} kelompok`}>
+        <Panel title="Jabatan fungsional" sub={<>{fmt.format(stats.functionalCount)} pegawai berjenis jabatan Fungsional. Jenis jabatan kosong dipisah, tidak dihitung.</>} aside={`${fmt.format(stats.functional.length)} kelompok`}>
           <RankedBars title="Jabatan fungsional" groups={stats.functional} total={stats.functionalTotal} noun="jabatan" searchable sortable scroll onSelect={pick('Jabatan fungsional')} emptyText="Belum ada pegawai berjenis jabatan Fungsional." />
         </Panel>
-        <Panel title="Peringkat jabatan" sub="Dikelompokkan dari kolom peringkat jabatan pada master." aside={`${fmt.format(stats.rank.length)} peringkat`}>
+        <Panel title="Peringkat jabatan" sub="Dikelompokkan dari kolom peringkat jabatan di master." aside={`${fmt.format(stats.rank.length)} peringkat`}>
           <RankedBars title="Peringkat jabatan" groups={stats.rank} total={emps.length} noun="peringkat" sortable initial={8} onSelect={pick('Peringkat jabatan')} />
         </Panel>
-        <Panel title="Jenis pendidikan" sub="Jenjang diseragamkan dari isian pendidikan, tertinggi di atas." aside={`${fmt.format(stats.education.length)} jenjang`}>
+        <Panel title="Jenis pendidikan" sub="Jenjang diseragamkan dari isian pendidikan; tertinggi di atas." aside={`${fmt.format(stats.education.length)} jenjang`}>
           <EducationTable groups={stats.education} total={emps.length} onSelect={pick('Jenis pendidikan')} />
         </Panel>
       </div>
     </Section>
 
-    <Section title="Demografi" hint="Struktur usia menurut jenis kelamin, dan siapa yang berulang tahun dalam waktu dekat.">
+    <Section title="Demografi" hint="Struktur usia menurut jenis kelamin dan ulang tahun terdekat.">
       <div className="pd-grid pd-grid-demo">
-        <Panel title="Piramida usia" sub="Kelompok 5 tahun. Pilih batang untuk satu jenis kelamin, atau label usia untuk semuanya." aside={`${fmt.format(stats.withAge)} dari ${fmt.format(emps.length)} terisi`}>
+        <Panel title="Piramida usia" sub="Kelompok 5 tahun. Pilih batang untuk satu jenis kelamin, atau label usia untuk semua." aside={`${fmt.format(stats.withAge)} dari ${fmt.format(emps.length)} terisi`}>
           {stats.withAge ? <Pyramid bands={stats.bands} onSelect={(band, side) => {
             const list = side === 'all' ? band.employees : side === 'male' ? band.male : band.female
             const who = side === 'all' ? 'Semua jenis kelamin.' : side === 'male' ? 'Laki-laki.' : 'Perempuan.'
@@ -154,7 +157,7 @@ export function PeopleDashboard({ nav }: { nav: Nav }) {
             </button></li>)}
           </ul>
           {(stats.unknownAge.length > 0 || bandsMissingGender > 0) && <div className="pd-note">
-            {bandsMissingGender > 0 && <p>{fmt.format(bandsMissingGender)} pegawai dengan jenis kelamin belum diisi tidak tampil di sisi kiri maupun kanan piramida, tetapi tetap terhitung pada label usia.</p>}
+            {bandsMissingGender > 0 && <p>{fmt.format(bandsMissingGender)} pegawai tanpa jenis kelamin tidak tampil di kedua sisi piramida, tetapi tetap terhitung pada label usia.</p>}
             {stats.unknownAge.length > 0 && <button type="button" className="pd-more" onClick={() => open('Kelompok usia', 'Tanggal lahir belum diisi', stats.unknownAge, 'Tanggal lahir belum tersedia pada master pegawai.')}>Tanggal lahir belum diisi pada {fmt.format(stats.unknownAge.length)} pegawai · lihat daftar</button>}
           </div>}
         </Panel>
@@ -172,7 +175,7 @@ export function PeopleDashboard({ nav }: { nav: Nav }) {
       </div>
     </Section>
 
-    <Section title="Perubahan pegawai" hint="Pensiun, pegawai baru, dan pengunduran diri. Hanya tanggal yang diisi secara eksplisit yang dihitung."
+    <Section title="Perubahan pegawai" hint="Pensiun, pegawai baru, dan pengunduran diri. Hanya tanggal yang diisi yang dihitung."
       aside={<div className="pd-window"><span id="pd-window-label">Jendela waktu</span><WindowPicker value={months} onChange={setMonths} /></div>}>
       <div className="pd-grid pd-grid-events">
         <EventPanel title="Akan pensiun" range={`${months} bulan ke depan · sampai ${formatID(movement.future)}`} items={movement.pensions} buckets={movement.pensionBuckets} nowKey={nowKey}
@@ -192,14 +195,14 @@ export function PeopleDashboard({ nav }: { nav: Nav }) {
           onAll={() => open(`Pegawai baru dalam ${months} bulan`, `${movement.newHires.length} pegawai`, movement.newHires.map(item => item.employee), DEFAULT_DESCRIPTION, dated(e => e.tanggalMulaiKerja))} />
         <EventPanel title="Mengundurkan diri" range={`${months} bulan terakhir · sejak ${formatID(movement.past)}`} items={movement.resignations} buckets={movement.resignBuckets} nowKey={nowKey}
           emptyText="Belum ada tanggal pengunduran diri dalam periode ini."
-          notes={[{ count: stats.inactiveWithoutResignationDate.length, text: `${stats.inactiveWithoutResignationDate.length} pegawai berstatus Nonaktif tanpa tanggal pengunduran diri. Status Nonaktif tidak otomatis dianggap mengundurkan diri.`, action: 'Periksa daftar pegawai', onOpen: () => open('Nonaktif tanpa tanggal pengunduran diri', `${stats.inactiveWithoutResignationDate.length} pegawai`, stats.inactiveWithoutResignationDate, DEFAULT_DESCRIPTION, e => [e.statusPegawai, e.kantor].filter(Boolean).join(' · ')) }]}
+          notes={[{ count: stats.inactiveWithoutResignationDate.length, text: `${stats.inactiveWithoutResignationDate.length} pegawai Nonaktif tanpa tanggal pengunduran diri. Nonaktif tidak otomatis dihitung mengundurkan diri.`, action: 'Periksa daftar pegawai', onOpen: () => open('Nonaktif tanpa tanggal pengunduran diri', `${stats.inactiveWithoutResignationDate.length} pegawai`, stats.inactiveWithoutResignationDate, DEFAULT_DESCRIPTION, e => [e.statusPegawai, e.kantor].filter(Boolean).join(' · ')) }]}
           onBucket={(bucket: MonthBucket) => open('Mengundurkan diri', bucket.full, bucket.employees, DEFAULT_DESCRIPTION, dated(e => e.tanggalPengunduranDiri))}
           onPerson={e => nav('employees', e.id)}
           onAll={() => open(`Pengunduran diri dalam ${months} bulan`, `${movement.resignations.length} pegawai`, movement.resignations.map(item => item.employee), DEFAULT_DESCRIPTION, dated(e => e.tanggalPengunduranDiri))} />
       </div>
     </Section>
 
-    <Section title="Kualitas data" hint="Seberapa lengkap master pegawai. Isian kosong memengaruhi semua grafik di atas.">
+    <Section title="Kualitas data" hint="Kelengkapan master pegawai. Isian kosong memengaruhi grafik di atas.">
       <CompletenessPanel fields={stats.completeness} employeeCount={emps.length}
         onMissing={field => open('Data belum lengkap', `${field.label} belum diisi`, emps.filter(e => !e[field.key]), `Pegawai yang ${field.label.toLocaleLowerCase('id-ID')} belum terisi pada master.`)} />
     </Section>

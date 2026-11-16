@@ -78,8 +78,8 @@ export function AttendanceOverview({ nav, toast }: { nav: Nav; toast: (message: 
   }
 
   return <div className="page submission-workspace setoran-page">
-    <PageHeader kicker={monthLabel(hr.activePeriod)} title="Setoran & review" actions={<button className="btn secondary" onClick={() => nav('reconcile')}>Lanjutkan rekonsiliasi</button>}>
-      Pantau tiga setoran mingguan seluruh KPPU, lalu lanjutkan ke rekonsiliasi dan uang makan.
+    <PageHeader kicker={monthLabel(hr.activePeriod)} title="Setoran & Review" actions={<button className="btn secondary" onClick={() => nav('reconcile')}>Lanjutkan rekonsiliasi</button>}>
+      Pantau tiga setoran mingguan seluruh KPPU, lalu lanjut ke rekonsiliasi dan uang makan.
     </PageHeader>
 
     <section className="hero-tiles" aria-label={`Ringkasan ${monthLabel(hr.activePeriod)}`}>
@@ -100,7 +100,7 @@ export function AttendanceOverview({ nav, toast }: { nav: Nav; toast: (message: 
     </section>
 
     <section className="month-board" aria-label="Papan setoran bulan">
-      <div className="board-head"><h3>Papan {monthLabel(hr.activePeriod)}</h3><span className="muted small">Klik sumber untuk membuka unggah pekan itu</span></div>
+      <div className="board-head"><h3>Papan {monthLabel(hr.activePeriod)}</h3><span className="muted small">Klik sumber untuk mengunggah pada pekan itu</span></div>
       <div className="board-scroll">
         <div className="board-row board-cols board-th" role="row"><span>Pekan</span><span>Offline</span><span>Online</span><span>ST</span><span>Clash</span><span>UM</span></div>
         {rows.map(row => {
@@ -126,7 +126,7 @@ export function AttendanceOverview({ nav, toast }: { nav: Nav; toast: (message: 
     </section>
 
     <div className="toolbar"><WeekPicker /><Seg label="Cakupan tampilan" value={hr.weekScope} onChange={value => hr.setWeekScope(value as 'month-part' | 'full')} options={[{ value: 'month-part', label: 'Bagian bulan' }, { value: 'full', label: 'Pekan penuh' }]} /></div>
-    {hr.roster.employees.length === 0 && <Note tone="warn"><CircleHelp size={14} /> Impor master pegawai terlebih dahulu agar roster dan denominator review sesuai pegawai aktif.</Note>}
+    {hr.roster.employees.length === 0 && <Note tone="warn"><CircleHelp size={14} /> Impor master pegawai dulu agar daftar pegawai aktif dan target review sesuai.</Note>}
 
     <ImportPage nav={nav} toast={toast} request={request} clashCount={selected.clashes} />
   </div>

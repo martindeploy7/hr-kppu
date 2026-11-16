@@ -116,9 +116,9 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
     toast('Daftar nominatif diunduh')
   }
 
-  return <div className="page">
+  return <div className="page meal-page">
     <PageHeader kicker={`Uang makan · ${view === 'week' ? `${formatID(calculation.period.start, { short: true })}–${formatID(calculation.period.end, { short: true })}` : monthLabel(hr.activePeriod)}`} title="Perhitungan uang makan" actions={<>{view === 'week' && <WeekPicker />}<Seg label="Periode hasil" value={view} onChange={setView} options={[{ value: 'week', label: 'Pekan terpilih' }, { value: 'month', label: 'Akumulasi bulan' }]} />{['admin', 'superadmin'].includes(user.role) && <button className="btn secondary" onClick={() => setShowPolicy(v => !v)}><Settings2 size={15} /> Aturan & tarif</button>}<button className="btn primary" onClick={exportXlsx}><Download size={15} /> Unduh daftar nominatif</button></>}>
-      Hari tanpa clash divalidasi otomatis dan UM-nya dihitung langsung; hari dengan clash menunggu keputusan di Rekonsiliasi. Nominal final muncul setelah ketiga sumber pekan (Offline, Online, ST) disetor; sebelumnya tampil sebagai perkiraan.
+      Hari tanpa clash divalidasi otomatis; hari dengan clash menunggu keputusan di Rekonsiliasi. Nominal final muncul setelah ketiga sumber pekan (Offline, Online, ST) disetor, sebelumnya tampil sebagai perkiraan.
     </PageHeader>
 
     {view === 'month' ? <SubmissionPanel /> : <Note>Setoran dan review mingguan terakumulasi pada periode {monthLabel(hr.activePeriod)}. Pengajuan nominatif tetap dilakukan melalui tampilan akumulasi bulan.</Note>}
@@ -131,7 +131,7 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
 
     <div className="meal-split">
       <Panel title="Kenapa tidak dapat UM" sub="Hari-orang per hasil. Klik segmen atau legenda untuk memfilter tabel.">
-        {outcomeTotal === 0 ? <p className="muted">Belum ada hari kerja yang berlangsung pada periode ini.</p> : <>
+        {outcomeTotal === 0 ? <p className="muted">Belum ada hari kerja yang berlangsung pada periode ini. Hasil muncul setelah pekan dimulai dan setoran masuk.</p> : <>
           <div className="why-bar" role="group" aria-label="Distribusi hasil hari kerja">{OUTCOMES.filter(o => outcomeCounts[o.id] > 0).map(o => <button key={o.id} type="button" className={`why-seg ${outcome === o.id ? 'on' : ''} ${outcome && outcome !== o.id ? 'dim' : ''}`} style={{ flexGrow: outcomeCounts[o.id], background: o.color }} title={`${o.label}: ${outcomeCounts[o.id]} hari`} aria-label={`${o.label}: ${outcomeCounts[o.id]} hari`} aria-pressed={outcome === o.id} onClick={() => setOutcome(outcome === o.id ? null : o.id)} />)}</div>
           <div className="why-legend">{OUTCOMES.filter(o => outcomeCounts[o.id] > 0).map(o => <button key={o.id} type="button" className={`why-item ${outcome === o.id ? 'on' : ''}`} aria-pressed={outcome === o.id} onClick={() => setOutcome(outcome === o.id ? null : o.id)}><i style={{ background: o.color }} />{o.label}<b>{fmt.format(outcomeCounts[o.id])}</b><em>{Math.round(outcomeCounts[o.id] / outcomeTotal * 100)}%</em></button>)}</div>
         </>}
@@ -160,7 +160,7 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
 
     {(noNip > 0 || assumed > 0) && <Note tone="warn">
       {noNip > 0 && <><strong>{noNip} pegawai</strong> berhak uang makan tetapi belum punya NIP (hanya dari sumber Kanwil). </>}
-      {assumed > 0 && <><strong>{assumed} pegawai</strong> belum memiliki data golongan; nominal belum siap dan tidak menggunakan fallback. Lengkapi golongan lewat Tambah Data → Bulk import agar tarif & PPh tepat.</>}
+      {assumed > 0 && <><strong>{assumed} pegawai</strong> belum memiliki data golongan; nominal belum siap dan tidak menggunakan fallback. Lengkapi golongan lewat Tambah Data (Impor massal) agar tarif & PPh tepat.</>}
     </Note>}
 
     <Panel title="Daftar nominatif" sub="Klik baris untuk melihat alasan per hari." aside={outcome ? <button className="tone-chip tone-info meal-clear" onClick={() => setOutcome(null)}>Filter: {OUTCOME_LABEL[outcome]} · {shown.length} pegawai <X size={12} /> Hapus</button> : undefined}>
@@ -177,7 +177,7 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
           <td><div className="day-strip">{m.days.filter(d => d.workday).map(d => { const o = classify(d); const c = o ? OUTCOME_COLOR[o] : 'transparent'; return <i key={d.date} className={o ? '' : 'future'} style={{ background: c }} title={`${formatID(d.date, { short: true })} · ${o ? OUTCOME_LABEL[o] : 'Belum berlangsung'}${d.meal.reason ? ` — ${d.meal.reason}` : ''}`} /> })}</div></td>
           <td className="num strong">{m.mealDays}{m.heldDays ? <small className="held">{m.heldDays} ditahan</small> : null}</td>
           <td className="num">{m.amountPendingDays ? 'Pending' : <strong className="money-final">{money.format(m.bruto)}</strong>}{m.estimateBruto > 0 && <small className="money-est">+ perkiraan {money.format(m.estimateBruto)}</small>}</td>
-        </tr>)}{shown.length === 0 && <tr><td colSpan={5} className="muted">Tidak ada pegawai yang cocok dengan filter.</td></tr>}</tbody>
+        </tr>)}{shown.length === 0 && <tr><td colSpan={5} className="muted">Tidak ada pegawai yang cocok. Ubah pencarian atau kantor{outcome ? ', atau hapus filter hasil di atas' : ''}.</td></tr>}</tbody>
         <tfoot><tr><td>Jumlah ({shown.length} pegawai)</td><td /><td /><td className="num">{fmt.format(shown.reduce((s, m) => s + m.mealDays, 0))}</td><td className="num">{money.format(shown.reduce((s, m) => s + m.bruto, 0))}</td></tr></tfoot>
       </table></div>
     </Panel>
@@ -224,12 +224,13 @@ function PolicyEditor() {
         {toggle('includeNonAsn', 'Bayar pegawai non-ASN', 'NIP placeholder (0000…) di aplikasi HP.')}
       </div>
       <div className="rates">
-        <p className="muted small">Tarif UM berikut mengikuti ketetapan KPPU. PPh tidak termasuk ketetapan tersebut: nilai awal 0% hanyalah kolom draf dan tidak dipakai sampai diubah sesuai aturan resmi lalu disahkan.</p>
+        <p className="muted small">Tarif UM mengikuti ketetapan KPPU.</p>
+        <details className="meal-how"><summary>Cara kerja PPh</summary><p className="muted small">PPh tidak termasuk ketetapan tersebut. Nilai awal 0% hanyalah kolom draf dan tidak dipakai sampai diubah sesuai aturan resmi lalu disahkan.</p></details>
         <table className="data"><thead><tr><th>Kelompok</th><th className="num">Tarif / hari</th><th className="num">PPh % (draf)</th></tr></thead>
           <tbody>{(['I', 'II', 'III', 'IV'] as GolGroup[]).map(g => <tr key={g}><td>Golongan {g}</td>
             <td className="num"><input disabled={!canEdit} type="number" step={1000} value={p.rates[g]} onChange={e => hr.setPolicy({ rates: { ...p.rates, [g]: Number(e.target.value) } })} /></td>
             <td className="num"><input disabled={!canEdit} type="number" step={1} value={p.pph[g]} onChange={e => hr.setPolicy({ pph: { ...p.pph, [g]: Number(e.target.value) } })} /></td></tr>)}</tbody></table>
-        <label className="holidays"><span>Hari libur nasional & cuti bersama (draf — cocokkan dengan SKB)</span><textarea disabled={!canEdit} rows={3} value={p.holidays.join(', ')} onChange={e => hr.setPolicy({ holidays: e.target.value.split(/[\s,]+/).filter(v => /^\d{4}-\d{2}-\d{2}$/.test(v)) })} /></label>
+        <label className="holidays"><span>Hari libur nasional & cuti bersama (draf, cocokkan dengan SKB)</span><textarea disabled={!canEdit} rows={3} value={p.holidays.join(', ')} onChange={e => hr.setPolicy({ holidays: e.target.value.split(/[\s,]+/).filter(v => /^\d{4}-\d{2}-\d{2}$/.test(v)) })} /></label>
       </div>
     </div>
   </Panel>

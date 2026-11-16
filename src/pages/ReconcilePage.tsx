@@ -21,7 +21,7 @@ const ACTIONS: Partial<Record<IssueType, { decision: Resolution['decision']; lab
   'status-berbeda': [{ decision: 'akui-dinas', label: 'ST/dinas yang valid (tanpa UM)', tone: 'primary' }, { decision: 'akui-hadir', label: 'Absensi hadir yang valid' }, { decision: 'tidak-hadir', label: 'Tidak hadir / tidak sah' }],
   'dinas-vs-scan-kantor': [{ decision: 'akui-dinas', label: 'Akui dinas (scan tidak dihitung)', tone: 'primary' }, { decision: 'akui-hadir', label: 'Akui hadir di kantor' }],
   'cuti-vs-hadir': [{ decision: 'valid', label: 'Tetap cuti/sakit', tone: 'primary' }, { decision: 'akui-hadir', label: 'Akui hadir (cuti dibatalkan)' }],
-  'st-tumpang-tindih': [{ decision: 'valid', label: 'Sudah diklarifikasi — satu ST berlaku', tone: 'primary' }, { decision: 'akui-dinas', label: 'Keduanya sah (ST berurutan)' }],
+  'st-tumpang-tindih': [{ decision: 'valid', label: 'Sudah diklarifikasi: satu ST berlaku', tone: 'primary' }, { decision: 'akui-dinas', label: 'Keduanya sah (ST berurutan)' }],
   'pd-tanpa-st': [{ decision: 'valid', label: 'ST ada / dinas sah', tone: 'primary' }, { decision: 'tidak-hadir', label: 'Tidak sah → tanpa keterangan' }],
   'wfo-di-luar-kantor': [{ decision: 'valid', label: 'Lokasi dapat diterima', tone: 'primary' }, { decision: 'tidak-hadir', label: 'Presensi tidak sah' }],
   'jam-duplikat': [{ decision: 'valid', label: 'Jam sudah diverifikasi', tone: 'primary' }, { decision: 'tidak-hadir', label: 'Tidak sah' }],
@@ -75,7 +75,7 @@ export function ReconcilePage({ nav, toast, focus }: { nav: Nav; toast: (m: stri
   const filtered = scoped.filter(c => type === 'all' || c.type === type)
   const selected = cases.find(c => c.id === openCase)
 
-  if (!hr.files.length) return <div className="page"><Empty icon={UploadCloud} title="Belum ada data untuk direkonsiliasi" action={<button className="btn primary" onClick={() => nav('import')}>Impor file sumber</button>} /></div>
+  if (!hr.files.length) return <div className="page"><Empty icon={UploadCloud} title="Belum ada data untuk direkonsiliasi" action={<button className="btn primary" onClick={() => nav('import')}>Impor file sumber</button>}>Clash muncul setelah file absensi diunggah. Unggah setoran pekan ini di Setoran &amp; Review.</Empty></div>
 
   const next = clashTotal === 0
     ? { tone: 'ok', text: 'Tidak ada clash pada pekan ini. Semua hari yang punya bukti sudah valid otomatis.', cta: 'Lihat Uang Makan', go: () => nav('meal') }
@@ -85,7 +85,7 @@ export function ReconcilePage({ nav, toast, focus }: { nav: Nav; toast: (m: stri
 
   return <div className="page recon">
     <PageHeader kicker={`Rekonsiliasi · ${formatID(hr.weekRecon.period.start, { short: true })}–${formatID(hr.weekRecon.period.end, { short: true })}`} title="Rekonsiliasi absensi" actions={<><WeekPicker /><Seg label="Tampilan" value={tab} onChange={setTab} options={[{ value: 'issues', label: 'Antrean clash' }, { value: 'matrix', label: 'Matriks harian' }]} /></>}>
-      Mesin Offline, Mesin Online, dan ST berkedudukan setara. Hari tanpa pertentangan antar sumber sudah valid otomatis; Anda hanya memutuskan hari yang bertentangan.
+      Mesin Offline, Mesin Online, dan ST berkedudukan setara. Hari tanpa pertentangan antar sumber valid otomatis; Anda hanya memutuskan hari yang bertentangan.
     </PageHeader>
 
     <div className="rc-tiles">
@@ -122,7 +122,7 @@ export function ReconcilePage({ nav, toast, focus }: { nav: Nav; toast: (m: stri
       {filtered.length === 0
         ? (state === 'open' && clashTotal > 0 && clashOpen === 0 && scope === 'clash' && !q && office === 'Semua')
           ? <div className="rc-celebrate"><PartyPopper size={30} /><strong>Semua clash pekan ini sudah diputuskan</strong><p>Status hari dan uang makan sudah dihitung ulang dari keputusan Anda.</p><button className="btn primary" onClick={() => nav('meal')}>Lihat Uang Makan <ArrowRight size={14} /></button></div>
-          : <Empty icon={CheckCircle2} title={state === 'open' ? 'Tidak ada kasus menunggu pada filter ini' : 'Belum ada keputusan pada filter ini'} />
+          : <Empty icon={CheckCircle2} title={state === 'open' ? 'Tidak ada kasus menunggu pada filter ini' : 'Belum ada keputusan pada filter ini'}>{q || office !== 'Semua' || type !== 'all' ? 'Ubah kata kunci, kantor, atau jenis clash untuk melihat kasus lain.' : state === 'open' ? 'Pilih "Semua catatan" di atas untuk melihat catatan yang tidak menahan uang makan.' : 'Keputusan yang Anda simpan akan muncul di sini.'}</Empty>
         : <div className="rc-cards">{filtered.slice(0, limit).map(c => <ClashCard key={c.id} c={c} toast={toast} editable={editable} onOpen={() => setOpenCase(c.id)} />)}</div>}
       {filtered.length > limit && <button className="btn secondary more" onClick={() => setLimit(l => l + 20)}>Tampilkan {Math.min(20, filtered.length - limit)} kasus lagi</button>}
     </Panel> : <Matrix months={hr.weekRecon.months} range={hr.weekRecon.period} onOpen={(emp, date) => setOpenDay({ emp, date })} />}
@@ -134,7 +134,7 @@ export function ReconcilePage({ nav, toast, focus }: { nav: Nav; toast: (m: stri
         const d = m?.days.find(x => x.date === openDay.date)
         return m && <Drawer wide label="Detail hari" onClose={() => setOpenDay(null)}>
           <div className="drawer-head"><span className="page-kicker">Bukti kehadiran</span><h2>{m.employee.nama}</h2><p>{m.employee.nip || 'Tanpa NIP'} · {m.employee.kantor} · {m.employee.unit}</p></div>
-          {d ? <><DayDetail day={d} canReview />{d.issues.length > 0 && <IssueActions issues={d.issues} toast={toast} editable={editable} />}</> : <p className="muted">Tidak ada catatan pada tanggal ini.</p>}
+          {d ? <><DayDetail day={d} canReview />{d.issues.length > 0 && <IssueActions issues={d.issues} toast={toast} editable={editable} />}</> : <p className="muted">Tidak ada catatan pada tanggal ini. Periksa setoran pekan ini di Setoran &amp; Review.</p>}
         </Drawer>
       })()}
     </AnimatePresence>
@@ -224,7 +224,7 @@ function ClashCard({ c, toast, editable, onOpen }: { c: Case; toast: (m: string)
       </div>)}
     </div>
     {c.resolved ? <div className="rc-decided"><CheckCircle2 size={16} /><div><b>Sudah diputuskan: {decided[0] ? DECISION_LABEL[decided[0].decision] : ''}</b>{decided[0] && <small>{decided[0].reviewer} · “{decided[0].note}”</small>}</div>
-      {editable && <button className="btn secondary" onClick={() => { hr.unresolve(ids); toast('Keputusan dibatalkan') }}><RotateCcw size={14} /> Batalkan</button>}</div>
+      {editable && <button className="btn danger" onClick={() => { hr.unresolve(ids); toast('Keputusan dibatalkan') }}><RotateCcw size={14} /> Batalkan keputusan</button>}</div>
     : editable ? <div className="rc-decide">
       <label><span>Catatan keputusan (jejak audit) · terisi otomatis, boleh diubah</span><textarea rows={2} value={note} onChange={ev => setEdited(ev.target.value)} /></label>
       <div className="rc-btns">{actions.map(a => {
@@ -299,7 +299,7 @@ function IssueActions({ issues, toast, onDone, type, editable }: { issues: Issue
   const ids = issues.map(i => i.id)
   const days = new Set(issues.map(i => `${i.employeeId}|${i.date}`)).size
   if (!editable) return <div className={`decision ${done ? 'done' : ''}`}><span>{done ? 'Keputusan sudah tercatat; status hari dan uang makan mengikuti keputusan tersebut.' : 'Keputusan kasus ini memerlukan akun Admin atau Superadmin.'}</span></div>
-  if (done) return <div className="decision done"><CheckCircle2 size={16} /><span>Sudah diputuskan. Status hari dan uang makan dihitung ulang memakai keputusan ini.</span><button className="btn secondary" onClick={() => { hr.unresolve(ids); toast('Keputusan dibatalkan') }}><RotateCcw size={14} /> Batalkan</button></div>
+  if (done) return <div className="decision done"><CheckCircle2 size={16} /><span>Sudah diputuskan. Status hari dan uang makan dihitung ulang memakai keputusan ini.</span><button className="btn danger" onClick={() => { hr.unresolve(ids); toast('Keputusan dibatalkan') }}><RotateCcw size={14} /> Batalkan keputusan</button></div>
   return <div className="decision">
     <label><span>Catatan keputusan (tersimpan sebagai jejak audit)</span><textarea rows={2} value={note} onChange={e => setNote(e.target.value)} placeholder="Mis. sudah dikonfirmasi ke sekretaris Direktorat; ST 640 dibatalkan." /></label>
     <div className="decision-buttons">{actions.map(a => <button key={a.decision + a.label} className={`btn ${a.tone === 'primary' ? 'primary' : 'secondary'}`} onClick={() => { if (note.trim().length < 3) { toast('Isi catatan keputusan minimal 3 karakter'); return } hr.resolve(ids, a.decision, note); toast(`Keputusan disimpan untuk ${days} hari`); onDone?.() }}>{a.label}</button>)}</div>
@@ -326,10 +326,10 @@ function Matrix({ months, range, onOpen }: { months: EmployeeMonth[]; range: { s
       <Seg label="Saring" value={only} onChange={setOnly} options={[{ value: 'attention', label: 'Perlu tindakan' }, { value: 'flag', label: 'Flag' }, { value: 'not-found', label: 'Tidak ditemukan' }, { value: 'all', label: 'Semua' }]} />
     </div>
     <div className="review-progress"><span><b>{fmt.format(coverage.valid)}</b> valid</span><span><b>{fmt.format(coverage.flag)}</b> flag</span><span><b>{fmt.format(coverage.missing)}</b> tidak ditemukan</span><span><b>{fmt.format(coverage.total)}</b> target hari-orang</span></div>
-    <div className="legend rc-legend">{[['ok', 'Hadir'], ['online', 'WFA'], ['duty', 'Dinas / ST / diklat'], ['leave', 'Cuti / sakit / izin'], ['danger', 'Tanpa keterangan / terlambat'], ['warn', 'Tidak lengkap / menunggu keputusan'], ['idle', 'Tidak ada data']].map(([k, l]) => <span key={k}><i className={`sw sw-${k}`} /> {l}</span>)}<span><i className="dot-issue" /> isu terbuka</span><span><b>!</b> menunggu keputusan · <b>?</b> tidak ditemukan</span></div>
+    <div className="legend rc-legend" role="group" aria-label="Legenda kode matriks">{[['ok', 'Hadir'], ['online', 'WFA'], ['duty', 'Dinas / ST / diklat'], ['leave', 'Cuti / sakit / izin'], ['danger', 'Tanpa keterangan / terlambat'], ['warn', 'Tidak lengkap / menunggu keputusan'], ['idle', 'Tidak ada data']].map(([k, l]) => <span key={k}><i className={`sw sw-${k}`} /> {l}</span>)}<span><i className="dot-issue" /> isu terbuka</span><span><b>!</b> menunggu keputusan · <b>?</b> tidak ditemukan</span></div>
     <div className="matrix-wrap">
       <table className="matrix">
-        <thead><tr><th className="sticky">Pegawai</th>{dates.map(d => <th key={d} className={isWeekend(d) ? 'we' : ''}><span>{dayName(d, true).slice(0, 2)}</span>{Number(d.slice(8))}</th>)}<th>H</th><th>TK</th></tr></thead>
+        <thead><tr><th className="sticky">Pegawai</th>{dates.map(d => <th key={d} className={isWeekend(d) ? 'we' : ''}><span>{dayName(d, true)}</span>{Number(d.slice(8))}</th>)}<th>H</th><th>TK</th></tr></thead>
         <tbody>{view.map(m => {
           const byDate = new Map(m.days.map(d => [d.date, d]))
           return <tr key={m.employee.id}>
@@ -347,6 +347,7 @@ function Matrix({ months, range, onOpen }: { months: EmployeeMonth[]; range: { s
         })}</tbody>
       </table>
     </div>
+    {rows.length === 0 && <Empty icon={Search} title="Tidak ada pegawai pada filter ini">{only === 'attention' ? 'Semua hari pada pekan ini sudah valid. Pilih "Semua" untuk melihat seluruh pegawai.' : 'Ubah kata kunci, kantor, atau filter untuk melihat pegawai lain.'}</Empty>}
     <div className="pager"><span>{fmt.format(rows.length)} pegawai</span>{rows.length > PER && <><button className="btn secondary" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Sebelumnya</button><span>Hal. {page + 1} / {Math.ceil(rows.length / PER)}</span><button className="btn secondary" disabled={(page + 1) * PER >= rows.length} onClick={() => setPage(p => p + 1)}>Berikutnya</button></>}</div>
   </Panel>
 }

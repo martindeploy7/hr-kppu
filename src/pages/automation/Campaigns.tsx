@@ -136,12 +136,12 @@ export function CampaignsSection({ overview, canWrite, selectedRuleId, notify }:
 
     <h4 className="ac-sub">Daftar kampanye</h4>
     <ErrorLine message={listError} />
-    {!campaigns ? <ListSkeleton rows={3} cols={4} label="Memuat kampanye…" /> : campaigns.length === 0 ? <p className="ac-note">Belum ada kampanye.</p> : <ul className="ac-camp-list">
+    {!campaigns ? <ListSkeleton rows={3} cols={4} label="Memuat kampanye…" /> : campaigns.length === 0 ? <p className="ac-note">Belum ada kampanye.{canWrite ? ' Susun lewat formulir di atas.' : ''}</p> : <ul className="ac-camp-list">
       {campaigns.map(c => { const [tone, label] = campTone[c.status]; return <li key={c.id}>
         <div><strong>{c.title}</strong><small>{ruleTitle(c.ruleId)} · {audienceText(c.audience)}</small>
           <small>{fmtDateTime(c.sendAt)}{c.repeatMonthly ? ' · berulang bulanan' : ''}{c.recipients != null ? ` · ${c.recipients} penerima` : ''}</small></div>
         <span className={`tone-chip ${tone}`}>{label}</span>
-        {canWrite && c.status === 'scheduled' && <button type="button" className="btn secondary ac-sm" onClick={() => void cancel(c)}><X size={14} /> Batalkan</button>}
+        {canWrite && c.status === 'scheduled' && <button type="button" className="btn danger ac-sm" onClick={() => void cancel(c)}><X size={14} /> Batalkan kampanye</button>}
       </li> })}
     </ul>}
   </Section>

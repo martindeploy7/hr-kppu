@@ -1,0 +1,9 @@
+/* Data Pegawai: ringkasan sumber per baris (lengkap di title dan profil) */
+.emp-src { display: flex; flex-wrap: nowrap; gap: 4px; align-items: center; min-width: 0 }
+.emp-src > span { padding: 2px 6px; border-radius: var(--radius-sm); background: var(--surface-sunken); color: var(--ink-muted); font-size: var(--fs-2xs); font-weight: 600; white-space: nowrap; max-width: 150px; overflow: hidden; text-overflow: ellipsis }
+.emp-src > .emp-src-more { background: var(--info-bg); color: var(--info); flex: none }
+.emp-src-full { flex-wrap: wrap }
+.emp-src-full > span { max-width: none; font-size: var(--fs-xs) }
+.emp-empty { display: grid; justify-items: start; gap: 8px; padding: 16px 4px; color: var(--ink-soft); font-size: var(--fs-md) }
+.emp-empty p { margin: 0 }
+@media (max-width: 760px) { .emp-src > span { max-width: 110px } }

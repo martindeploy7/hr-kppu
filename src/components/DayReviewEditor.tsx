@@ -39,7 +39,7 @@ export function DayReviewEditor({ day }: { day: DayRecord }) {
     {current && <p className="muted small">{STATUS_LABEL[current.status]} · {current.note} · {new Date(current.at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</p>}
     {stale && <p className="form-error" role="status">Bukti atau identitas berubah sejak keputusan terakhir. Tinjau ulang sebelum UM dihitung.</p>}
     {!canReview || day.reviewState === 'future' ? <p className="muted small">{!canReview ? 'Akun ini tidak memiliki hak untuk mengesahkan keputusan.' : 'Hari yang belum berlangsung belum dapat divalidasi.'}</p> : <>
-      <p className="muted small">Pilih catatan yang dipakai dan tetapkan statusnya. Catatan dari sumber lain tetap terlihat untuk audit; sumber tidak saling mengesahkan.</p>
+      <p className="muted small">Pilih catatan yang dipakai, lalu tetapkan statusnya. Catatan sumber lain tetap terlihat untuk audit.</p>
       {day.evidence.length > 0 ? <div className="table-wrap"><table className="evidence"><thead><tr><th>Gunakan</th><th>Sumber & kantor</th><th>Masuk–pulang</th><th>Keterangan</th><th>Rujukan</th></tr></thead><tbody>{day.evidence.map(e => <tr key={e.id}>
         <td><input type="checkbox" checked={evidenceIds.includes(e.id)} onChange={() => toggle(evidenceIds, e.id, setEvidenceIds)} aria-label={`Gunakan bukti ${e.kind} ${e.ref}`} /></td>
         <td><SourceChip kind={e.kind} /><small>{e.office}</small></td>
@@ -58,7 +58,7 @@ export function DayReviewEditor({ day }: { day: DayRecord }) {
       {error && <p className="form-error" role="alert">{error}</p>}
       <div className="form-actions">
         <button className="btn primary" disabled={hr.saveStatus === 'saving' || hr.saveStatus === 'loading'} onClick={save}><Save size={14} /> {current ? 'Simpan perubahan keputusan' : 'Sahkan hari ini'}</button>
-        {old && <button className="btn secondary" disabled={hr.saveStatus === 'saving'} onClick={() => hr.unreviewDay(day.employeeId, day.date)}>Hapus keputusan</button>}
+        {old && <button className="btn danger" disabled={hr.saveStatus === 'saving'} onClick={() => hr.unreviewDay(day.employeeId, day.date)}>Hapus keputusan</button>}
       </div>
       <small className="muted">Reviewer: {user.name} · Perubahan tersimpan bersama revisi workspace.</small>
       {hr.saveStatus === 'saving' && <p className="muted small" role="status">Menyimpan keputusan…</p>}

@@ -58,6 +58,7 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
   const [filterOffice, setFilterOffice] = useState(user.role === 'operator_st' ? user.offices?.[0] ?? 'Pusat' : initialOffice ?? 'Semua')
   const [registerOffice, setRegisterOffice] = useState(user.role === 'operator_st' ? user.offices?.[0] ?? 'Pusat' : initialOffice ?? 'Pusat')
   const [recordsLoaded, setRecordsLoaded] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [data, setData] = useState<RekapResponse>({ revision: hr?.revision ?? 0, records: [], sourceIds: [] })
   const [employees, setEmployees] = useState<EmployeeOption[]>([])
   const [employeeQuery, setEmployeeQuery] = useState('')
@@ -87,12 +88,12 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
     const query = new URLSearchParams({ period })
     if (officeForQuery && officeForQuery !== 'Semua') query.set('office', officeForQuery)
     const response = await api<RekapResponse>(`/rekap-st?${query}`)
-    setData(response); setRecordsLoaded(true)
+    setData(response); setRecordsLoaded(true); setLoadFailed(false)
   }, [period, officeForQuery])
 
   useEffect(() => {
     let active = true
-    loadRecords().catch(e => { if (active) { setError((e as Error).message); setRecordsLoaded(true) } })
+    loadRecords().catch(e => { if (active) { setError((e as Error).message); setRecordsLoaded(true); setLoadFailed(true) } })
     return () => { active = false }
   }, [loadRecords])
 
@@ -197,22 +198,22 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
 
   return <div className={operator ? 'st-operator-shell' : 'page'}>
     {operator && <header>{brand}</header>}
-    <PageHeader title="Rekap ST" actions={<label className="select-label">Periode<input type="month" value={period} onChange={e => e.target.value && setPeriod(e.target.value)} aria-label="Bulan rekap ST" /></label>}>
-      {operator ? 'Masukkan surat tugas untuk pegawai di kantor cakupan Anda.' : 'Catat satu surat tugas dengan beberapa pegawai dan rentang tanggal tugas. Rekap manual ini langsung menjadi bukti pada rekonsiliasi bulan terkait.'}
+    <PageHeader title="Rekap ST" actions={<label className="select-label">Periode<input type="month" lang="id" value={period} onChange={e => e.target.value && setPeriod(e.target.value)} aria-label="Bulan rekap ST" /></label>}>
+      {operator ? 'Masukkan surat tugas untuk pegawai di kantor cakupan Anda.' : 'Catat satu surat tugas untuk beberapa pegawai dan rentang tanggal. Rekap ini langsung menjadi bukti rekonsiliasi bulan terkait.'}
     </PageHeader>
 
     {error && <p role="alert" className="form-error">{error}</p>}
     {message && <p role="status" className="st-success">{message}</p>}
 
-    {canAdd && <Panel title="Tambah rekap surat tugas" sub="Satu pengajuan untuk satu Surat Tugas: satu nomor ST, rentang tanggal tugas, dan beberapa pegawai, sesuai rekap Excel.">
-      {!employees.length && <Note tone="warn">Belum ada pegawai di master resmi untuk kantor ini. Minta Superadmin memperbarui master pegawai sebelum menginput ST.</Note>}
+    {canAdd && <Panel title="Tambah rekap surat tugas" sub="Satu ST: satu nomor, satu rentang tanggal, beberapa pegawai.">
+      {!employees.length && <Note tone="warn">Belum ada pegawai di master untuk kantor ini. Minta Superadmin melengkapi master pegawai sebelum mengisi ST.</Note>}
       <form onSubmit={submit}>
         <div className="st-entry-grid">
           {user.role === 'superadmin' && <label>Kantor register ST<select required value={registerOffice} onChange={e => { setRegisterOffice(e.target.value); setEmployeeIds([]); setEmployeeQuery('') }}>{OFFICES.map(office => <option key={office}>{office}</option>)}</select></label>}
           <label>No. ST<input required maxLength={100} value={letterNo} onChange={e => setLetterNo(e.target.value)} placeholder="256/" /></label>
-          <label>Tanggal ST<input type="date" required value={letterDate} onChange={e => setLetterDate(e.target.value)} /></label>
-          <label>Tanggal tugas mulai<input type="date" required value={startDate} onChange={e => setStartDate(e.target.value)} /></label>
-          <label>Tanggal tugas selesai<input type="date" required min={startDate} value={effectiveEnd} onChange={e => setEndDate(e.target.value)} /></label>
+          <label>Tanggal ST<input type="date" lang="id" required value={letterDate} onChange={e => setLetterDate(e.target.value)} /></label>
+          <label>Tanggal tugas mulai<input type="date" lang="id" required value={startDate} onChange={e => setStartDate(e.target.value)} /></label>
+          <label>Tanggal tugas selesai<input type="date" lang="id" required min={startDate} value={effectiveEnd} onChange={e => setEndDate(e.target.value)} /></label>
           <label className="st-destination-field">Tujuan<input required maxLength={250} value={destination} onChange={e => setDestination(e.target.value)} placeholder="Kota, Provinsi" /></label>
         </div>
         {dateError && <p role="alert" className="form-error">{dateError}</p>}
@@ -231,18 +232,18 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
           <p><strong>{employeeIds.length} pegawai × {dayList.length} hari = {employeeIds.length * dayList.length} baris</strong></p>
           <p className="muted small">{dayList.map(shortDate).join(', ')}</p>
         </div>}
-        <div className="st-form-actions"><span className="muted small">Identitas pegawai dikunci dari master agar rekap tidak salah pasangan. Baris yang sudah ada dilewati.</span><button className="btn primary" disabled={busy || !employeeIds.length || !!dateError}>{busy ? 'Menyimpan…' : 'Simpan rekap ST'}</button></div>
+        <div className="st-form-actions"><span className="muted small">Identitas pegawai diambil dari master. Baris yang sudah ada dilewati.</span><button className="btn primary" disabled={busy || !employeeIds.length || !!dateError}>{busy ? 'Menyimpan…' : 'Simpan rekap ST'}</button></div>
       </form>
     </Panel>}
 
-    {canConfirmCoverage && <Panel title="Kelengkapan ST bulanan" sub="Penambahan ST tidak otomatis menyatakan register lengkap. Superadmin mengonfirmasi kelengkapan setelah mencocokkan seluruh rekap kantor.">
+    {canConfirmCoverage && <Panel title="Kelengkapan ST bulanan" sub="Superadmin mengonfirmasi kelengkapan setelah mencocokkan seluruh rekap kantor.">
+      <details className="st-how"><summary>Cara kerja</summary><p>Menambah ST tidak otomatis menyatakan register lengkap. Tanpa konfirmasi, bulan ini tetap berstatus belum dikonfirmasi di rekonsiliasi.</p></details>
       <div className="st-coverage-row"><label>Kantor register<select value={registerOffice} onChange={e => setRegisterOffice(e.target.value)}>{officeOptions.map(office => <option key={office}>{office}</option>)}</select></label><div><span>Status cakupan</span><strong>{coverageState === 'complete' ? 'Lengkap' : coverageState === 'nil' ? 'Nihil' : coverageState === 'partial' ? 'Parsial' : coverageState === 'unconfirmed' ? 'Data ada, belum dikonfirmasi' : 'Belum dikonfirmasi'}</strong></div><button className="btn secondary" disabled={busy || ['complete', 'nil'].includes(coverageState)} onClick={() => void confirmCoverage()}>{data.records.some(record => record.registerOffice === registerOffice && record.status === 'active') ? 'Konfirmasi rekap lengkap' : 'Konfirmasi nihil ST'}</button></div>
       {hasOtherSt && <p className="muted small">Register ST dari Excel lama terdeteksi; konfirmasikan cakupan file tersebut di halaman Impor Sumber.</p>}
     </Panel>}
 
-    <Panel title={`Daftar rekap · ${period}`} sub={operator ? `Kantor cakupan: ${user.offices?.join(', ') || 'belum ditetapkan'}` : 'Catatan aktif masuk ke rekonsiliasi. Pembatalan oleh Superadmin tetap tercatat sebagai jejak audit.'}>
+    <Panel title={`Daftar rekap · ${period}`} sub={operator ? `Kantor cakupan: ${user.offices?.join(', ') || 'belum ditetapkan'}` : 'Catatan aktif masuk ke rekonsiliasi. Pembatalan tercatat sebagai jejak audit.'}>
       <div className="toolbar">
-        <label className="select-label">Periode<input type="month" value={period} onChange={e => e.target.value && setPeriod(e.target.value)} aria-label="Filter bulan rekap" /></label>
         {!operator && <label className="select-label">Kantor<select value={filterOffice} onChange={e => setFilterOffice(e.target.value)}><option>Semua</option>{OFFICES.map(office => <option key={office}>{office}</option>)}</select></label>}
         <span className="count-line">{groups.length} ST · {data.records.length} baris</span>
         <button className="btn secondary" disabled={busy} onClick={() => void loadRecords().catch(e => setError((e as Error).message))}>Muat ulang</button>
@@ -262,14 +263,14 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
             <ul className="st-group-people">{[...group.records].sort((a, b) => a.name.localeCompare(b.name, 'id') || a.activityDate.localeCompare(b.activityDate)).map(record => <li key={record.id}>
               <span>{record.name}</span><span className="mono">{record.nip || 'NI PPPK tidak tersedia di master'}</span><span>{idDate(record.activityDate)}</span>
               <span className={`st-record-status ${record.status === 'active' ? 'active' : 'inactive'}`}>{stateLabel[record.status] ?? record.status}</span>
-              {user.role === 'superadmin' && record.status === 'active' && <button className="link" disabled={busy} onClick={() => void voidRecord(record)}>Batalkan</button>}
+              {user.role === 'superadmin' && record.status === 'active' && <button className="link danger" disabled={busy} aria-label={`Batalkan ST ${record.letterNo} untuk ${record.name}`} onClick={() => void voidRecord(record)}>Batalkan</button>}
             </li>)}</ul>
           </td></tr>]
         })}</tbody>
-      </table></div> : <p className="muted">Belum ada rekap ST untuk kantor dan bulan ini.</p>}
+      </table></div> : loadFailed ? <p className="muted">Daftar rekap gagal dimuat. Periksa koneksi, lalu pilih Muat ulang.</p> : <p className="muted">Belum ada rekap ST untuk kantor dan bulan ini.{canAdd ? ' Tambahkan lewat formulir di atas.' : ''}</p>}
     </Panel>
 
-    {operator && <Panel title="Akun operator" sub="Ganti password secara berkala dan keluar setelah selesai menggunakan perangkat bersama.">
+    {operator && <Panel title="Akun operator" sub="Keluar setelah selesai bila memakai perangkat bersama.">
       <details open={passwordOpen} onToggle={e => setPasswordOpen(e.currentTarget.open)}><summary>Ganti password</summary>
         <form onSubmit={changePassword} className="st-password-form"><label>Password saat ini<input type="password" required autoComplete="current-password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} /></label><label>Password baru<input type="password" required minLength={14} maxLength={256} autoComplete="new-password" value={newPassword} onChange={e => setNewPassword(e.target.value)} /></label><button className="btn secondary" disabled={busy}>Simpan password</button></form>
       </details>

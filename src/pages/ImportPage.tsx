@@ -156,7 +156,11 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
     <section aria-label="Setoran mingguan" className="office-submissions">
       <div className="week-head">
         <h3>Setoran pekan {formatID(selectedRange.start, { short: true })}–{formatID(selectedRange.end, { short: true })}</h3>
-        <p className="setoran-hint">Tiga file untuk seluruh KPPU. Kantor tiap baris dipetakan otomatis. File multi-pekan boleh diunggah; hanya tanggal pekan ini yang dipakai. Seret file ke kartu atau klik tombolnya.</p>
+        <p className="setoran-hint">Tiga file untuk seluruh KPPU. Seret file ke kartu atau klik tombolnya.</p>
+        <details className="setoran-how"><summary>Cara kerja</summary>
+          <p>Kantor tiap baris dipetakan otomatis. File multi-pekan boleh diunggah; hanya tanggal pekan ini yang dipakai.</p>
+          <p>Setelah tersimpan, sumber tersebut tercatat sudah disetor untuk pekan ini. Mengunggah ulang file yang sama untuk pekan lain diperbolehkan; baris ganda dilewati.</p>
+        </details>
       </div>
       <div className="weekly-upload-cards" role="group" aria-label="Sumber setoran mingguan">
         {(['offline', 'online', 'surat-tugas'] as CoverageSource[]).map(source => {
@@ -203,7 +207,7 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
         <h2 id="setoran-dialog-title">{sourceLabels[modalTarget.source]} · seluruh KPPU</h2>
         <p className="setoran-dialog-period">{formatID(modalTarget.start)}–{formatID(modalTarget.end)}</p>
         {user.role === 'superadmin' ? <>
-          <p>Pilih file Excel asli dari sumbernya. Hanya tanggal di pekan ini yang dipakai; kantor tiap baris dipetakan otomatis dari unit di file dan master pegawai.</p>
+          <p>Pilih file Excel asli dari sumbernya. Hanya tanggal pekan ini yang dipakai; kantor tiap baris dipetakan otomatis.</p>
           <input ref={input} aria-label="Pilih file absensi" hidden type="file" multiple accept=".xls,.xlsx" disabled={busy} onChange={e => {
             const files = [...(e.currentTarget.files ?? [])]
             e.currentTarget.value = ''
@@ -211,7 +215,7 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
           }} />
           <button className="btn primary" type="button" autoFocus disabled={busy} onClick={() => input.current?.click()}><UploadCloud size={16} /> Pilih file</button>
           <small>Excel .xls atau .xlsx · Bisa memilih beberapa file</small>
-          {demoMode && <p className="setoran-hint">Mode demo memakai contoh sintetis dan menyimpan perubahan di browser. Pemilihan file di sini tidak mengunggah data ke server.</p>}
+          {demoMode && <p className="setoran-hint">Mode demo memakai contoh sintetis dan menyimpan perubahan di browser. File yang dipilih di sini tidak diunggah ke server.</p>}
         </> : <p role="status">Akun Admin dapat melihat sumber dan melakukan rekonsiliasi. Unggah file hanya tersedia untuk Superadmin.</p>}
         <div className="setoran-dialog-actions">
           <button className="btn secondary" type="button" onClick={() => showSources(modalTarget.office, modalTarget.source)}>Lihat sumber</button>
@@ -222,7 +226,6 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
 
     {user.role === 'superadmin' && <section ref={previewSection} className="setoran-upload" aria-label="Hasil unggahan setoran">
       {busy && <p role="status"><Loader2 className="spin" size={16} /> Memproses dan menyimpan file…</p>}
-      <p className="setoran-hint">Unggah file pada kartu sumber yang sesuai. Setelah tersimpan, sumber tersebut tercatat sudah disetor untuk pekan ini. Unggah ulang file yang sama untuk pekan lain diperbolehkan; baris ganda dilewati.</p>
       <details className="setoran-options"><summary>Pengaturan format tanggal</summary>
         <label className="select-label">Urutan tanggal dalam file<select className="select" value={dateOrder} onChange={e => setDateOrder(e.target.value as typeof dateOrder)}><option value="">Deteksi otomatis; minta konfirmasi jika ambigu</option><option value="DMY">DD/MM/YYYY</option><option value="MDY">MM/DD/YYYY</option></select></label>
       </details>
@@ -234,7 +237,7 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
 
     <details ref={fileDetails} className="setoran-details"><summary>File sumber ({uploadedFiles.length}){fileFilter ? ` · ${fileFilter.office} · ${sourceLabels[fileFilter.source]}` : ''}</summary>
       {fileFilter && <button className="btn secondary" onClick={() => setFileFilter(undefined)}>Tampilkan semua sumber</button>}
-      {uploadedFiles.length === 0 ? <p className="muted">{user.role === 'superadmin' ? 'Belum ada file sumber. Unggah file absensi untuk mulai memeriksa data.' : 'Belum ada file sumber. Menunggu unggahan dari Superadmin.'}</p> :
+      {uploadedFiles.length === 0 ? <p className="muted">{fileFilter ? 'Belum ada file untuk sumber ini. Pilih "Tampilkan semua sumber" atau unggah dari kartu sumber di atas.' : user.role === 'superadmin' ? 'Belum ada file sumber. Unggah file absensi dari kartu sumber di atas untuk mulai memeriksa data.' : 'Belum ada file sumber. Menunggu unggahan dari Superadmin.'}</p> :
         <div className="file-list">{[...uploadedFiles].sort(sortFiles).map(f => <FileRow key={f.id} file={f} open={open === f.id} onToggle={() => setOpen(open === f.id ? null : f.id)} onRemove={async () => { try { await hr.removeFile(f.id); toast(`${f.fileName} ditarik dari perhitungan; arsip tetap tersimpan`) } catch (e) { toast((e as Error).message) } }} onOffice={async o => { try { await hr.setFileOffice(f.id, o); toast('Kantor sumber diperbarui di server') } catch (e) { toast((e as Error).message) } }} onCoverage={status => declareFileCoverage(f, status)} coverageRange={selectedRange} />)}</div>}
     </details>
 
@@ -267,7 +270,7 @@ function FileRow({ file, open, onToggle, onRemove, onOffice, onCoverage, coverag
         <span>{fmt.format(file.stats.rows)} baris · {fmt.format(file.stats.people)} nama</span>
       </div>
       <button className={`warn-toggle ${warn ? 'has' : ''}`} onClick={onToggle} aria-expanded={open}>{warn ? <><AlertTriangle size={14} /> {warn} catatan</> : 'Bersih'} <ChevronDown size={14} /></button>
-      {editable && <button className="icon-btn" aria-label={`Tarik sumber ${file.fileName}`} disabled={busy} onClick={() => void perform(onRemove)}><Trash2 size={15} /></button>}
+      {editable && <button className="icon-btn danger" title="Tarik sumber dari perhitungan" aria-label={`Tarik sumber ${file.fileName}`} disabled={busy} onClick={() => void perform(onRemove)}><Trash2 size={15} /></button>}
     </div>
     {open && <div className="file-detail">
       {warn ? <ul>{file.warnings.map((w, i) => <li key={`warning-${i}`}>{w}</li>)}{file.quarantined?.map((q, i) => <li key={`quarantine-${i}`}>{q.ref}: {q.reason}</li>)}</ul> : <p>Tidak ada anomali format.</p>}

@@ -7,7 +7,7 @@ import { ErrorLine, Notify, Section, Switch } from './common.tsx'
 const numFields: { key: 'testDailyLimit' | 'minIntervalSec' | 'jitterSec' | 'dailyLimit' | 'maxAttempts'; label: string; hint: string; min: number }[] = [
   { key: 'testDailyLimit', label: 'Batas harian mode uji', hint: 'Pesan/hari ke nomor uji', min: 1 },
   { key: 'minIntervalSec', label: 'Jeda minimum (detik)', hint: 'Antar pesan', min: 0 },
-  { key: 'jitterSec', label: 'Jitter acak (detik)', hint: 'Ditambahkan ke jeda', min: 0 },
+  { key: 'jitterSec', label: 'Variasi acak (detik)', hint: 'Ditambahkan ke jeda', min: 0 },
   { key: 'dailyLimit', label: 'Batas harian', hint: 'Total pesan per hari', min: 1 },
   { key: 'maxAttempts', label: 'Maks. percobaan', hint: 'Sebelum ditandai gagal', min: 1 },
 ]
@@ -47,7 +47,7 @@ export function SettingsSection({ overview, canWrite, onOverview, notify }: { ov
   return <Section id="ac-settings" title="Pengaturan pengiriman" subtitle="Mode uji, jendela kirim, dan batas laju" icon={<SlidersHorizontal />}>
     <div className="ac-switches">
       <div className={`ac-switch-row tone-amber ${draft.testMode ? 'on' : ''}`}><Switch on={draft.testMode} label="Mode uji" disabled={ro} onClick={toggleTestMode} /><div><strong>Mode uji</strong><small>Semua pesan dialihkan ke nomor uji dengan label penerima asli.</small></div></div>
-      <div className={`ac-switch-row tone-violet ${draft.dryRun ? 'on' : ''}`}><Switch on={draft.dryRun} label="Simulasi" disabled={ro} onClick={() => set('dryRun', !draft.dryRun)} /><div><strong>Simulasi (dry run)</strong><small>Pesan ditandai terkirim tanpa menghubungi WhatsApp.</small></div></div>
+      <div className={`ac-switch-row tone-violet ${draft.dryRun ? 'on' : ''}`}><Switch on={draft.dryRun} label="Simulasi" disabled={ro} onClick={() => set('dryRun', !draft.dryRun)} /><div><strong>Simulasi</strong><small>Pesan ditandai terkirim tanpa menghubungi WhatsApp.</small></div></div>
       <div className={`ac-switch-row tone-red ${draft.paused ? 'on' : ''}`}><Switch on={draft.paused} label="Jeda pengiriman" disabled={ro} onClick={() => set('paused', !draft.paused)} /><div><strong>Jeda semua pengiriman</strong><small>Antrean tetap tersimpan tetapi tidak ada yang dikirim.</small></div></div>
     </div>
 

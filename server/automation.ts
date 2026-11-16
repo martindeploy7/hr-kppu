@@ -524,7 +524,7 @@ export class AutomationService {
     else if (s.testMode) warnings.push(`Mode uji aktif: semua pesan dialihkan ke ${s.testNumbers.length} nomor uji (maks. ${s.testDailyLimit}/hari).`)
     const status = this.whatsapp?.status()
     if (!s.dryRun && !status) warnings.push('Layanan WhatsApp tidak aktif di server ini.')
-    else if (!s.dryRun && status && status.status !== 'connected') warnings.push(`WhatsApp ${status.status === 'not_configured' ? 'belum dikonfigurasi (WHATSAPP_SESSION_ENCRYPTION_KEY)' : 'belum terhubung'}: ${counts.pending} pesan akan menunggu.`)
+    else if (!s.dryRun && status && status.status !== 'connected') warnings.push(`WhatsApp ${status.status === 'not_configured' ? 'belum dikonfigurasi di server' : 'belum terhubung'}: ${counts.pending} pesan akan menunggu.`)
     const soon = input.holidays.filter(h => h.enabled && !h.confirmed && h.date >= today && h.date <= addDays(today, 60))
     if (soon.length) warnings.push(`${soon.length} hari raya dalam 60 hari belum dikonfirmasi: ${soon.map(h => `${h.name} (${h.date})`).join(', ')}.`)
     const active = input.employees.filter(e => e.statusPegawai !== 'Nonaktif')

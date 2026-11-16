@@ -4,7 +4,11 @@ import type { AutomationRuleId, AutomationScope, OutboxStatus, RulePreview } fro
 
 export type Notify = (message: string) => void
 
-export const scopeLabels: Record<AutomationScope, string> = { public: 'Publik', segmented: 'Tersegmentasi', personal: 'Personal' }
+export const scopeLabels: Record<AutomationScope, string> = { public: 'Publik', segmented: 'Tersegmentasi', personal: 'Pribadi' }
+
+/** Label kategori ditampilkan dalam bahasa Indonesia; nilai asli di shared/automation.ts tetap. */
+const categoryLabels: Record<string, string> = { Celebration: 'Perayaan', Lifecycle: 'Siklus kerja', 'Data Quality': 'Kualitas data', Learning: 'Pelatihan', 'Change Event': 'Perubahan data' }
+export const categoryLabel = (c: string) => categoryLabels[c] ?? c
 
 export const statusMeta: Record<OutboxStatus, { label: string; tone: string }> = {
   pending: { label: 'Menunggu', tone: 'tone-warn' },
@@ -26,12 +30,12 @@ export const ruleIcon = (id: AutomationRuleId) => icons[id] ?? <Activity />
 /** Warna agenda: ulang tahun merah muda, hari raya hijau-teal, masa kerja indigo. */
 export const ruleHue = (id: AutomationRuleId) => id === 'birthday' ? 'pink' : id === 'religion' ? 'teal' : id === 'anniversary' ? 'indigo' : 'slate'
 
-export const maskPhone = (p: string) => p.length > 8 ? `${p.slice(0, 5)}•••${p.slice(-4)}` : p || '—'
+export const maskPhone = (p: string) => p.length > 8 ? `${p.slice(0, 5)}•••${p.slice(-4)}` : p || '-'
 
 const dayFmt = new Intl.DateTimeFormat('id-ID', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'Asia/Jakarta' })
 export const fmtDay = (iso: string) => dayFmt.format(new Date(`${iso}T12:00:00+07:00`))
 const dtFmt = new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta', hour12: false })
-export const fmtDateTime = (iso?: string) => iso ? `${dtFmt.format(new Date(iso))} WIB` : '—'
+export const fmtDateTime = (iso?: string) => iso ? `${dtFmt.format(new Date(iso))} WIB` : '-'
 const timeFmt = new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta', hour12: false })
 export const fmtClock = (iso: string) => timeFmt.format(new Date(iso)).replace('.', ':')
 

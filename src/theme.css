@@ -1,15 +1,24 @@
-/* ===== Token warna alur Setoran → Rekonsiliasi → Uang Makan =====
-   Dasar merek tetap navy + merah KPPU; warna semantik dipakai konsisten di ketiga halaman.
-   Selalu pasangkan warna dengan teks/ikon (jangan warna saja). */
+/* ===== Token sistem desain (satu-satunya sumber; lihat docs/DESIGN.md §1) =====
+   Dasar merek tetap navy + merah KPPU; warna semantik dipakai konsisten di semua halaman.
+   Selalu pasangkan warna dengan teks/ikon (jangan warna saja). Hex baru di luar file ini tidak boleh ditambahkan. */
 :root {
   /* merek */
   --brand-navy: #072c52;
+  --brand-navy-deep: #06284b;   /* dasar gradien sidebar */
+  --brand-navy-hover: #051f3a;  /* hover tombol primer: lebih gelap dari navy */
   --brand-red: #d9251c;
+  --brand-red-hover: #bd211a;   /* hover tombol berbahaya solid */
   --ink: #1c2b3a;
   --ink-soft: #4f5c69;
+  --ink-muted: #5a6672;         /* keterangan kecil; 5.9:1 di putih, 5.1:1 di --surface-sunken */
+  --navy-ink: #13283d;          /* judul gelap di atas putih */
   --line: #e7e3dc;
+  --line-strong: #d6d1c8;       /* pemisah kepala tabel, garis tombol sekunder */
+  --field-line: #8a939d;        /* batas input/select/textarea: 3.1:1 di putih (WCAG 1.4.11) */
   --surface: #ffffff;
   --surface-warm: #faf8f4;
+  --surface-sunken: #f1eee9;    /* sel/area tenggelam */
+  --focus: #156c78;             /* cincin fokus; 6.1:1 di putih */
 
   /* semantik status */
   --ok: #1a7f52;        --ok-bg: #e6f5ed;      --ok-line: #9fd5b9;      /* lengkap / dapat UM */
@@ -29,16 +38,52 @@
   --money: #1a7f52;
   --money-estimate: #b86e00;
 
-  --radius-card: 12px;
+  /* tipografi: skala tetap */
+  --fs-2xs: 10.5px;  /* label tabel huruf kapital */
+  --fs-xs: 11.5px;   /* chip, catatan */
+  --fs-sm: 12.5px;   /* isi tabel, tombol */
+  --fs-md: 13.5px;   /* teks badan */
+  --fs-lg: 15px;     /* judul panel h3 */
+  --fs-title: 18px;  /* judul di topbar */
+  --fs-xl: 22px;     /* judul halaman h2 */
+  --fs-2xl: 26px;    /* angka KPI */
+
+  /* radius dan bayangan */
+  --radius-sm: 6px;      /* chip kecil, sel */
+  --radius-md: 9px;      /* tombol, input */
+  --radius-card: 12px;   /* panel, kartu, drawer */
+  --radius-pill: 999px;  /* hanya chip status dan segmented control */
   --shadow-card: 0 1px 2px rgba(7, 44, 82, .06), 0 4px 14px rgba(7, 44, 82, .05);
+  --shadow-pop: 0 8px 28px rgba(7, 44, 82, .14);       /* drawer, dialog, menu, toast */
+  --shadow-hairline: 0 1px 2px rgba(7, 44, 82, .12);   /* segmen terpilih */
+
+  /* motion */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);      /* masuk/keluar */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);  /* gerak di layar */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);   /* drawer */
+  --dur-press: 140ms;
+  --dur-fast: 160ms;
+  --dur-base: 220ms;
+  --dur-exit: 160ms;
+  --dur-drawer: 380ms;
+  --dur-drawer-exit: 240ms;
 }
 
+/* Fokus: satu aturan global. Di permukaan gelap (sidebar, hero navy) pakai .on-dark agar kontras tetap >= 3:1. */
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.on-dark :focus-visible, .sidebar :focus-visible { outline-color: var(--surface); }
+[tabindex="-1"]:focus-visible { outline: none; }
+
 /* Chip status generik: <span class="tone-chip tone-ok">Lengkap</span> */
-.tone-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; border: 1px solid transparent; font-size: 11.5px; font-weight: 700; line-height: 1.4; white-space: nowrap; }
+.tone-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: var(--radius-pill); border: 1px solid transparent; font-size: var(--fs-xs); font-weight: 700; line-height: 1.4; white-space: nowrap; }
 .tone-ok { color: var(--ok); background: var(--ok-bg); border-color: var(--ok-line); }
 .tone-warn { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-line); }
 .tone-danger { color: var(--danger); background: var(--danger-bg); border-color: var(--danger-line); }
 .tone-info { color: var(--info); background: var(--info-bg); border-color: var(--info-line); }
 .tone-duty { color: var(--duty); background: var(--duty-bg); border-color: var(--duty-line); }
 .tone-leave { color: var(--leave); background: var(--leave-bg); border-color: var(--leave-line); }
-.tone-idle { color: var(--idle); background: var(--idle-bg); border-color: var(--idle-line); }
+.tone-idle { color: var(--ink-muted); background: var(--idle-bg); border-color: var(--idle-line); } /* --idle di atas --idle-bg hanya 3.95:1 */

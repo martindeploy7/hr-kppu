@@ -315,7 +315,7 @@ export function buildRoster(files: SourceFile[], master: Employee[], overrides: 
     const nips = group.map(e => e.nip).filter(Boolean)
     if (births.size === 1 && nips.length === group.length && new Set(nips).size > 1) conflicts.push({ key, kind: 'nip-berbeda', employeeIds: ids, detail: `Nama dan tanggal lahir di NIP sama, tetapi NIP berbeda (${nips.join(' vs ')}). Kemungkinan salah ketik di salah satu sistem.` })
     else if (group.some(e => !e.nip) && group.every(e => e.kantor === group[0].kantor)) conflicts.push({ key, kind: 'nip-berbeda', employeeIds: ids, detail: 'Nama sama di kantor yang sama; salah satu tanpa NIP. Periksa apakah orang yang sama dengan ID berbeda di mesin.' })
-    else conflicts.push({ key, kind: 'nama-sama', employeeIds: ids, detail: `Nama sama, data identitas berbeda (${group.map(e => `${e.kantor}${e.unit ? ` · ${e.unit}` : ''}`).join(' / ')}). Kemungkinan orang berbeda — pastikan surat tugas tidak tertukar.` })
+    else conflicts.push({ key, kind: 'nama-sama', employeeIds: ids, detail: `Nama sama, data identitas berbeda (${group.map(e => `${e.kantor}${e.unit ? ` · ${e.unit}` : ''}`).join(' / ')}). Kemungkinan orang berbeda. Pastikan surat tugas tidak tertukar.` })
   }
   return { employees, byId, evidenceLink, assignmentLink, identity, conflicts }
 }

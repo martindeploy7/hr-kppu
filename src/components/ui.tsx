@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { motion } from 'framer-motion'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { motion, useIsPresent, useReducedMotion } from 'framer-motion'
 import { AlertTriangle, Info, OctagonAlert, X, type LucideIcon } from 'lucide-react'
 import type { DayStatus, Severity, SourceKind } from '../engine/types.ts'
 import { STATUS_LABEL } from '../engine/reconcile.ts'
@@ -46,11 +46,60 @@ export function SourceChip({ kind }: { kind: SourceKind }) {
   return <span className={`src-chip src-${kind}`}>{SOURCE_SHORT[kind]}</span>
 }
 
+// Nilai sama dengan --ease-drawer, --dur-drawer, --dur-drawer-exit, --dur-base di theme.css (framer-motion butuh nilai JS, bukan var CSS).
+const EASE_DRAWER = [0.32, 0.72, 0, 1] as const
+const EASE_OUT = [0.23, 1, 0.32, 1] as const
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])'
+
 export function Drawer({ onClose, children, wide, label }: { onClose: () => void; children: ReactNode; wide?: boolean; label: string }) {
+  const panel = useRef<HTMLElement>(null)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  // Captured during the first render, before any child effect can move focus into the drawer.
+  const [opener] = useState(() => document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null)
+  const returnTo = useRef<HTMLElement | null>(opener)
+  const isPresent = useIsPresent()
+  const reduce = useReducedMotion()
+
+  // Fokus masuk ke drawer saat dibuka; Escape menutup; Tab berputar di dalam drawer.
+  useEffect(() => {
+    const el = panel.current
+    ;(el?.querySelector<HTMLElement>('.drawer-x') ?? el)?.focus({ preventScroll: true })
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || !el) return
+      if (e.key === 'Escape') { e.preventDefault(); closeRef.current(); return }
+      if (e.key !== 'Tab') return
+      const items = [...el.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(n => n.getClientRects().length > 0)
+      if (!items.length) { e.preventDefault(); el.focus(); return }
+      const first = items[0], last = items[items.length - 1], active = document.activeElement
+      if (e.shiftKey && (active === first || active === el || !el.contains(active))) { e.preventDefault(); last.focus() }
+      else if (!e.shiftKey && (active === last || !el.contains(active))) { e.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Saat mulai menutup, kembalikan fokus ke pemicu (kecuali pemanggil sudah memindahkannya sendiri).
+  useEffect(() => {
+    if (isPresent) return
+    const active = document.activeElement
+    const stranded = !active || active === document.body || !!panel.current?.contains(active)
+    let target = returnTo.current
+    // A list/grid may re-render its rows while the drawer is open; fall back to the twin with the same accessible name.
+    if (target && !target.isConnected) {
+      const name = target.getAttribute('aria-label')
+      target = name ? [...document.querySelectorAll<HTMLElement>(`${target.tagName}[aria-label]`)].find(n => n.getAttribute('aria-label') === name) ?? null : null
+    }
+    if (stranded && target) target.focus({ preventScroll: true })
+  }, [isPresent])
+
   return <>
-    <motion.div className="drawer-scrim" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
-    <motion.aside role="dialog" aria-label={label} className={`side-drawer ${wide ? 'wide' : ''}`} initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', damping: 30, stiffness: 280 }}>
-      <button className="drawer-x" aria-label="Tutup" onClick={onClose}><X size={18} /></button>
+    <motion.div className="drawer-scrim" aria-hidden="true" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { duration: .22, ease: EASE_OUT } }} exit={{ opacity: 0, transition: { duration: .24, ease: EASE_OUT } }} onClick={onClose} />
+    <motion.aside ref={panel} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} className={`side-drawer ${wide ? 'wide' : ''}`}
+      initial={reduce ? { opacity: 0 } : { x: '100%' }}
+      animate={reduce ? { opacity: 1, transition: { duration: .16 } } : { x: 0, transition: { duration: .38, ease: EASE_DRAWER } }}
+      exit={reduce ? { opacity: 0, transition: { duration: .12 } } : { x: '100%', transition: { duration: .24, ease: EASE_DRAWER } }}>
+      <button type="button" className="drawer-x" aria-label="Tutup" onClick={onClose}><X size={18} aria-hidden="true" /></button>
       {children}
     </motion.aside>
   </>

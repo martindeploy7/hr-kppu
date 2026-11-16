@@ -10,6 +10,19 @@ import { STATUS_LABEL } from '../engine/reconcile.ts'
 import { ageFrom, fmt, initials, money } from '../lib/format.ts'
 import { Drawer, Empty, PageHeader, Panel, StatusChip, STATUS_SHORT } from '../components/ui.tsx'
 import type { Nav } from '../App.tsx'
+import './employees.css'
+
+const SOURCE_PREVIEW = 2
+
+/** Ringkas daftar sumber: 2 pertama + "+N"; daftar lengkap ada di title dan di profil. */
+function SourceCell({ sources }: { sources: string[] }) {
+  if (!sources.length) return <span className="muted">Belum ada sumber</span>
+  const shown = sources.slice(0, SOURCE_PREVIEW), rest = sources.slice(SOURCE_PREVIEW)
+  return <div className="emp-src" title={sources.join('\n')}>
+    {shown.map(s => <span key={s}>{s}</span>)}
+    {rest.length > 0 && <span className="emp-src-more" aria-label={`dan ${rest.length} sumber lain: ${rest.join(', ')}`}>+{rest.length}</span>}
+  </div>
+}
 
 const ALIAS_LABEL = { nip: 'NIP', nika: 'NIKA', app: 'ID aplikasi', mesin: 'No. mesin', nama: 'Nama tertulis' }
 
@@ -29,15 +42,15 @@ export function EmployeesPage({ nav, toast, focus }: { nav: Nav; toast: (m: stri
     .sort((a, b) => a.nama.localeCompare(b.nama)), [emps, office, status, q])
   const emp = selected ? hr.roster.byId.get(selected) : undefined
 
-  if (!emps.length) return <div className="page"><Empty icon={UploadCloud} title="Belum ada data pegawai" action={user.role === 'superadmin' ? <button className="btn primary" onClick={() => nav('import')}>Impor file absensi</button> : undefined} /></div>
+  if (!emps.length) return <div className="page"><Empty icon={UploadCloud} title="Belum ada data pegawai" action={user.role === 'superadmin' ? <button className="btn primary" onClick={() => nav('import')}>Impor file absensi</button> : undefined}>Daftar pegawai dibentuk dari file absensi yang diimpor. {user.role === 'superadmin' ? 'Impor minimal satu file untuk memulai.' : 'Minta Superadmin mengimpor file absensi.'}</Empty></div>
 
   return <div className="page">
-    <PageHeader title="Direktori pegawai" actions={user.role === 'superadmin' ? <button className="btn primary" onClick={() => nav('add')}><Plus size={16} /> Tambah / impor master</button> : undefined}>
-      Satu profil per orang, menyatukan NIP, NIKA, nomor mesin, dan semua variasi nama yang muncul di sumber. Field bertanda "dari NIP" diturunkan otomatis.
+    <PageHeader title="Data Pegawai" actions={user.role === 'superadmin' ? <button className="btn primary" onClick={() => nav('add')}><Plus size={16} /> Tambah data pegawai</button> : undefined}>
+      Satu profil per orang, menyatukan NIP, NIKA, nomor mesin, dan variasi nama dari semua sumber. Isian bertanda "dari NIP" diturunkan otomatis.
     </PageHeader>
     <Panel>
       <div className="toolbar">
-        <label className="search"><Search size={15} /><input placeholder="Cari nama, NIP, NIKA, alias…" value={q} onChange={e => setQ(e.target.value)} /></label>
+        <label className="search"><Search size={15} /><input placeholder="Cari nama, NIP, NIKA, alias…" aria-label="Cari pegawai" value={q} onChange={e => setQ(e.target.value)} /></label>
         <select className="select" value={office} onChange={e => setOffice(e.target.value)} aria-label="Kantor"><option>Semua</option>{offices.map(o => <option key={o}>{o}</option>)}</select>
         <select className="select" value={status} onChange={e => setStatus(e.target.value)} aria-label="Status kepegawaian"><option>Semua</option><option>PPPK</option><option>PNS</option><option>Non-ASN</option><option>Belum diketahui</option></select>
         <span className="count-line">{fmt.format(rows.length)} pegawai</span>
@@ -49,10 +62,11 @@ export function EmployeesPage({ nav, toast, focus }: { nav: Nav; toast: (m: stri
           <td className="mono">{e.nip || <span className="warn-text">tanpa NIP</span>}<small>{e.nika || e.aliases.find(a => a.kind === 'app')?.value || ''}</small></td>
           <td>{e.kantor}<small>{e.unit.replace(/ - Sekretaris Jenderal$/, '') || 'Unit belum diisi'}</small></td>
           <td><span className={`pill st-${e.statusKepegawaian.replace(/\s/g, '-').toLowerCase()}`}>{e.statusKepegawaian}</span></td>
-          <td><div className="src-tags">{e.sources.map(s => <span key={s}>{s}</span>)}</div></td>
+          <td><SourceCell sources={e.sources} /></td>
           <td><ChevronRight size={15} /></td>
         </tr>)}</tbody>
-      </table></div>
+      </table>
+      {!rows.length && <div className="emp-empty"><p>Tidak ada pegawai yang cocok dengan pencarian atau filter ini.</p><button type="button" className="btn secondary" onClick={() => { setQ(''); setOffice('Semua'); setStatus('Semua') }}>Hapus pencarian dan filter</button></div>}</div>
       {rows.length > limit && <button className="btn secondary more" onClick={() => setLimit(l => l + 120)}>Tampilkan lebih banyak</button>}
     </Panel>
     <AnimatePresence>{emp && <Drawer wide label={`Profil ${emp.nama}`} onClose={() => setSelected(null)}><Profile emp={emp} toast={toast} nav={nav} /></Drawer>}</AnimatePresence>
@@ -78,14 +92,14 @@ function Profile({ emp, toast, nav }: { emp: Employee; toast: (m: string) => voi
     <div className="profile-top">
       <span className="profile-avatar">{initials(emp.nama)}</span>
       <div><span className="pill">{emp.statusKepegawaian}</span><h2>{emp.nama}</h2><p>{emp.jabatan || 'Jabatan belum diisi'} · {emp.kantor}</p><small>{emp.unit || 'Unit belum diisi'}</small></div>
-      {user.role === 'superadmin' && <button className="btn secondary" onClick={() => setEdit(v => !v)}><Pencil size={14} /> {edit ? 'Batal' : 'Lengkapi'}</button>}
+      {user.role === 'superadmin' && <button className="btn secondary" onClick={() => setEdit(v => !v)}><Pencil size={14} /> {edit ? 'Batal ubah' : 'Lengkapi data'}</button>}
     </div>
 
     {edit && <div className="edit-grid">
       {([['nip', 'NIP'], ['golongan', 'Golongan (mis. IX atau III/b)'], ['jabatan', 'Jabatan'], ['peringkatJabatan', 'Peringkat jabatan'], ['jenisJabatan', 'Jenis jabatan'], ['pendidikan', 'Pendidikan'], ['nomorWhatsApp', 'Nomor WhatsApp'], ['email', 'Email']] as const).map(([k, label]) => <label key={k}><span>{label}</span><input value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} /></label>)}
-      {([['tanggalMulaiKerja', 'Tanggal mulai kerja'], ['tanggalPensiun', 'Tanggal pensiun'], ['tanggalPengunduranDiri', 'Tanggal pengunduran diri']] as const).map(([k, label]) => <label key={k}><span>{label}</span><input type="date" value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} /></label>)}
+      {([['tanggalMulaiKerja', 'Tanggal mulai kerja'], ['tanggalPensiun', 'Tanggal pensiun'], ['tanggalPengunduranDiri', 'Tanggal pengunduran diri']] as const).map(([k, label]) => <label key={k}><span>{label}</span><input type="date" lang="id" value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} /></label>)}
       <label><span>Agama</span><select value={form.agama} onChange={e => setForm({ ...form, agama: e.target.value as Employee['agama'] })}><option value="">Pilih agama</option>{['Islam', 'Kristen', 'Katolik', 'Hindu', 'Buddha', 'Konghucu', 'Lainnya'].map(x => <option key={x}>{x}</option>)}</select></label>
-      <button className="btn primary" onClick={save}>Simpan</button>
+      <button className="btn primary" onClick={save}>Simpan pegawai</button>
     </div>}
 
     <div className="facts">
@@ -112,6 +126,10 @@ function Profile({ emp, toast, nav }: { emp: Employee; toast: (m: string) => voi
     </section>}
 
     <EmploymentPeriods employee={emp} />
+    <section className="profile-block">
+      <h3>Sumber data ({emp.sources.length})</h3>
+      {emp.sources.length ? <div className="emp-src emp-src-full">{emp.sources.map(s => <span key={s}>{s}</span>)}</div> : <p className="muted small">Belum ada sumber. Profil ini hanya berasal dari master pegawai.</p>}
+    </section>
     <section className="profile-block">
       <h3>Identitas di setiap sumber</h3>
       <div className="alias-list">{(Object.keys(ALIAS_LABEL) as (keyof typeof ALIAS_LABEL)[]).filter(k => aliases[k]).map(k => <div key={k}>
