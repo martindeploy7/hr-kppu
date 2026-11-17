@@ -57,7 +57,6 @@ export function DayDetail({ day, showMeal = true, canReview = false }: { day: Da
       <span>Masuk <b>{day.clockIn ?? '—'}</b></span><span>Pulang <b>{day.clockOut ?? '—'}</b></span>
       {day.lateMin > 0 && <span>Terlambat <b>{day.lateMin} mnt</b></span>}
       {day.earlyMin > 0 && <span>Pulang cepat <b>{day.earlyMin} mnt</b></span>}
-      {day.workday && day.timeKnown && !day.scheduleKnown && <span className="meal-tag m-held">Jadwal resmi perlu dikonfirmasi</span>}
       {day.overtimeMin > 0 && <span>Lembur <b>{Math.round(day.overtimeMin / 6) / 10} jam</b></span>}
       {showMeal && <span className={`meal-tag m-${day.meal.state}`}>Uang makan: {day.meal.state === 'eligible' ? day.meal.amountReady ? 'hari memenuhi syarat' : 'hari memenuhi syarat, nominal pending' : day.meal.state === 'held' ? 'ditahan' : 'tidak memenuhi syarat'} · {day.meal.reason}</span>}
     </div>

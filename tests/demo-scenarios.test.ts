@@ -50,7 +50,8 @@ describe('Data rekonsiliasi demo ringkas', () => {
     const after = analyze(reviews)
     const find = (index: number, date: string) => after.months.find(month => month.employee.id === demoEmployees[index].id)!.days.find(day => day.date === date)!
     expect(find(1, '2026-09-03')).toMatchObject({ reviewState: 'valid', lateMin: 20, meal: { state: 'excluded', amount: 0 } })
-    expect(find(1, '2026-09-24')).toMatchObject({ reviewState: 'valid', clockIn: '08:00', meal: { state: 'excluded' } })
+    // Masuk tepat 08:00 memenuhi batas (<= 08:00), jadi eligible.
+    expect(find(1, '2026-09-24')).toMatchObject({ reviewState: 'valid', clockIn: '08:00', meal: { state: 'eligible' } })
     expect(find(2, '2026-09-25')).toMatchObject({ reviewState: 'valid', earlyMin: 60, meal: { state: 'excluded' } })
     expect(find(5, '2026-09-03')).toMatchObject({ reviewState: 'valid', status: 'hadir-wfa', meal: { state: 'eligible', amount: 41000 } })
     expect(find(3, '2026-09-28')).toMatchObject({ status: 'sakit', meal: { state: 'excluded' } })

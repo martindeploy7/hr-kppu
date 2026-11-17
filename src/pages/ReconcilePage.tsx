@@ -6,6 +6,7 @@ import { useAuth } from '../state/Auth.tsx'
 import type { Issue, IssueType, Resolution, Severity } from '../engine/types.ts'
 import { ISSUE_LABEL, STATUS_LABEL, type DayRecord, type EmployeeMonth } from '../engine/reconcile.ts'
 import { addDays, dayName, eachDay, formatID, isWeekend } from '../engine/dates.ts'
+import { MEAL_CLOCK_IN, MEAL_CLOCK_OUT } from '../engine/policy.ts'
 import { fmt, money } from '../lib/format.ts'
 import { DayDetail } from '../components/DayDetail.tsx'
 import { WeekPicker } from '../components/WeekPicker.tsx'
@@ -143,7 +144,7 @@ export function ReconcilePage({ nav, toast, focus }: { nav: Nav; toast: (m: stri
   </div>
 }
 
-const onTime = (t?: string) => !!t && t <= '08:00'
+const onTime = (t?: string) => !!t && t <= MEAL_CLOCK_IN
 /** Dampak keputusan terhadap uang makan, ditulis dari bukti hari itu bila bisa. */
 function umImpact(decision: Resolution['decision'], type: IssueType, day: DayRecord | undefined, rate: number): string {
   if (decision === 'akui-dinas' || decision === 'tidak-hadir') return 'tanpa UM'
@@ -152,9 +153,7 @@ function umImpact(decision: Resolution['decision'], type: IssueType, day: DayRec
     const machine = (day?.evidence ?? []).filter(e => e.kind !== 'daring' && (e.clockIn || e.clockOut))
     const timed = type === 'scan-berbeda' && machine.length ? machine : (day?.evidence ?? []).filter(e => e.clockIn || e.clockOut)
     if (!timed.length) return 'tanpa UM (tidak ada jam masuk/pulang)'
-    // Jadwal resmi KPPU: Sen–Kam pulang 16:00, Jumat 16:30.
-    const end = day && new Date(`${day.date}T00:00:00Z`).getUTCDay() === 5 ? '16:30' : '16:00'
-    const verdict = (i?: string, o?: string) => !i || !o ? 'tanpa UM (scan tidak lengkap)' : !onTime(i) ? 'tanpa UM (terlambat)' : o < end ? 'tanpa UM (pulang sebelum jadwal)' : `dapat UM ${money.format(rate)}`
+    const verdict = (i?: string, o?: string) => !i || !o ? 'tanpa UM (scan tidak lengkap)' : !onTime(i) ? 'tanpa UM (terlambat)' : o < MEAL_CLOCK_OUT ? `tanpa UM (pulang sebelum ${MEAL_CLOCK_OUT})` : `dapat UM ${money.format(rate)}`
     const verdicts = [...new Set(timed.map(e => verdict(e.clockIn, e.clockOut)))]
     return verdicts.length === 1 ? verdicts[0] : `tergantung bukti yang dipakai (${verdicts.join(' / ')})`
   }

@@ -59,3 +59,38 @@ describe('temuan E2E', () => {
     expect(day.reviewState).toBe('valid')
   })
 })
+
+describe('aturan UM 08:00–16:30', () => {
+  const person = { ...blankEmployee('um'), nama: 'Pegawai Aturan UM', nip: '198001012020011001', kantor: 'Pusat', statusKepegawaian: 'PNS' as const, golongan: 'III/a' }
+  // 2026-10-05 Senin, 2026-10-09 Jumat; aturan sama untuk semua hari kerja dan tidak membaca jadwal sumber.
+  const dayFor = (date: string, change: Partial<Evidence>) => {
+    const ev: Evidence = { id: 'e', fileId: 'f', kind: 'mesin', office: 'Pusat', name: person.nama, ids: { nip: person.nip }, date, ref: 'A1', ...change }
+    const files = [file({ id: 'f', kind: 'mesin', evidence: [ev] })]
+    const roster = buildRoster(files, [person], {}, [])
+    return reconcile(files, roster, { start: date, end: date }, { ...DEFAULT_POLICY, holidays: [] }, [], '2026-10-20', [], () => true).months[0].days[0]
+  }
+
+  test('Senin masuk 07:59 pulang 16:30: eligible', () => {
+    expect(dayFor('2026-10-05', { clockIn: '07:59', clockOut: '16:30' })).toMatchObject({ scheduleKnown: true, earlyMin: 0, meal: { state: 'eligible' } })
+  })
+  test('Senin masuk 08:00 pulang 16:29: tanpa UM karena pulang cepat 1 menit', () => {
+    const day = dayFor('2026-10-05', { clockIn: '08:00', clockOut: '16:29' })
+    expect(day).toMatchObject({ earlyMin: 1, meal: { state: 'excluded' } })
+    expect(day.meal.reason).toContain('Pulang 1 menit sebelum pukul 16:30')
+  })
+  test('Jumat masuk 08:01 pulang 17:00: tanpa UM karena terlambat', () => {
+    const day = dayFor('2026-10-09', { clockIn: '08:01', clockOut: '17:00' })
+    expect(day).toMatchObject({ lateMin: 1, meal: { state: 'excluded' } })
+    expect(day.meal.reason).toContain('Terlambat 1 menit')
+  })
+  test('hanya jam masuk 07:45: tanpa UM, bukan ditahan', () => {
+    const day = dayFor('2026-10-05', { clockIn: '07:45' })
+    expect(day.meal.state).toBe('excluded')
+    expect(day.meal.reason).toContain('tanpa jam pulang')
+  })
+  test('hanya jam pulang 16:45: tanpa UM, bukan ditahan', () => {
+    const day = dayFor('2026-10-05', { clockOut: '16:45' })
+    expect(day.meal.state).toBe('excluded')
+    expect(day.meal.reason).toContain('tanpa jam masuk')
+  })
+})

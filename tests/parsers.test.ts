@@ -24,7 +24,7 @@ test('leading-zero text IDs survive Excel round trip',async()=>{
 })
 test('day decision survives unrelated data but expires after source evidence changes',()=>{
  const employee={...blankEmployee('person'),nama:'Uji',nip:'198001012020011001',kantor:'Pusat',golongan:'III/a',statusKepegawaian:'PNS' as const}
- const file={id:'file',fileName:'test',kind:'mesin' as const,label:'Test',office:'Pusat',importedAt:'2026-10-19T00:00:00Z',period:{start:'2026-10-05',end:'2026-10-05'},evidence:[{id:'ev',fileId:'file',kind:'mesin' as const,office:'Pusat',name:'Uji',ids:{nip:employee.nip},date:'2026-10-05',schedule:{start:'08:00',end:'16:00',label:'Jadwal resmi fixture'},clockIn:'08:00',clockOut:'16:00',notes:['jam-manual-absen-error' as const],ref:'row 1'}],assignments:[],warnings:[],stats:{rows:1,people:1}}
+ const file={id:'file',fileName:'test',kind:'mesin' as const,label:'Test',office:'Pusat',importedAt:'2026-10-19T00:00:00Z',period:{start:'2026-10-05',end:'2026-10-05'},evidence:[{id:'ev',fileId:'file',kind:'mesin' as const,office:'Pusat',name:'Uji',ids:{nip:employee.nip},date:'2026-10-05',schedule:{start:'08:00',end:'16:30',label:'Jadwal resmi fixture'},clockIn:'08:00',clockOut:'16:30',notes:['jam-manual-absen-error' as const],ref:'row 1'}],assignments:[],warnings:[],stats:{rows:1,people:1}}
  const policy={...DEFAULT_POLICY,parametersApproved:true,arrivalBoundary:'inclusive' as const}, roster=buildRoster([file],[employee],{},[]), scope={start:'2026-10-05',end:'2026-10-05'}
  const initial=reconcile([file],roster,scope,policy,[],'2026-10-19'), day=initial.months[0].days[0], issue=initial.issues[0]
  const resolution={issueId:issue.id,signature:issue.signature,decision:'valid' as const,note:'Bukti dikonfirmasi',reviewer:'HR',at:'2026-10-19T00:00:00Z'}

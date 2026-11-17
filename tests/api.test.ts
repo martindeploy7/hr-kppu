@@ -111,16 +111,16 @@ describe('Authenticated PostgreSQL API',()=>{
    const current=await workspace();expect((await request('/backup/restore','POST',{expectedRevision:current.revision,state:before.state,reason:'Restore original workspace after effective profile test'})).status).toBe(200)
   }
  })
- test('legacy policy cannot bypass mandatory rules or approve an unknown 08:00 boundary',async()=>{const w=await workspace();const r=await request('/workspace','PUT',{expectedRevision:w.revision,patch:{policy:{...w.state.policy,parametersApproved:true,arrivalBoundary:undefined,requireComplete:false,requireOnTime:false,lateToleranceMin:15,countLocalDuty:true}},reason:'Legacy policy requires boundary review'});expect(r.status).toBe(200);const next=await r.json();expect(next.state.policy).toMatchObject({parametersApproved:false,requireComplete:true,requireOnTime:true,lateToleranceMin:0,countLocalDuty:false});expect(next.state.policy.arrivalBoundary).toBeUndefined()})
+ test('legacy policy cannot bypass mandatory rules; boundary 08:00 yang kosong dipaksa inklusif',async()=>{const w=await workspace();const r=await request('/workspace','PUT',{expectedRevision:w.revision,patch:{policy:{...w.state.policy,parametersApproved:true,arrivalBoundary:undefined,requireComplete:false,requireOnTime:false,lateToleranceMin:15,countLocalDuty:true}},reason:'Legacy policy requires boundary review'});expect(r.status).toBe(200);const next=await r.json();expect(next.state.policy).toMatchObject({parametersApproved:true,arrivalBoundary:'inclusive',requireComplete:true,requireOnTime:true,requireNoEarlyLeave:true,lateToleranceMin:0,countLocalDuty:false})})
  test('preview does not commit, identical hash and renamed file are idempotent',async()=>{
-  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['NIK','Nama','Tanggal','Scan Masuk','Scan Pulang'],['198001012020011001','Pegawai Uji','15/10/2026','08:00','16:00']]),'Sheet1')
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['NIK','Nama','Tanggal','Scan Masuk','Scan Pulang'],['198001012020011001','Pegawai Uji','15/10/2026','08:00','16:30']]),'Sheet1')
   const bytes=XLSX.write(wb,{type:'buffer',bookType:'xlsx'}), form=new FormData();form.set('file',new File([bytes],'test.xlsx'));const before=await workspace()
   const response=await app.request('http://kppu.test/api/imports/preview',{method:'POST',headers:{origin:'http://kppu.test',cookie:cookies.admin},body:form});expect(response.status).toBe(200);const p=await response.json();expect((await workspace()).revision).toBe(before.revision)
   const intent={uploadId:p.file.id,expectedRevision:before.revision,office:'Pusat',mode:'add',reason:'Adding a source after preview'}
   const impact=await request('/imports/impact','POST',intent);expect(impact.status).toBe(200);const diff=await impact.json();expect(diff.counts.added).toBe(1);expect((await workspace()).revision).toBe(before.revision)
   const commit=await request('/imports/commit','POST',{...intent,confirmedImpact:diff.checksum});expect(commit.status,await commit.clone().text()).toBe(200)
   const next=await workspace();expect(next.state.files).toHaveLength(1)
-  const revisedBook=XLSX.utils.book_new();revisedBook.Props={Title:'Second export'};XLSX.utils.book_append_sheet(revisedBook,XLSX.utils.aoa_to_sheet([['NIK','Nama','Tanggal','Scan Masuk','Scan Pulang'],['198001012020011001','Pegawai Uji','15/10/2026','08:00','16:00']]),'Sheet1')
+  const revisedBook=XLSX.utils.book_new();revisedBook.Props={Title:'Second export'};XLSX.utils.book_append_sheet(revisedBook,XLSX.utils.aoa_to_sheet([['NIK','Nama','Tanggal','Scan Masuk','Scan Pulang'],['198001012020011001','Pegawai Uji','15/10/2026','08:00','16:30']]),'Sheet1')
   const secondForm=new FormData();secondForm.set('file',new File([XLSX.write(revisedBook,{type:'buffer',bookType:'xlsx'})],'second-export.xlsx'))
   const secondUpload=await app.request('http://kppu.test/api/imports/preview',{method:'POST',headers:{origin:'http://kppu.test',cookie:cookies.admin},body:secondForm});expect(secondUpload.status).toBe(200);const secondFile=(await secondUpload.json()).file
   const secondIntent={uploadId:secondFile.id,expectedRevision:next.revision,office:'Pusat',mode:'add',reason:'Second export contains a repeated attendance row'}
@@ -130,7 +130,7 @@ describe('Authenticated PostgreSQL API',()=>{
   const renamed=new FormData();renamed.set('file',new File([bytes],'different-name.xlsx'));const duplicate=await app.request('http://kppu.test/api/imports/preview',{method:'POST',headers:{origin:'http://kppu.test',cookie:cookies.admin},body:renamed});expect((await duplicate.json()).duplicate).toBe(true);expect((await workspace()).state.files).toHaveLength(2)
  })
  test('same filename revision is staged, scoped replacement preserves archive, retry commit is idempotent',async()=>{
-  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['NIK','Nama','Tanggal','Scan Masuk','Scan Pulang'],['198001012020011001','Pegawai Uji','15/10/2026','09:00','16:00'],['198001012020011001','Pegawai Uji','15/10/2026','09:00','16:00']]),'Sheet1')
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['NIK','Nama','Tanggal','Scan Masuk','Scan Pulang'],['198001012020011001','Pegawai Uji','15/10/2026','09:00','16:30'],['198001012020011001','Pegawai Uji','15/10/2026','09:00','16:30']]),'Sheet1')
   const form=new FormData();form.set('file',new File([XLSX.write(wb,{type:'buffer',bookType:'xlsx'})],'test.xlsx'))
   const before=await workspace(),old=before.state.files.find((f:any)=>f.active!==false)
   const preview=await app.request('http://kppu.test/api/imports/preview',{method:'POST',headers:{origin:'http://kppu.test',cookie:cookies.admin},body:form});expect(preview.status).toBe(200);const file=(await preview.json()).file
@@ -179,7 +179,7 @@ describe('Authenticated PostgreSQL API',()=>{
  test('complete period submits once, requires another finance actor, freezes snapshot and exports matching totals',async()=>{
   const before=await workspace(),state=emptyWorkspace(),person={...blankEmployee('snapshot-person'),nama:'Snapshot Uji',nip:'198001012020011001',kantor:'Pusat',statusKepegawaian:'PNS' as const,golongan:'III/a'}
   state.master=[person];state.policy={...DEFAULT_POLICY,parametersApproved:true,taxParametersApproved:true,arrivalBoundary:'inclusive',pph:{...DEFAULT_POLICY.pph,III:5},holidays:[]}
-  const evidence=eachDay('2026-09-01','2026-09-30').filter(d=>!isWeekend(d)).map(date=>({id:`e-${date}`,fileId:'pending',kind:'mesin' as const,office:'Pusat',name:person.nama,ids:{nip:person.nip},date,clockIn:'08:00',clockOut:new Date(`${date}T00:00:00Z`).getUTCDay()===5?'16:30':'16:00',ref:`synthetic ${date}`}))
+  const evidence=eachDay('2026-09-01','2026-09-30').filter(d=>!isWeekend(d)).map(date=>({id:`e-${date}`,fileId:'pending',kind:'mesin' as const,office:'Pusat',name:person.nama,ids:{nip:person.nip},date,clockIn:'08:00',clockOut:'16:30',ref:`synthetic ${date}`}))
   monthPackage(state,'2026-09',evidence);reviewAllWorkdays(state,'2026-09')
   expect((await request('/backup/restore','POST',{expectedRevision:before.revision,state,reason:'Synthetic complete September fixture'})).status).toBe(200)
   let current=await workspace();expect((await request('/coverage/nil-st','POST',{expectedRevision:current.revision,office:'Pusat',period:'2026-09',basis:'Synthetic nil statement confirmed by HR test'})).status).toBe(200)

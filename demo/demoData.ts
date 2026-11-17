@@ -2,7 +2,7 @@ import { emptyWorkspace, type Workspace } from '../shared/workspace.ts'
 import { eachDay, isWeekend } from '../src/engine/dates.ts'
 import { OFFICES, OFFICE_CITY } from '../src/engine/ids.ts'
 import { DEFAULT_POLICY, enforcePolicy } from '../src/engine/policy.ts'
-import { defaultSchedule } from '../src/engine/reconcile.ts'
+import { MEAL_CLOCK_IN, MEAL_CLOCK_OUT } from '../src/engine/policy.ts'
 import type { Assignment, Employee, Evidence, IssueType, SourceFile, SourceKind } from '../src/engine/types.ts'
 
 const START = '2026-09-01'
@@ -87,6 +87,9 @@ function baseFile(id: string, fileName: string, kind: SourceKind, label: string,
     stats: { rows: 0, people: 0 }, hash: 'DEMO-SYNTHETIC', parserVersion: 'demo-scripted-v1', completeThrough: END, active: true,
   }
 }
+
+// Jam kerja demo mengikuti aturan UM: masuk ≤ 08:00, pulang ≥ 16:30 setiap hari kerja.
+const defaultSchedule = (_date: string) => ({ start: MEAL_CLOCK_IN, end: MEAL_CLOCK_OUT, label: `Jam kerja ${MEAL_CLOCK_IN}–${MEAL_CLOCK_OUT}` })
 
 function offlineFile(index: number): SourceFile {
   const employee = peopleWithIds[index]

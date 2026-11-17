@@ -433,7 +433,7 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
 
   <h3>Pekan atau bulan</h3>
   <p>Pilihan <span class="ui">Periode hasil</span> di bagian atas menentukan jangkauan hitungan. <span class="ui">Pekan terpilih</span> menampilkan satu pekan, dengan <span class="ui">Pekan aktif</span> di sebelahnya. <span class="ui">Akumulasi bulan</span> menjumlahkan semua pekan dalam bulan dan menampilkan panel pengajuan (Bab 7). Tombol <span class="ui">Unduh daftar nominatif</span> mengunduh hasil sesuai pilihan ini.</p>
-  <figure class="shot"><img src="panduan-penggunaan/assets/13-uang-makan-pekan.png" width="2296" height="818" alt="Ubin UM final dan perkiraan, bar alasan, dan kartu aturan aktif"><figcaption>Uang Makan untuk Pekan 2. UM final masih Rp 0 karena Rekap ST pekan itu belum dinyatakan lengkap, sedangkan Rp 26.406.000 tampil sebagai perkiraan.</figcaption></figure>
+  <figure class="shot"><img src="panduan-penggunaan/assets/13-uang-makan-pekan.png" width="2296" height="818" alt="Ubin UM final dan perkiraan, bar alasan, dan kartu aturan aktif"><figcaption>Uang Makan untuk Pekan 2. UM final masih Rp 0 karena Rekap ST pekan itu belum dinyatakan lengkap, sedangkan Rp 15.265.000 tampil sebagai perkiraan.</figcaption></figure>
   <p>Empat ubin di atas: <span class="ui">UM final</span> (hanya hari yang sudah sah), <span class="ui">UM perkiraan</span> (hari yang menunggu setoran lengkap), <span class="ui">Hari UM</span> dengan tautan ke clash yang menunggu, dan <span class="ui">Pegawai penerima</span>. Bila PPh belum ditetapkan, ubin final hanya menampilkan bruto.</p>
 
   <h3>Kenapa tidak dapat UM</h3>
@@ -444,18 +444,18 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
       <tr><td><span class="ui">Menunggu setoran</span></td><td>Bukti hari itu ada dan lolos syarat, tetapi pekannya belum lengkap. Nilainya masuk UM perkiraan.</td></tr>
       <tr><td><span class="ui">Pekan belum disetor</span></td><td>Hari itu belum punya bukti sama sekali karena sumber pekannya belum masuk. Tidak ada angka perkiraan.</td></tr>
       <tr><td><span class="ui">Menunggu keputusan</span></td><td>Ada clash yang perlu diputuskan Admin. Tautan di ubin Hari UM membukanya.</td></tr>
-      <tr><td>Terlambat, Pulang cepat</td><td>Masuk setelah 08.00, atau pulang sebelum jadwal.</td></tr>
+      <tr><td>Terlambat, Pulang cepat</td><td>Masuk setelah 08.00, atau pulang sebelum 16.30.</td></tr>
       <tr><td>Dinas/ST, Cuti/Sakit/Izin</td><td>Status kerja yang menurut aturan tidak dihitung uang makan.</td></tr>
-      <tr><td>Tidak hadir (TK), Scan tidak lengkap, Tidak ada data, Lainnya</td><td>Sisanya. Scan tidak lengkap berarti hanya salah satu dari masuk atau pulang yang ada, atau Mesin Online hanya mencatat status tanpa jam.</td></tr>
+      <tr><td>Tidak hadir (TK), Scan tidak lengkap, Tidak ada data, Lainnya</td><td>Sisanya. Scan tidak lengkap berarti hanya salah satu dari masuk atau pulang yang ada, atau Mesin Online hanya mencatat status tanpa jam. Hari seperti ini tidak dapat uang makan.</td></tr>
     </tbody>
   </table>
 
   <h3>Aturan yang berlaku</h3>
   <p>Kartu <span class="ui">Aturan aktif</span> merangkum aturan dalam beberapa chip. Aturannya sebagai berikut.</p>
   <ul>
-    <li>Scan masuk paling lambat pukul 08.00. Pukul 08.00 tepat termasuk (batasnya ditetapkan sebagai kurang dari atau sama dengan 08.00). Bila batas ini dibiarkan Belum ditetapkan, hari dengan scan tepat 08.00 ditahan.</li>
-    <li>Scan masuk dan scan pulang harus lengkap. Pasangan jam dari dua baris berbeda tidak digabung.</li>
-    <li>Pulang tidak boleh sebelum jadwal: Senin sampai Kamis pukul 16.00, Jumat pukul 16.30. Angka ini dipakai bila sumber tidak mencantumkan jadwal sendiri.</li>
+    <li>Scan masuk paling lambat pukul 08.00. Scan tepat pukul 08.00 masih dihitung.</li>
+    <li>Scan pulang paling cepat pukul 16.30. Batas ini sama untuk Senin sampai Jumat. Jadwal yang tercantum di file mesin tidak mengubahnya.</li>
+    <li>Scan masuk dan scan pulang harus lengkap. Kalau hanya ada jam masuk tanpa jam pulang, atau sebaliknya, hari itu tidak dapat uang makan. Pasangan jam dari dua baris berbeda tidak digabung.</li>
     <li>Hari dinas atau ST tidak dihitung uang makan. Begitu pula dinas lokal, cuti, sakit, dan izin.</li>
     <li>Presensi WFA yang berstatus Approved dan memuat jam masuk dan pulang dihitung hadir. Status online tanpa jam (misalnya WFA - hadir saja) tidak dihitung.</li>
     <li>Pegawai Non-ASN ditahan sampai ada keputusan tentang dasar pembayarannya.</li>
@@ -473,12 +473,12 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
 
   <h3>Daftar nominatif dan rincian per hari</h3>
   <p>Tabel <span class="ui">Daftar nominatif</span> memuat satu baris per pegawai: golongan dan tarif, deretan titik berwarna (satu titik per hari kerja, dengan alasan di keterangan saat kursor diarahkan), jumlah hari UM, dan nominal. Cari dengan nama, NIP, atau unit, saring menurut kantor, dan urutkan menurut nama, hari UM, hari ditahan, atau bruto. Klik baris untuk membuka rincian per hari.</p>
-  <figure class="shot narrow"><img src="panduan-penggunaan/assets/14-uang-makan-rincian.png" width="1720" height="814" alt="Panel rincian uang makan satu pegawai"><figcaption>Rincian uang makan satu pegawai pada Pekan 1. Setiap hari menyebut alasannya. Klik sebuah hari untuk membuka bukti lengkapnya.</figcaption></figure>
+  <figure class="shot narrow"><img src="panduan-penggunaan/assets/14-uang-makan-rincian.png" width="1720" height="814" alt="Panel rincian uang makan satu pegawai"><figcaption>Rincian uang makan satu pegawai pada Pekan 2. Setiap hari menyebut alasannya, misalnya pulang 30 menit sebelum pukul 16.30. Klik sebuah hari untuk membuka bukti lengkapnya.</figcaption></figure>
   <p>Tombol <span class="ui">Unduh daftar nominatif</span> menghasilkan satu berkas Excel dengan enam sheet: Nominatif, Rincian Harian, Rincian Sumber, Ditahan, Review Sumber, dan Parameter. Nama berkas memuat pekan atau bulan, dan nama kantor bila filter kantor aktif.</p>
 
   <h3>Aturan dan tarif</h3>
-  <p>Tombol <span class="ui">Aturan &amp; tarif</span> hanya muncul untuk Admin dan Superadmin. Admin bisa membaca isinya tetapi semua isiannya terkunci. Superadmin bisa mengubah batas kedatangan, pengesahan parameter uang makan dan parameter PPh, aturan pulang sebelum jadwal, WFA dihitung hadir, penahanan hari yang punya isu terbuka, pembayaran pegawai Non-ASN, tarif per golongan, persentase PPh, dan daftar hari libur nasional serta cuti bersama.</p>
-  <div class="warning"><span class="label">Ubah dengan hati-hati</span><p>Panel <span class="ui">Dampak pilihan aturan</span> (hanya Superadmin) menampilkan pilihan siap pakai beserta jumlah hari dan bruto yang akan dihasilkan. Mengklik pilihan itu langsung mengubah aturan ruang kerja untuk semua pengguna, tanpa kotak konfirmasi. Pakai untuk membandingkan angka, lalu pastikan pilihan yang aktif sesuai ketetapan sebelum menutup halaman.</p></div>
+  <p>Tombol <span class="ui">Aturan &amp; tarif</span> hanya muncul untuk Admin dan Superadmin. Admin bisa membaca isinya tetapi semua isiannya terkunci. Batas jam masuk 08.00 dan jam pulang 16.30 tertulis di sana sebagai aturan tetap dan tidak bisa diubah. Superadmin bisa mengubah pengesahan parameter uang makan dan parameter PPh, WFA dihitung hadir, penahanan hari yang punya isu terbuka, pembayaran pegawai Non-ASN, tarif per golongan, persentase PPh, dan daftar hari libur nasional serta cuti bersama.</p>
+  <div class="warning"><span class="label">Ubah dengan hati-hati</span><p>Panel <span class="ui">Dampak pilihan aturan</span> (hanya Superadmin) menampilkan pilihan siap pakai beserta jumlah hari dan bruto yang akan dihasilkan. Mengklik pilihan itu mengubah aturan ruang kerja untuk semua pengguna setelah Anda menyetujui kotak konfirmasi. Baca perkiraan hari dan bruto di kotak itu sebelum menekan Terapkan aturan.</p></div>
   <figure class="shot compact"><img src="panduan-penggunaan/assets/15-uang-makan-bulan.png" width="2296" height="946" alt="Tampilan Akumulasi bulan dengan panel pengajuan di atas ubin ringkasan"><figcaption>Tampilan Akumulasi bulan. Panel pengajuan muncul di atas ubin dan tombol Ajukan masih nonaktif karena paket sumber bulan itu belum lengkap.</figcaption></figure>
 </section>
 

@@ -6,9 +6,9 @@ import { DEFAULT_POLICY } from '../src/engine/policy.ts'
 import type { DayReview, Evidence, SourceFile } from '../src/engine/types.ts'
 
 const person = { ...blankEmployee('staff'), nama: 'Pegawai Uji', nip: '198001012020011001', kantor: 'Pusat', statusKepegawaian: 'PNS' as const, golongan: 'III/a' }
-const evidence: Evidence = { id: 'scan', fileId: 'offline', kind: 'mesin', office: 'Pusat', name: person.nama, ids: { nip: person.nip }, date: '2026-10-05', schedule: { start: '08:00', end: '16:00', label: 'Jadwal resmi fixture' }, clockIn: '07:50', clockOut: '16:00', ref: 'baris 2' }
+const evidence: Evidence = { id: 'scan', fileId: 'offline', kind: 'mesin', office: 'Pusat', name: person.nama, ids: { nip: person.nip }, date: '2026-10-05', schedule: { start: '08:00', end: '16:30', label: 'Jadwal resmi fixture' }, clockIn: '07:50', clockOut: '16:30', ref: 'baris 2' }
 const source = (change: Partial<SourceFile> = {}): SourceFile => ({ id: 'offline', fileName: 'offline.xlsx', kind: 'mesin', label: 'Mesin Offline', office: 'Pusat', importedAt: '2026-10-06T00:00:00Z', period: { start: '2026-10-05', end: '2026-10-05' }, evidence: [evidence], assignments: [], warnings: [], stats: { rows: 1, people: 1 }, ...change })
-const policy = { ...DEFAULT_POLICY, parametersApproved: true, arrivalBoundary: 'exclusive' as const, holidays: [] }
+const policy = { ...DEFAULT_POLICY, parametersApproved: true, arrivalBoundary: 'inclusive' as const, holidays: [] }
 const range = { start: '2026-10-05', end: '2026-10-05' }
 
 describe('cakupan setoran pada rekonsiliasi', () => {

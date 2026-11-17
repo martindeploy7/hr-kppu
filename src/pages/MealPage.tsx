@@ -142,9 +142,9 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
       </Panel>
       <Panel title="Aturan aktif" aside={['admin', 'superadmin'].includes(user.role) ? <button className="btn secondary" onClick={() => setShowPolicy(true)}><Settings2 size={14} /> Ubah aturan & tarif</button> : undefined}>
         <div className="rule-chips">
-          <span className={`tone-chip ${hr.policy.arrivalBoundary ? 'tone-ok' : 'tone-warn'}`}><Clock size={12} /> {hr.policy.arrivalBoundary === 'inclusive' ? 'Masuk ≤ 08:00' : hr.policy.arrivalBoundary === 'exclusive' ? 'Masuk < 08:00' : 'Batas 08:00 belum ditetapkan'}</span>
+          <span className="tone-chip tone-ok"><Clock size={12} /> Masuk ≤ 08:00</span>
+          <span className="tone-chip tone-ok"><Clock size={12} /> Pulang ≥ 16:30</span>
           <span className="tone-chip tone-info">Scan masuk & pulang lengkap</span>
-          {hr.policy.requireNoEarlyLeave && <span className="tone-chip tone-info">Pulang ≥ 16:00 (Jum 16:30)</span>}
           <span className="tone-chip tone-duty">Dinas/ST tidak dihitung</span>
           <span className={`tone-chip ${hr.policy.countWfa ? 'tone-ok' : 'tone-idle'}`}>WFA {hr.policy.countWfa ? 'dihitung' : 'tidak dihitung'}</span>
           <span className="tone-chip tone-leave">Cuti/sakit tidak dihitung</span>
@@ -153,7 +153,7 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
       </Panel>
     </div>
 
-    {user.role === 'superadmin' && <Panel title="Dampak pilihan aturan" sub={`${view === 'week' ? `Pekan terpilih, ${formatID(calculation.period.start, { short: true })}–${formatID(calculation.period.end, { short: true })}` : `Akumulasi ${monthLabel(hr.activePeriod)}`}. Aturan: scan masuk paling lambat 08:00 dan pulang tidak sebelum jadwal (Sen–Kam 16:00, Jumat 16:30).`}>
+    {user.role === 'superadmin' && <Panel title="Dampak pilihan aturan" sub={`${view === 'week' ? `Pekan terpilih, ${formatID(calculation.period.start, { short: true })}–${formatID(calculation.period.end, { short: true })}` : `Akumulasi ${monthLabel(hr.activePeriod)}`}. Aturan: scan masuk paling lambat 08:00 dan scan pulang paling cepat 16:30, setiap hari kerja.`}>
       <div className="presets">{presetImpact.map(p => <button key={p.id} className={`preset ${p.active ? 'on' : ''}`} onClick={async () => {
         if (p.active) return
         // A preset changes the UM rule for every user and every month, so ask first.
@@ -222,11 +222,9 @@ function PolicyEditor() {
     <div className="policy-grid">
       <div className="toggles">
         <Note>Aturan selain tarif dan hak WFA tetap mengikuti parameter yang perlu disahkan.</Note>
-        <label className="toggle-row"><span><strong>Batas kedatangan pukul 08:00</strong><small>{p.arrivalBoundary ? 'Diterapkan ke semua hari dengan waktu masuk.' : 'Belum ditetapkan.'}</small></span><select className="select" aria-label="Batas kedatangan pukul 08:00" disabled={!canEdit} value={p.arrivalBoundary ?? ''} onChange={e => hr.setPolicy({ arrivalBoundary: e.target.value ? e.target.value as NonNullable<MealPolicy['arrivalBoundary']> : undefined })}><option value="">Belum ditetapkan</option><option value="exclusive">Harus sebelum 08:00 (&lt;)</option><option value="inclusive">Termasuk tepat pukul 08:00 (≤ 08:00:00)</option></select></label>
-        {!p.arrivalBoundary && <Note tone="warn">Pengesahan parameter tetap nonaktif sampai operator batas 08:00 dipilih.</Note>}
-        {toggle('parametersApproved', 'Parameter uang makan telah diverifikasi', 'Sahkan setelah operator batas 08:00, jadwal kerja, tarif bruto dan kalender dikonfirmasi.')}
+        <div className="toggle-row"><span><strong>Jam masuk dan pulang</strong><small>Masuk paling lambat 08:00 dan pulang paling cepat 16:30, sama untuk setiap hari kerja. Hanya jam masuk atau hanya jam pulang tidak dapat uang makan. Aturan ini tetap dan tidak bisa diubah dari sini.</small></span></div>
+        {toggle('parametersApproved', 'Parameter uang makan telah diverifikasi', 'Sahkan setelah tarif bruto dan kalender libur dikonfirmasi.')}
         {toggle('taxParametersApproved', 'Parameter PPh/netto telah disahkan', 'PPh dan netto baru dihitung setelah aturan pajak resmi disahkan; angka awal tidak digunakan otomatis.')}
-        {toggle('requireNoEarlyLeave', 'Pulang sebelum jadwal menggugurkan', 'Sen–Kam 16:00, Jumat 16:30.')}
         {toggle('countWfa', 'WFA dihitung hadir', 'Presensi WFA lewat aplikasi yang disetujui.')}
         {toggle('holdOnIssues', 'Tahan hari yang punya isu terbuka', 'Mis. dinas luar tapi scan di kantor, jam diisi manual.')}
         {toggle('includeNonAsn', 'Bayar pegawai non-ASN', 'NIP placeholder (0000…) di aplikasi HP.')}

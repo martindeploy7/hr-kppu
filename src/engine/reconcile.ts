@@ -1,7 +1,7 @@
 import type { Assignment, DayReview, DayStatus, Employee, Evidence, ISODate, Issue, IssueType, Resolution, Severity, SourceFile, SourceKind } from './types.ts'
 import type { Roster } from './roster.ts'
 import { eachDay, formatID, isWeekend, toMinutes } from './dates.ts'
-import { enforcePolicy, golGroup, type GolGroup, type MealPolicy } from './policy.ts'
+import { enforcePolicy, golGroup, MEAL_CLOCK_IN, MEAL_CLOCK_OUT, type GolGroup, type MealPolicy } from './policy.ts'
 import { DAY_CODE_LABEL } from './parsers/common.ts'
 import { OFFICES } from './ids.ts'
 import { effectiveSource } from './recordReviews.ts'
@@ -331,15 +331,13 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   const paired = presenceEv.filter(e => e.clockIn && e.clockOut && e.clockOut >= e.clockIn)
   const unique = (values: (string | undefined)[]) => [...new Set(values.filter((value): value is string => !!value))]
   const clockIns = unique(presenceEv.map(e => e.clockIn)), clockOuts = unique(presenceEv.map(e => e.clockOut))
-  const schedules = [...new Map(evs.filter(e => e.schedule && !e.notes?.includes('jadwal-puasa') && !/\basumsi\b/i.test(e.schedule.label)).map(e => [JSON.stringify(e.schedule), e.schedule!])).values()]
-  const inRamadan = date >= policy.ramadan.start && date <= policy.ramadan.end
-  // Jadwal resmi KPPU (mesin Pusat): Sen–Kam 08:00–16:00, Jumat 08:00–16:30. Dipakai bila bukti tidak membawa jadwal.
-  const official = schedules.length === 1 ? schedules[0] : schedules.length === 0 && !inRamadan ? defaultSchedule(date) : undefined
-  // Jam berbeda tipis antar sumber (mis. mesin 07:30–16:22 dan online 07:31–16:14) bukan clash bila semua pasangan
+  // Aturan UM tetap: pulang paling cepat 16:30 setiap hari kerja; jadwal yang tercantum di sumber tidak dipakai.
+  const official = { end: MEAL_CLOCK_OUT }
+  // Jam berbeda tipis antar sumber (mis. mesin 07:30–16:42 dan online 07:31–16:34) bukan clash bila semua pasangan
   // memberi putusan UM yang sama. Dipakai satu pasangan utuh dari satu sumber (mesin lebih dulu), tidak dirakit.
-  const onTime = (time: string) => policy.arrivalBoundary === 'exclusive' ? time < '08:00' : time <= '08:00'
+  const onTime = (time: string) => time <= MEAL_CLOCK_IN
   const allPaired = presenceEv.filter(hasTimes).every(e => paired.includes(e))
-  const pairVerdicts = official ? new Set(paired.map(e => onTime(e.clockIn!) && e.clockOut! >= official.end)) : new Set<boolean>()
+  const pairVerdicts = new Set(paired.map(e => onTime(e.clockIn!) && e.clockOut! >= official.end))
   // Signature isu dihitung lebih awal agar keputusan "pakai jam mesin offline" bisa memilih pasangan jam sebelum evaluasi.
   const issueSignature = stableStringify({ employee: [employee.id, employee.kantor, employee.workStatusPeriods?.filter(s => s.start <= date && s.end >= date)], date, workday, partialDay, evs: [...new Set(evs.map(({ id, fileId, ref, ...e }) => stableStringify(e)))].sort(), sts: [...new Set(sts.map(({ id, fileId, ref, dateRef, ...a }) => stableStringify(a)))].sort() })
   const scanDecision = resolutions.get(`${employee.id}|${date}|scan-berbeda`)
@@ -352,7 +350,7 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   // Satu pasangan lengkap + scan parsial di sumber lain yang tidak bertentangan (mis. mesin 06:43–— dan online 06:42–16:04):
   // scan parsial menguatkan, bukan clash. Bertentangan bila jam parsial memberi putusan tepat waktu/pulang yang berbeda.
   const soloPair = paired.length === 1 ? paired[0] : undefined
-  const partialAgrees = !!soloPair && !!official && unpairedTimed.length > 0 && unpairedTimed.every(e =>
+  const partialAgrees = !!soloPair && unpairedTimed.length > 0 && unpairedTimed.every(e =>
     (!e.clockIn || onTime(e.clockIn) === onTime(soloPair.clockIn!)) && (!e.clockOut || (e.clockOut >= official.end) === (soloPair.clockOut! >= official.end)))
   const confirmedPair = !agreedByVerdict && !wfaPair && (clockIns.length > 1 || clockOuts.length > 1) && partialAgrees ? soloPair : undefined
   // Admin memutuskan jam mesin offline yang berlaku (decision akui-hadir pada isu scan-berbeda).
@@ -361,9 +359,9 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   const clockOut = agreedPair ? agreedPair.clockOut : clockOuts.length === 1 ? clockOuts[0] : undefined
   const timeKnown = !!(clockIn || clockOut)
   const complete = !!agreedPair || !!(clockIn && clockOut && clockOut >= clockIn && paired.some(e => e.clockIn === clockIn && e.clockOut === clockOut) && new Set(paired.map(e => `${e.clockIn}|${e.clockOut}`)).size === 1)
-  const scheduleKnown = !!official
-  const lateMin = clockIn ? Math.max(0, Math.ceil(toMinutes(clockIn)! - 8 * 60)) : 0
-  const earlyMin = official && clockOut && clockIn ? Math.max(0, Math.ceil(toMinutes(official.end)! - toMinutes(clockOut)!)) : 0
+  const scheduleKnown = true
+  const lateMin = clockIn ? Math.max(0, Math.ceil(toMinutes(clockIn)! - toMinutes(MEAL_CLOCK_IN)!)) : 0
+  const earlyMin = clockOut && clockIn ? Math.max(0, Math.ceil(toMinutes(official.end)! - toMinutes(clockOut)!)) : 0
   const overtimeMin = Math.max(0, ...evs.map(e => e.overtimeMin ?? 0))
 
   const leaveCode = [...codes].find(c => LEAVE.has(c))
@@ -387,9 +385,9 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   if (agreedPair && candidates.has('hadir') && candidates.has('hadir-wfa')) candidates.delete(agreedPair.kind === 'daring' && agreedPair.mode === 'WFA' ? 'hadir' : 'hadir-wfa')
   // Jam identik di mesin kantor dan presensi WFA: putusan UM sama, jadi info saja; scan mesin kantor yang dipakai.
   else if (complete && candidates.has('hadir') && candidates.has('hadir-wfa')) candidates.delete(paired.some(e => OFFICE_KINDS.includes(e.kind)) ? 'hadir-wfa' : 'hadir')
-  // Clash hanya bila salah satu sisi benar-benar bisa mendapat UM (pasangan jam lengkap, masuk ≤ batas, pulang ≥ jadwal).
+  // Clash hanya bila salah satu sisi benar-benar bisa mendapat UM (pasangan jam lengkap, masuk ≤ 08:00, pulang ≥ 16:30).
   // Bila semua kemungkinan berujung tanpa UM (mis. kode DL + scan masuk saja), status dipilih otomatis dan dicatat sebagai info.
-  const couldEarnMeal = complete && !!clockIn && !!clockOut && onTime(clockIn) && (!official || clockOut >= official.end)
+  const couldEarnMeal = complete && !!clockIn && !!clockOut && onTime(clockIn) && clockOut >= official.end
   const STATUS_PRIORITY: DayStatus[] = ['dinas-luar', 'dinas-lokal', 'diklat', 'sakit', 'cuti', 'izin', 'tidak-lengkap']
   if (candidates.size > 1) add('status-berbeda', 'tinggi', `Status berbeda antar-bukti: ${[...candidates].map(s => STATUS_LABEL[s]).join(', ')}. Admin perlu memilih catatan dan status harian yang berlaku.`, couldEarnMeal)
   if (!workday) { status = presenceEv.length ? 'hadir' : 'libur'; basis = presenceEv.length ? 'Ada absen pada hari libur' : 'Hari libur' }
@@ -416,13 +414,11 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
 
   // ---- deteksi isu ----
   // Clash jam hanya menahan bila setidaknya satu pasangan jam lengkap bisa mendapat UM (tepat waktu dan tidak pulang cepat).
-  const anyPairEarns = paired.some(e => onTime(e.clockIn!) && (!official || e.clockOut! >= official.end))
+  const anyPairEarns = paired.some(e => onTime(e.clockIn!) && e.clockOut! >= official.end)
   if (confirmedPair) add('scan-berbeda', 'rendah', `Scan parsial di sumber lain sejalan dengan pasangan jam ${SOURCE_NAME[confirmedPair.kind] ?? confirmedPair.kind} ${confirmedPair.clockIn}–${confirmedPair.clockOut}; pasangan itu dipakai.`, false)
   else if (wfaPair) add('scan-berbeda', 'rendah', `Mesin mencatat kode WFA dengan scan parsial; jam WFA dari presensi online (${wfaPair.clockIn}–${wfaPair.clockOut}) dipakai.`, false)
   else if (agreedByVerdict) add('scan-berbeda', 'rendah', `Jam berbeda tipis antar sumber (${paired.map(e => `${SOURCE_NAME[e.kind] ?? e.kind} ${e.clockIn}–${e.clockOut}`).join('; ')}), putusan UM sama; dipakai ${SOURCE_NAME[agreedByVerdict.kind] ?? agreedByVerdict.kind}.`, false)
   else if (new Set(paired.map(e => `${e.clockIn}|${e.clockOut}`)).size > 1 || clockIns.length > 1 || clockOuts.length > 1) add('scan-berbeda', 'tinggi', 'Jam masuk/pulang berbeda antar-bukti terpilih; pilih bukti absensi yang berlaku.', anyPairEarns)
-  if (schedules.length > 1) add('jadwal-tidak-sesuai', 'sedang', 'Jadwal berbeda antar-bukti terpilih; pilih sumber jadwal yang berlaku sebelum menghitung pulang cepat.', true)
-  else if (!scheduleKnown && policy.requireNoEarlyLeave && timeKnown && workday) add('jadwal-tidak-sesuai', 'sedang', 'Bukti terpilih tidak memuat jadwal dan tanggal ini berada pada masa Ramadan. Konfirmasikan jadwal kerja sebelum menilai pulang cepat.', true)
   const scanAtOffice = officeEv.some(hasTimes) || daringWfo.length > 0
   if ((pdCode || stOut.length) && scanAtOffice) {
     const edge = stOut.some(a => a.start === date || a.end === date)
@@ -488,8 +484,13 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   const autoValidated = settled && !decidedByAdmin
   const reviewState = !workday ? (hasSource ? 'flag' : 'not-found') : dayReview ? (open.length ? 'flag' : 'valid') : settled ? 'valid' : hasSource ? 'flag' : 'not-found'
   const reviewHeld = workday && !dayReview && !settled
-  const autoMeal = settled && meal.state === 'held' && (finalStatus === 'tidak-lengkap' || finalStatus === 'tidak-ada-data') && !partialDay
-    ? { state: 'excluded' as const, reason: rawEvidence.some(e => e.present && !e.clockIn) ? `Sumber hanya mencatat kode ${rawEvidence.find(e => e.present && !e.clockIn)?.codeLabel ?? 'kehadiran'} tanpa jam; tidak membuktikan masuk ≤ 08:00` : finalStatus === 'tidak-ada-data' ? 'Sumber mencatat hari ini tanpa scan maupun keterangan; admin dapat mengoreksi lewat rekonsiliasi' : 'Scan masuk/pulang tidak lengkap atau presensi online tidak disetujui; admin dapat mengoreksi lewat rekonsiliasi', amount: 0 }
+  const incompleteReason = clockIn && !clockOut ? `Hanya ada jam masuk ${clockIn}, tanpa jam pulang; tidak dapat UM`
+    : clockOut && !clockIn ? `Hanya ada jam pulang ${clockOut}, tanpa jam masuk; tidak dapat UM`
+    : rawEvidence.some(e => e.present && !e.clockIn) ? `Sumber hanya mencatat kode ${rawEvidence.find(e => e.present && !e.clockIn)?.codeLabel ?? 'kehadiran'} tanpa jam; tidak membuktikan masuk ≤ 08:00`
+    : 'Scan masuk/pulang tidak lengkap atau presensi online tidak disetujui; admin dapat mengoreksi lewat rekonsiliasi'
+  const autoMeal = !partialDay && finalStatus === 'tidak-lengkap' && meal.state === 'excluded' ? { ...meal, reason: incompleteReason }
+    : settled && meal.state === 'held' && finalStatus === 'tidak-ada-data' && !partialDay
+    ? { state: 'excluded' as const, reason: rawEvidence.some(e => e.present && !e.clockIn) ? `Sumber hanya mencatat kode ${rawEvidence.find(e => e.present && !e.clockIn)?.codeLabel ?? 'kehadiran'} tanpa jam; tidak membuktikan masuk ≤ 08:00` : 'Sumber mencatat hari ini tanpa scan maupun keterangan; admin dapat mengoreksi lewat rekonsiliasi', amount: 0 }
     : meal
   const finalMeal = reviewHeld ? { state: 'held' as const, heldBy: 'decision' as const, reason: reviewError ? `Keputusan perlu diperbarui: ${reviewError}` : hasSource ? 'Clash antar-sumber: menunggu admin memilih bukti yang valid' : 'Belum ditemukan data absensi', amount: 0 } : autoMeal
   return { employeeId: employee.id, date, workday, covered, sourceCoverageComplete: true, reviewState, autoValidated, reviewSignature, decision: dayReview, reviewError, evidence: rawEvidence, assignments: rawAssignments, status: finalStatus, basis: finalBasis, clockIn, clockOut, scheduleKnown, lateMin, earlyMin, overtimeMin, complete, timeKnown, issues, resolved, meal: finalMeal }
@@ -507,11 +508,6 @@ function describePresence(office: Evidence[], wfo: Evidence[]) {
   return `Scan ${parts.join(' + ')}`
 }
 
-export function defaultSchedule(date: ISODate) {
-  const fri = new Date(`${date}T00:00:00Z`).getUTCDay() === 5
-  return fri ? { start: '08:00', end: '16:30', label: 'Jumat 08:00–16:30' } : { start: '08:00', end: '16:00', label: 'Sen–Kam 08:00–16:00' }
-}
-
 function mealFor(employee: Employee, date: ISODate, status: DayStatus, workday: boolean, complete: boolean, timeKnown: boolean, clockIn: string | undefined, lateMin: number, earlyMin: number, open: Issue[], policy: MealPolicy): DayRecord['meal'] {
   const no = (reason: string): DayRecord['meal'] => ({ state: 'excluded', reason, amount: 0 })
   if (!workday) return no('Bukan hari kerja')
@@ -519,7 +515,9 @@ function mealFor(employee: Employee, date: ISODate, status: DayStatus, workday: 
   if (excludedStatus) return no(`${excludedStatus.kind === 'tugas-belajar' ? 'Tugas belajar' : 'Diperbantukan ke instansi lain'}: ${excludedStatus.basis}`)
   if (employee.statusPegawai === 'Tugas Belajar' && !employee.workStatusPeriods?.length) return { state: 'held', amount: 0, reason: 'Lengkapi rentang efektif tugas belajar' }
   if (employee.statusPegawai === 'Nonaktif') return no('Pegawai nonaktif')
-  if (status === 'tidak-ada-data' || status === 'tidak-lengkap') return { state: 'held', amount: 0, reason: 'Bukti masuk dan pulang belum lengkap/tersedia' }
+  // Hanya jam masuk atau hanya jam pulang tidak membuktikan hari penuh: tidak dapat UM.
+  if (status === 'tidak-lengkap') return no('Scan masuk/pulang tidak lengkap')
+  if (status === 'tidak-ada-data') return { state: 'held', amount: 0, reason: 'Bukti masuk dan pulang belum tersedia' }
   const counts = status === 'hadir' || (status === 'hadir-wfa' && policy.countWfa)
   if (!counts) {
     const reasons: Partial<Record<DayStatus, string>> = {
@@ -539,7 +537,7 @@ function mealFor(employee: Employee, date: ISODate, status: DayStatus, workday: 
       if (!policy.arrivalBoundary) return { state: 'held', amount: 0, reason: 'Batas tepat pukul 08:00 belum ditetapkan; minta konfirmasi apakah batasnya < 08:00 atau ≤ 08:00' }
       if (policy.arrivalBoundary === 'exclusive') return no('Tepat pukul 08:00 tidak memenuhi batas hadir sebelum 08:00')
     }
-    if (policy.requireNoEarlyLeave && timeKnown && earlyMin > 0) return no(`Pulang ${earlyMin} menit sebelum jadwal`)
+    if (policy.requireNoEarlyLeave && timeKnown && earlyMin > 0) return no(`Pulang ${earlyMin} menit sebelum pukul ${MEAL_CLOCK_OUT}`)
   }
   const blocking = open.filter(i => i.blocksMeal)
   if (policy.holdOnIssues && blocking.length) return { state: 'held', reason: `Ditahan: ${blocking[0].title.toLowerCase()}`, amount: 0 }

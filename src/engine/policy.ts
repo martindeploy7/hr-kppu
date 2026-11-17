@@ -23,6 +23,11 @@ export type MealPolicy = {
   wfoRadiusKm: number
 }
 
+/** Aturan UM yang ditetapkan pengguna (17 Nov 2026): masuk ≤ 08:00 dan pulang ≥ 16:30 di setiap hari kerja,
+ *  tanpa melihat jadwal yang tercantum di sumber. Hanya jam masuk atau hanya jam pulang = tidak dapat UM. */
+export const MEAL_CLOCK_IN = '08:00'
+export const MEAL_CLOCK_OUT = '16:30'
+
 /** Tarif bruto mengikuti angka yang ditetapkan pengguna; parameter operasional dan PPh tetap perlu pengesahan. */
 export const DEFAULT_POLICY: MealPolicy = {
   // Presensi daring KPPU mencatat masuk 08:00 tanpa keterlambatan dan 08:01 sebagai "Terlambat 1 Menit".
@@ -51,7 +56,7 @@ export const DEFAULT_POLICY: MealPolicy = {
 }
 
 export const POLICY_PRESETS: { id: string; label: string; detail: string; patch: Partial<MealPolicy> }[] = [
-  { id: 'brief', label: 'Aturan wajib UM (draf)', detail: 'Masuk paling lambat 08:00 (sesuai presensi daring KPPU), scan masuk & pulang lengkap, tidak pulang sebelum jadwal.', patch: { requireComplete: true, requireOnTime: true, lateToleranceMin: 0, requireNoEarlyLeave: true } },
+  { id: 'brief', label: 'Aturan wajib UM (draf)', detail: 'Masuk paling lambat 08:00, pulang paling cepat 16:30, scan masuk & pulang lengkap.', patch: { requireComplete: true, requireOnTime: true, lateToleranceMin: 0, requireNoEarlyLeave: true } },
 ]
 
 /** Golongan PNS (I–IV, "III/b") atau PPPK (I–XVII) → kelompok tarif sesuai tabel yang ditetapkan pengguna. */
@@ -72,11 +77,13 @@ export function golGroup(golongan: string, status: string, fallback: GolGroup): 
 export function enforcePolicy(policy: MealPolicy): MealPolicy {
   return {
     ...policy,
-    parametersApproved: policy.parametersApproved === true && !!policy.arrivalBoundary,
+    parametersApproved: policy.parametersApproved === true,
     taxParametersApproved: policy.taxParametersApproved === true,
+    arrivalBoundary: 'inclusive',
     requireComplete: true,
     requireOnTime: true,
     lateToleranceMin: 0,
+    requireNoEarlyLeave: true,
     countWfa: true,
     countLocalDuty: false,
     holdOnIssues: true,

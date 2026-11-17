@@ -8,7 +8,7 @@ import { parseTime } from '../src/engine/dates.ts'
 import { splitPeople } from '../src/engine/names.ts'
 const employee: Employee = { ...blankEmployee('person'), nama: 'Pegawai Uji', nip: '198001012020011001', kantor: 'Pusat', statusKepegawaian: 'PNS', golongan: 'III/a' }
 const policy = { ...DEFAULT_POLICY, parametersApproved: true, taxParametersApproved: true, pph: { ...DEFAULT_POLICY.pph, III: 5 }, arrivalBoundary: 'inclusive' as const, holidays: [] }
-const ev = (id: string, change: Partial<Evidence> = {}): Evidence => ({ id, fileId: 'file', kind: 'mesin', office: 'Pusat', name: employee.nama, ids: { nip: employee.nip }, date: '2026-10-05', schedule: { start: '08:00', end: '16:00', label: 'Jadwal resmi fixture' }, clockIn: '08:00', clockOut: '16:00', ref: id, ...change })
+const ev = (id: string, change: Partial<Evidence> = {}): Evidence => ({ id, fileId: 'file', kind: 'mesin', office: 'Pusat', name: employee.nama, ids: { nip: employee.nip }, date: '2026-10-05', schedule: { start: '08:00', end: '16:30', label: 'Jadwal resmi fixture' }, clockIn: '08:00', clockOut: '16:30', ref: id, ...change })
 const source = (evidence: Evidence[]): SourceFile => ({ id:'file', fileName:'test.xls', kind:'mesin', label:'Test', office:'Pusat', importedAt:'2026-10-19T00:00:00Z', period:{start:'2026-10-05',end:'2026-10-05'}, evidence, assignments:[], warnings:[], stats:{rows:evidence.length,people:1} })
 const run = (items: Evidence[], person = employee, config = policy, assignments: SourceFile['assignments'] = [], dayReviews: unknown[] = []) => {
  const file=source(items), st={...source([]),id:'st',kind:'surat-tugas' as const,assignments}
@@ -21,11 +21,16 @@ const reviewed = (items: Evidence[], person = employee, config = policy, assignm
 }
 const runReviewed = (items: Evidence[], person = employee, config = policy, assignments: SourceFile['assignments'] = [], status?: string) => run(items,person,config,assignments,[reviewed(items,person,config,assignments,status)])
 describe('Aturan wajib UM',()=>{
- test('08:00 lengkap eligible only after inclusive boundary is explicit',()=>{const r=runReviewed([ev('a')]);expect(r.mealDays).toBe(1);expect(r.bruto).toBe(37000);expect(r.pph).toBe(1850);expect(r.netto).toBe(35150)})
- test('exact 08:00 remains held while the boundary operator is unknown',()=>{const r=runReviewed([ev('a')],employee,{...policy,arrivalBoundary:undefined});expect(r.days[0].meal.state).toBe('held');expect(r.days[0].meal.reason).toContain('belum ditetapkan');expect(r.mealDays).toBe(0)})
- test('strict boundary excludes exact 08:00 and later time stays late despite a later source schedule',()=>{
-  const strict=runReviewed([ev('exact')],employee,{...policy,arrivalBoundary:'exclusive'}),late=runReviewed([ev('late',{clockIn:'08:15',schedule:{start:'08:30',end:'16:00',label:'Jadwal sumber 08:30–16:00'}})])
-  expect(strict.days[0].meal.state).toBe('excluded');expect(strict.days[0].meal.reason).toContain('sebelum 08:00');expect(late.days[0].meal.state).toBe('excluded');expect(late.days[0].meal.reason).toContain('Terlambat 15 menit')
+ test('08:00 pas dan pulang 16:30 eligible pada hari Senin',()=>{const r=runReviewed([ev('a')]);expect(r.mealDays).toBe(1);expect(r.bruto).toBe(37000);expect(r.pph).toBe(1850);expect(r.netto).toBe(35150)})
+ test('exact 08:00 tetap eligible meski konfigurasi lama bilang exclusive atau belum ditetapkan',()=>{
+  for(const arrivalBoundary of ['exclusive',undefined] as const){
+   const r=runReviewed([ev('a')],employee,{...policy,arrivalBoundary})
+   expect(r.days[0].meal.state).toBe('eligible');expect(r.mealDays).toBe(1)
+  }
+ })
+ test('jam masuk lewat 08:00 tetap terlambat meski jadwal sumber mulai 08:30',()=>{
+  const late=runReviewed([ev('late',{clockIn:'08:15',schedule:{start:'08:30',end:'16:30',label:'Jadwal sumber 08:30–16:30'}})])
+  expect(late.days[0].meal.state).toBe('excluded');expect(late.days[0].meal.reason).toContain('Terlambat 15 menit')
  })
  test('detik setelah inclusive 08:00 boundary is not rounded to on time',()=>{expect(parseTime('08:00:01')).toBe('08:00:01');expect(runReviewed([ev('a',{clockIn:parseTime('08:00:01')})]).mealDays).toBe(0);expect(parseTime((8*3600+1)/86400)).toBe('08:00:01')})
  test('telat + lembur tidak eligible meskipun policy legacy longgar',()=>{const r=runReviewed([ev('a',{clockIn:'08:01',clockOut:'20:00',overtimeMin:240})],employee,{...policy,requireOnTime:false,lateToleranceMin:15});expect(r.mealDays).toBe(0)})
@@ -33,15 +38,19 @@ describe('Aturan wajib UM',()=>{
  test('WFA tetap dihitung meski konfigurasi lama mencoba mematikannya',()=>{const r=runReviewed([ev('wfa',{kind:'daring',mode:'WFA'})],employee,{...policy,countWfa:false},[],'hadir-wfa');expect(r.mealDays).toBe(1);expect(r.bruto).toBe(37000)})
  test('tarif bruto dapat dihitung tanpa mengasumsikan PPh atau netto',()=>{const r=runReviewed([ev('a')],employee,{...policy,taxParametersApproved:false});expect(r.mealDays).toBe(1);expect(r.bruto).toBe(37000);expect(r.pph).toBe(0);expect(r.nettoReady).toBe(false);expect(r.netto).toBe(0);expect(r.days[0].meal.taxPct).toBeUndefined()})
  test('hadir tanpa jam ditahan',()=>{const r=run([ev('a',{clockIn:undefined,clockOut:undefined,present:true})]);expect(r.days[0].complete).toBe(false);expect(r.mealDays).toBe(0)})
- test('tanpa jadwal sumber (atau jadwal asumsi), jadwal resmi KPPU dipakai untuk menilai pulang cepat',()=>{
-  // Jadwal resmi mesin Pusat: Sen–Kam 08:00–16:00, Jumat 08:00–16:30.
+ test('jadwal sumber (atau jadwal asumsi) tidak dipakai: batas pulang tetap 16:30 setiap hari kerja',()=>{
+  // Aturan UM: masuk <= 08:00 dan pulang >= 16:30, Senin–Jumat sama; jadwal di sumber diabaikan.
   const missing=runReviewed([ev('missing',{schedule:undefined})]).days[0]
   expect(missing).toMatchObject({scheduleKnown:true,earlyMin:0,meal:{state:'eligible'}})
   expect(missing.issues.some(issue=>issue.type==='jadwal-tidak-sesuai')).toBe(false)
   const assumed=runReviewed([ev('assumed',{schedule:{start:'08:00',end:'16:00',label:'Senin–Kamis (asumsi)'}})]).days[0]
   expect(assumed).toMatchObject({scheduleKnown:true,meal:{state:'eligible'}})
+  const sourceEndsEarly=runReviewed([ev('sched',{schedule:{start:'08:00',end:'16:00',label:'Jadwal sumber 08:00–16:00'},clockOut:'16:10'})]).days[0]
+  expect(sourceEndsEarly).toMatchObject({scheduleKnown:true,earlyMin:20,meal:{state:'excluded'}})
   const leftEarly=runReviewed([ev('early',{schedule:undefined,clockOut:'15:30'})]).days[0]
-  expect(leftEarly).toMatchObject({earlyMin:30,meal:{state:'excluded'}})
+  expect(leftEarly).toMatchObject({earlyMin:60,meal:{state:'excluded'}})
+  const oneMinuteEarly=runReviewed([ev('early1',{clockOut:'16:29'})]).days[0]
+  expect(oneMinuteEarly).toMatchObject({earlyMin:1,meal:{state:'excluded'}})
  })
  test('dua pasangan bermasalah tidak dirakit menjadi pasangan eligible',()=>{const r=run([ev('a',{clockOut:'12:00'}),ev('b',{clockIn:'09:00'})]);expect(r.mealDays).toBe(0);expect(r.days[0].clockOut).toBeUndefined()})
  test.each(['tugas-belajar','diperbantukan'] as const)('status efektif %s mengalahkan scan lengkap',kind=>{const person={...employee,workStatusPeriods:[{kind,start:'2026-10-05',end:'2026-10-06',basis:'Dokumen uji'}]};const r=runReviewed([ev('a')],person);expect(r.mealDays).toBe(0)})
@@ -66,23 +75,23 @@ describe('Validasi keputusan harian setara antar-sumber',()=>{
   expect(different).toMatchObject({reviewState:'flag',autoValidated:false,meal:{state:'held'}})
  })
  test('jam berbeda dengan putusan berbeda: keputusan "pakai jam mesin offline" memakai pasangan mesin',()=>{
-  const items=[ev('offline',{clockIn:'06:36',clockOut:'16:13'}),ev('online',{id:'online',fileId:'online-file',kind:'daring',mode:'WFA',clockIn:'14:35',clockOut:'14:35',schedule:undefined})]
+  const items=[ev('offline',{clockIn:'06:36',clockOut:'16:43'}),ev('online',{id:'online',fileId:'online-file',kind:'daring',mode:'WFA',clockIn:'14:35',clockOut:'14:35',schedule:undefined})]
   const files=[source(items),{...source([]),id:'st',kind:'surat-tugas' as const,assignments:[]}]
   const roster=buildRoster(files,[employee],{},[])
   const at=(res:Parameters<typeof reconcile>[4])=>reconcile(files,roster,{start:'2026-10-05',end:'2026-10-05'},policy,res,'2026-10-19').months[0].days[0]
   const clash=at([])
   expect(clash).toMatchObject({reviewState:'flag',meal:{state:'held'}})
   const decided=at(clash.issues.filter(i=>i.blocksMeal).map(i=>({issueId:i.id,decision:'akui-hadir' as const,note:'Jam mesin dipakai',reviewer:'Admin',at:'2026-10-19T00:00:00Z',signature:i.signature})))
-  expect(decided).toMatchObject({reviewState:'valid',status:'hadir',clockIn:'06:36',clockOut:'16:13',meal:{state:'eligible'}})
+  expect(decided).toMatchObject({reviewState:'valid',status:'hadir',clockIn:'06:36',clockOut:'16:43',meal:{state:'eligible'}})
  })
  test('mesin berkode WFA dengan scan parsial + online WFA lengkap: jam online dipakai tanpa clash',()=>{
   const day=run([ev('offline',{code:'WFA',mode:'WFA',present:true,clockIn:'08:06',clockOut:undefined}),ev('online',{id:'online',fileId:'online-file',kind:'daring',mode:'WFA',approved:true,approvalStatus:'approved',clockIn:'07:15',clockOut:'17:38'})]).days[0]
   expect(day).toMatchObject({reviewState:'valid',status:'hadir-wfa',clockIn:'07:15',clockOut:'17:38',meal:{state:'eligible'}})
  })
  test('scan parsial yang sejalan dengan pasangan lengkap di sumber lain bukan clash; yang bertentangan tetap clash',()=>{
-  const ok=run([ev('offline',{clockIn:'06:43',clockOut:undefined}),ev('online',{id:'online',fileId:'online-file',kind:'daring',mode:'WFO',clockIn:'06:42',clockOut:'16:04'})]).days[0]
-  expect(ok).toMatchObject({reviewState:'valid',clockIn:'06:42',clockOut:'16:04',meal:{state:'eligible'}})
-  const conflict=run([ev('offline',{clockIn:'08:20',clockOut:undefined}),ev('online',{id:'online',fileId:'online-file',kind:'daring',mode:'WFO',clockIn:'07:42',clockOut:'16:04'})]).days[0]
+  const ok=run([ev('offline',{clockIn:'06:43',clockOut:undefined}),ev('online',{id:'online',fileId:'online-file',kind:'daring',mode:'WFO',clockIn:'06:42',clockOut:'16:34'})]).days[0]
+  expect(ok).toMatchObject({reviewState:'valid',clockIn:'06:42',clockOut:'16:34',meal:{state:'eligible'}})
+  const conflict=run([ev('offline',{clockIn:'08:20',clockOut:undefined}),ev('online',{id:'online',fileId:'online-file',kind:'daring',mode:'WFO',clockIn:'07:42',clockOut:'16:34'})]).days[0]
   expect(conflict).toMatchObject({reviewState:'flag',meal:{state:'held'}})
  })
  test('jam bertentangan yang tidak satu pun bisa mendapat UM tidak menunggu admin',()=>{
