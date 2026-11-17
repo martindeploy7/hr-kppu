@@ -56,8 +56,7 @@ export function GuidedTour() {
     { page: 'add', chapter: '08 · Kepegawaian', title: 'Tambah atau perbarui data', body: 'Form tambah pegawai dan impor master tersedia untuk memperbarui workspace. Simpanan dalam demo hanya mengubah data lokal sintetis.', target: '.page-head' },
     { page: 'automation', chapter: '09 · Komunikasi', title: 'Automation Center', body: 'Lihat aturan komunikasi, contoh pesan, kesiapan nomor WhatsApp, dan status koneksi. Pengiriman WhatsApp tidak aktif di demo.', target: '.page-head' },
     { page: 'settings', chapter: '10 · Administrasi', title: 'Ruang Kerja & Akses', body: 'Jelajahi backup dan pemulihan, akun contoh, kebijakan, dan riwayat perubahan. Tidak ada akun atau data live yang diubah.', target: '.page-head' },
-    { page: 'ideas', chapter: '11 · Peta Fitur', title: 'Lihat peta fitur dan data', body: 'Peta ini merangkum fungsi yang sudah tersedia, sumber data, aturan, serta area yang masih perlu dikembangkan atau disahkan.', target: '.page-head' },
-    { page: 'ideas', chapter: 'Selesai', title: 'Demo siap dijelajahi', body: 'Tur selesai. Gunakan navigasi kiri untuk menjelajahi halaman, buka kembali panduan kapan saja, atau reset untuk mengulang skenario dari data sintetis awal.' },
+    { page: 'settings', chapter: 'Selesai', title: 'Demo siap dijelajahi', body: 'Tur selesai. Gunakan navigasi kiri untuk menjelajahi halaman, buka kembali panduan kapan saja, atau reset untuk mengulang skenario dari data sintetis awal.' },
   ], [])
   const step = steps[stepIndex]
   const completed = !!done[stepIndex]

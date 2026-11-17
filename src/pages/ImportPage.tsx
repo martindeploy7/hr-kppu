@@ -8,6 +8,7 @@ import { formatID, weekRange } from '../engine/dates.ts'
 import { coverageSource, inspectSourceCoverage, type CoverageSource } from '../engine/monthlyFlow.ts'
 import { fmt } from '../lib/format.ts'
 import { Note } from '../components/ui.tsx'
+import { useDialog } from '../components/Dialog.tsx'
 import type { Nav } from '../App.tsx'
 import { SourceRecords } from '../components/SourceRecords.tsx'
 import type { ImportProposal } from '../../shared/imports.ts'
@@ -43,8 +44,7 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
   const [fileFilter, setFileFilter] = useState<{ office: string; source: CoverageSource }>()
   const [results, setResults] = useState<ImportResult[]>([])
   const [dragSource, setDragSource] = useState<CoverageSource>()
-  const [naSource, setNaSource] = useState<CoverageSource>()
-  const [naBasis, setNaBasis] = useState('')
+  const dialog = useDialog()
   const [open, setOpen] = useState<string | null>(null)
   const selectedRange = hr.weekScope === 'full' ? weekRange(hr.weekSlice.weekStart) : { start: hr.weekSlice.displayStart, end: hr.weekSlice.displayEnd }
   const offices = user.offices?.length ? user.offices : OFFICES
@@ -79,12 +79,18 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
 
   const submitNa = async (source: CoverageSource) => {
     if (!rangeElapsed) { toast('Konfirmasi hanya dapat dibuat untuk tanggal yang sudah berlangsung'); return }
-    if (naBasis.trim().length < 10) { toast('Alasan minimal 10 karakter'); return }
+    const nil = source === 'surat-tugas'
+    const basis = await dialog.prompt({
+      title: nil ? 'Tidak ada ST pekan ini' : `${sourceLabels[source]}: tidak ada data pekan ini`,
+      message: `${formatID(selectedRange.start)}–${formatID(selectedRange.end)}. Pernyataan ini dicatat sebagai jejak audit dan menandai sumber sudah beres untuk pekan ini.`,
+      label: 'Alasan atau dasar', minLength: 10, placeholder: nil ? 'Mis. register ST Pusat dan Kanwil dicek, tidak ada ST pekan ini.' : 'Mis. mesin tidak beroperasi pekan ini, sesuai surat ...',
+      confirmLabel: 'Simpan pernyataan',
+    })
+    if (!basis) return
     try {
-      if (source === 'surat-tugas') await hr.declareNilSt('Pusat', selectedRange.start, selectedRange.end, naBasis.trim())
-      else await hr.declareNotApplicable('Pusat', source, selectedRange.start, selectedRange.end, naBasis.trim())
+      if (nil) await hr.declareNilSt('Pusat', selectedRange.start, selectedRange.end, basis)
+      else await hr.declareNotApplicable('Pusat', source, selectedRange.start, selectedRange.end, basis)
       toast(`${sourceLabels[source]}: tidak ada data pekan ini dicatat`)
-      setNaSource(undefined); setNaBasis('')
     } catch (error) { toast((error as Error).message) }
   }
 
@@ -116,7 +122,7 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
           await hr.commitImport(proposal, impact.checksum)
           revision++
           const outside = impact.source.parsedRows - impact.counts.added - impact.counts.duplicate
-          result.message = `${fmt.format(impact.counts.added)} baris baru tersimpan${impact.counts.duplicate ? `, ${fmt.format(impact.counts.duplicate)} duplikat dilewati` : ''}${outside > 0 ? `; ${fmt.format(outside)} baris di luar pekan tidak dipakai` : ''}. Kantor tiap baris dipetakan otomatis.${file.quarantined?.length ? ` ${file.quarantined.length} baris perlu diperiksa di rincian sumber.` : ''}`
+          result.message = `${fmt.format(impact.counts.added)} baris baru tersimpan${impact.counts.duplicate ? `, ${fmt.format(impact.counts.duplicate)} duplikat dilewati` : ''}${outside > 0 ? `; ${fmt.format(outside)} baris di luar pekan tidak dipakai` : ''}. Kantor tiap baris dipetakan otomatis.${file.quarantined?.length ? ` ${file.quarantined.length} baris perlu diperiksa di rincian sumber.` : ''}${impact.coverageNote ? ` ${impact.coverageNote}` : ''}`
         } catch (error) {
           result.ok = false
           result.message = (error as Error).message
@@ -129,26 +135,17 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
     finally { setBusy(false) }
   }
 
-  const declareNil = async (office: string) => {
-    if (!rangeElapsed) { toast('Pernyataan nihil hanya dapat dibuat untuk tanggal yang sudah berlangsung'); return }
-    const basis = window.prompt(`Jelaskan konfirmasi register ST ${office} nihil untuk ${formatID(selectedRange.start)}–${formatID(selectedRange.end)} (minimal 10 karakter):`)
-    if (!basis || basis.trim().length < 10) { toast('Alasan pernyataan nihil minimal 10 karakter'); return }
-    try { await hr.declareNilSt(office, selectedRange.start, selectedRange.end, basis.trim()); toast(`Nihil ST ${office} dicatat untuk rentang terpilih`) }
-    catch (error) { toast((error as Error).message) }
-  }
-  const declareNotApplicable = async (office: string, source: CoverageSource) => {
-    if (!rangeElapsed) { toast('Konfirmasi hanya dapat dibuat untuk tanggal yang sudah berlangsung'); return }
-    const basis = window.prompt(`Jelaskan dasar resmi ${sourceLabels[source]} tidak berlaku untuk ${office}, ${formatID(selectedRange.start)}–${formatID(selectedRange.end)} (minimal 10 karakter):`)
-    if (!basis || basis.trim().length < 10) { toast('Dasar konfirmasi minimal 10 karakter'); return }
-    try { await hr.declareNotApplicable(office, source, selectedRange.start, selectedRange.end, basis.trim()); toast(`${sourceLabels[source]} ditandai tidak berlaku untuk rentang terpilih`) }
-    catch (error) { toast((error as Error).message) }
-  }
   const declareFileCoverage = async (file: SourceFile, status: 'complete' | 'partial') => {
     if (!rangeElapsed) { toast('Cakupan hanya dapat dikonfirmasi untuk tanggal yang sudah berlangsung'); return }
-    const basis = window.prompt(`Jelaskan dasar ${status === 'complete' ? 'kelengkapan' : 'parsial'} ${file.fileName} untuk ${formatID(selectedRange.start)}–${formatID(selectedRange.end)} (minimal 10 karakter):`)
-    if (!basis || basis.trim().length < 10) { toast('Dasar cakupan minimal 10 karakter'); return }
-    if (status === 'complete' && !window.confirm(`Konfirmasi cakupan lengkap ${file.fileName} untuk ${file.office}, ${formatID(selectedRange.start)}–${formatID(selectedRange.end)}? Untuk ST, pastikan seluruh register yang diwajibkan sudah tercakup.`)) return
-    try { await hr.declareFileCoverage(file.id, selectedRange.start, selectedRange.end, status, basis.trim()); toast(`Cakupan ${status === 'complete' ? 'lengkap' : 'parsial'} dicatat`) }
+    const complete = status === 'complete'
+    const basis = await dialog.prompt({
+      title: complete ? `Konfirmasi cakupan lengkap ${file.fileName}` : `Tandai ${file.fileName} sebagai parsial`,
+      message: `${file.office}, ${formatID(selectedRange.start)}–${formatID(selectedRange.end)}.${complete ? ' Untuk ST, pastikan seluruh register yang diwajibkan sudah tercakup.' : ''}`,
+      label: complete ? 'Dasar kelengkapan' : 'Dasar status parsial', minLength: 10, placeholder: 'Rujukan dan alasan, minimal 10 karakter',
+      confirmLabel: complete ? 'Konfirmasi lengkap' : 'Tandai parsial',
+    })
+    if (!basis) return
+    try { await hr.declareFileCoverage(file.id, selectedRange.start, selectedRange.end, status, basis); toast(`Cakupan ${complete ? 'lengkap' : 'parsial'} dicatat`) }
     catch (error) { toast((error as Error).message) }
   }
 
@@ -187,12 +184,8 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
             </button>
             <div className="office-source-extra">
               {source === 'surat-tugas' && <button type="button" className="link" onClick={() => nav('rekap-st', 'Pusat')}>Isi ST manual</button>}
-              {canUpload && !item.ready && <button type="button" className="link" disabled={busy || !rangeElapsed} onClick={() => { setNaBasis(''); setNaSource(naSource === source ? undefined : source) }}>{source === 'surat-tugas' ? 'Tidak ada ST pekan ini' : 'Tidak ada data pekan ini'}</button>}
+              {canUpload && !item.ready && <button type="button" className="link" disabled={busy || !rangeElapsed} onClick={() => void submitNa(source)}>{source === 'surat-tugas' ? 'Tidak ada ST pekan ini' : 'Tidak ada data pekan ini'}</button>}
             </div>
-            {naSource === source && <form className="na-form" onSubmit={e => { e.preventDefault(); void submitNa(source) }}>
-              <label>Alasan / dasar (min. 10 karakter)<input className="select" value={naBasis} onChange={e => setNaBasis(e.target.value)} autoFocus /></label>
-              <div><button type="submit" className="btn primary" disabled={busy || naBasis.trim().length < 10}>Simpan</button> <button type="button" className="btn secondary" onClick={() => setNaSource(undefined)}>Batal</button></div>
-            </form>}
           </div>
         })}
       </div>

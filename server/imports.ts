@@ -410,7 +410,12 @@ export function previewImport(state: Workspace, revision: number, parsed: Source
   const offset = intent.offset ?? 0, limit = intent.limit ?? 50
   const activeFile = effectiveSource(file)
   const selectedRows = intent.mode === 'replace-registers' ? selectedIds.length : activeFile.evidence.length + activeFile.assignments.length + (activeFile.master?.length ?? 0)
-  return { next, impact: { checksum, revision, mode: intent.mode, source: { id: parsed.id, kind: parsed.kind, office: intent.office, parsedRows, selectedRows, omittedMasterCount }, counts, changes: allChanges.slice(offset, offset + limit), offset, limit, totalChanges: allChanges.length, hasMore: offset + limit < allChanges.length, registers: registerResults, replacedScopes, review } }
+  // An attendance export that stops before the confirmed range end is probably a partial export (e.g. online data only to 21 Okt).
+  const lastDate = activeFile.evidence.map(row => row.date).sort().at(-1)
+  const coverageNote = intent.coverage?.status === 'complete' && activeFile.kind !== 'surat-tugas' && lastDate && lastDate < intent.coverage.end
+    ? `Data di file berakhir ${lastDate}, sedangkan setoran dinyatakan lengkap sampai ${intent.coverage.end}. Pastikan tanggal sesudahnya memang tanpa absensi; bila belum, setor ulang file yang lengkap.`
+    : undefined
+  return { next, impact: { checksum, revision, mode: intent.mode, coverageNote, source: { id: parsed.id, kind: parsed.kind, office: intent.office, parsedRows, selectedRows, omittedMasterCount }, counts, changes: allChanges.slice(offset, offset + limit), offset, limit, totalChanges: allChanges.length, hasMore: offset + limit < allChanges.length, registers: registerResults, replacedScopes, review } }
 }
 
 export function canRetryImport(file: SourceFile | undefined, actor: User, confirmedImpact: string) {

@@ -135,7 +135,9 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
     if (inFlight.current || editableKeys.some(k => JSON.stringify(current.current[k]) !== JSON.stringify(base.current[k]))) throw new Error('Tunggu sampai perubahan tersimpan, lalu ulangi tindakan')
     inFlight.current = true; setSaveStatus('saving')
     try { apply(await api<WorkspaceResponse>(path, { method: 'POST', body: JSON.stringify({ ...body, expectedRevision }) })) }
-    catch (e) { setSaveStatus('error'); setSaveError((e as Error).message); throw e }
+    // Penolakan server (409/422/jaringan) bukan perubahan lokal yang belum tersimpan: tidak ada yang hilang, jadi tidak memasang
+    // banner global "Perubahan belum tersimpan". Pemanggil menampilkan galatnya sendiri; status kembali ke tersimpan.
+    catch (e) { setSaveStatus('saved'); throw e }
     finally { inFlight.current = false }
   }
   const value: Ctx = {
@@ -171,7 +173,7 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
     }),
     unreviewDay: (employeeId, date) => patch(s => ({ dayReviews: s.dayReviews.filter(r => r.employeeId !== employeeId || r.date !== date) })),
     resolve: (ids, decision, note) => {
-      if (note.trim().length < 3) { setSaveError('Catatan keputusan wajib diisi minimal 3 karakter'); return }
+      if (note.trim().length < 3) return // validasi di formulir pemanggil; bukan galat penyimpanan
       patch(s => ({ resolutions: [...s.resolutions.filter(r => !ids.includes(r.issueId)), ...ids.map(issueId => ({ issueId, decision, note, reviewer: user.name, at: new Date().toISOString(), signature: recon.issues.find(i => i.id === issueId)?.signature }))] }))
     },
     unresolve: ids => patch(s => ({ resolutions: s.resolutions.filter(r => !ids.includes(r.issueId)) })),

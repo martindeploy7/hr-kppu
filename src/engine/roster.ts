@@ -87,6 +87,9 @@ export function buildRoster(files: SourceFile[], master: Employee[], overrides: 
   const knownNips = new Set(master.map(m => m.nip).filter(Boolean))
   const sourceMaster: Employee[] = []
   for (const f of files) for (const row of f.master ?? []) {
+    // A "Data Pegawai" sheet inside a Rekap ST workbook is a lookup list, not the official master:
+    // surat tugas only links to existing employees and never creates new ones.
+    if (f.kind === 'surat-tugas') continue
     if (row.nip && knownNips.has(row.nip)) continue
     if (row.nip) knownNips.add(row.nip)
     sourceMaster.push({ ...blankEmployee(row.nip ? `nip:${row.nip}` : `source-master:${row.kantor}:${nameKey(row.nama ?? '')}`), ...row, sources: ['Master pegawai'] })

@@ -34,7 +34,7 @@ export function SubmissionPanel() {
   const delta = correction?.delta.reduce((s, d) => s + d.after.netto - d.before.netto, 0) ?? 0
   const packageReady = hr.monthlyPackage.ready
   const calculationReady = hr.policy.parametersApproved && hr.policy.taxParametersApproved && hr.recon.months.length > 0 && hr.recon.months.every(m => !m.heldDays && !m.amountPendingDays && !m.openClashes)
-  return <Panel title="Pengajuan & snapshot periode KPPU" sub="Satu pengajuan mencakup Pusat dan seluruh Kanwil untuk bulan yang dipilih. SDM mengajukan; akun Keuangan yang berbeda menyetujui dan mengunci.">
+  return <Panel title="Pengajuan & snapshot periode KPPU" sub="Satu pengajuan mencakup Pusat dan seluruh Kanwil untuk bulan yang dipilih. Satu Superadmin mengajukan; Superadmin lain yang menyetujui dan mengunci.">
     <div className="toolbar"><strong>Cakupan: seluruh KPPU · {hr.activePeriod}</strong>
       {user.role === 'superadmin' && !user.offices?.length && <button className="btn primary" disabled={busy || hr.saveStatus !== 'saved' || !packageReady || !calculationReady} onClick={() => action()}>Ajukan {hr.activePeriod}</button>}
       <button className="btn secondary" disabled={busy} onClick={() => void load().catch(e => setError(e.message))}>Muat pengajuan</button>

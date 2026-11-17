@@ -316,14 +316,15 @@ export function createApp(db: Database, config: { origin: string; production: bo
         }
         file.coverageDeclarations = (file.coverageDeclarations ?? []).filter(declaration => declaration.end < bounds.start || declaration.start > bounds.end)
         for (const previousSource of state.files) {
-          if (previousSource === file || previousSource.kind !== 'surat-tugas' || previousSource.office !== office || previousSource.active === false) continue
+          // ST coverage is one KPPU-wide confirmation: a new ST from any office reopens every "lengkap"/"nihil" claim for that month.
+          if (previousSource === file || previousSource.kind !== 'surat-tugas' || previousSource.active === false) continue
           let invalidated = false
           previousSource.coverageDeclarations = (previousSource.coverageDeclarations ?? []).flatMap(declaration => {
-            if (declaration.status !== 'nil' || declaration.end < bounds.start || declaration.start > bounds.end) return [declaration]
+            if ((declaration.status !== 'nil' && declaration.status !== 'complete') || declaration.end < bounds.start || declaration.start > bounds.end) return [declaration]
             invalidated = true
             const overlapStart = declaration.start < bounds.start ? bounds.start : declaration.start
             const overlapEnd = declaration.end > bounds.end ? bounds.end : declaration.end
-            const suffix = ` [Nihil dibatalkan setelah input ST ${input.letterNo} oleh ${actor.name}]`
+            const suffix = ` [${declaration.status === 'nil' ? 'Nihil' : 'Konfirmasi lengkap'} dibuka kembali setelah input ST ${input.letterNo} (${office}) oleh ${actor.name}]`
             const invalidatedRange = { ...declaration, start: overlapStart, end: overlapEnd, status: 'partial' as const, basis: `${declaration.basis.slice(0, Math.max(0, 2000 - suffix.length))}${suffix}` }
             return [
               ...(declaration.start < overlapStart ? [{ ...declaration, end: addDays(overlapStart, -1) }] : []),

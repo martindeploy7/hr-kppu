@@ -6,7 +6,7 @@ export function Bone({ w = '100%', h = 12, r = 6, style }: { w?: number | string
   return <span className="sk-bone" aria-hidden="true" style={{ width: w, height: h, borderRadius: r, ...style }} />
 }
 
-export type SkeletonVariant = 'board' | 'cards' | 'meal' | 'identity' | 'table' | 'dashboard' | 'form' | 'grid' | 'automation' | 'features' | 'employees' | 'rekap' | 'settings'
+export type SkeletonVariant = 'board' | 'cards' | 'meal' | 'identity' | 'table' | 'dashboard' | 'form' | 'grid' | 'automation' | 'employees' | 'rekap' | 'settings'
 
 type Tint = 'ok' | 'warn' | 'info' | undefined
 const arr = (n: number) => Array.from({ length: n }, (_, i) => i)
@@ -177,11 +177,6 @@ function Body({ variant }: { variant: SkeletonVariant }) {
       <div className="sk-row sk-wrap"><Bone w={120} h={32} r={999} /><Bone w={110} h={32} r={999} /><Bone w={130} h={32} r={999} /><Bone w={100} h={32} r={999} /></div>
       <Rows n={5} cols={4} />
     </>
-    case 'features': return <div className="sk-card sk-panel">
-      <div className="sk-stack sk-tight"><Bone w={260} h={15} /><Bone w="min(420px, 70%)" h={10} /></div>
-      <div className="sk-feat sk-feat-head">{arr(3).map(i => <Bone key={i} w={i === 0 ? 150 : 110} h={9} />)}</div>
-      {arr(6).map(r => <div key={r} className="sk-feat">{arr(3).map(c => <div key={c} className="sk-stack sk-tight">{arr(2 + ((r + c) % 3)).map(l => <Bone key={l} w={l === 0 ? '96%' : `${55 + ((r * 11 + c * 17 + l * 23) % 40)}%`} h={10} />)}</div>)}</div>)}
-    </div>
     case 'employees': return <>
       <Bone w={160} h={36} r={9} />
       <div className="sk-card sk-table sk-emp">
@@ -248,7 +243,6 @@ const HEAD: Record<SkeletonVariant, { kicker?: boolean; lines?: number; actions?
   form: { lines: 1 },
   grid: { lines: 1 },
   automation: { lines: 1, details: true },
-  features: { lines: 1, details: true },
   employees: { lines: 2 },
   rekap: { lines: 1 },
   settings: { lines: 1 },

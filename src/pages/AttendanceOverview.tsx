@@ -13,6 +13,7 @@ import { WeekPicker } from '../components/WeekPicker.tsx'
 
 const SOURCES: CoverageSource[] = ['offline', 'online', 'surat-tugas']
 const SRC_LABEL: Record<CoverageSource, string> = { offline: 'Mesin Offline', online: 'Mesin Online', 'surat-tugas': 'Rekap ST' }
+const SRC_SHORT: Record<CoverageSource, string> = { offline: 'Offline', online: 'Online', 'surat-tugas': 'ST' }
 const SRC_ICON = { offline: Printer, online: Globe2, 'surat-tugas': ScrollText } as const
 type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'idle'
 
@@ -78,7 +79,7 @@ export function AttendanceOverview({ nav, toast }: { nav: Nav; toast: (message: 
   }
 
   return <div className="page submission-workspace setoran-page">
-    <PageHeader kicker={monthLabel(hr.activePeriod)} title="Setoran & Review" actions={<button className="btn secondary" onClick={() => nav('reconcile')}>Lanjutkan rekonsiliasi</button>}>
+    <PageHeader kicker={monthLabel(hr.activePeriod)} title="Setoran & Review" actions={<><button className="btn secondary" disabled={!hr.files.length} aria-describedby={hr.files.length ? undefined : 'recon-disabled-reason'} onClick={() => nav('reconcile')}>Lanjutkan rekonsiliasi</button>{!hr.files.length && <small id="recon-disabled-reason" className="muted">Belum ada data. Unggah setoran lebih dulu.</small>}</>}>
       Pantau tiga setoran mingguan seluruh KPPU, lalu lanjut ke rekonsiliasi dan uang makan.
     </PageHeader>
 
@@ -115,7 +116,8 @@ export function AttendanceOverview({ nav, toast }: { nav: Nav; toast: (message: 
               const chip = sourceChip(row, source)
               const Icon = SRC_ICON[source]
               return <button type="button" key={source} className={`src-cell src-${source}`} onClick={() => openSource(row.slice.weekStart, source)} aria-label={`${SRC_LABEL[source]} pekan ${row.slice.index}: ${chip.text}`}>
-                <span className={`tone-chip tone-${chip.tone}`}><Icon size={12} /> {chip.text}</span>
+                <span className="src-short">{SRC_SHORT[source]}</span>
+                <span className={`tone-chip tone-${chip.tone}`}><Icon size={12} aria-hidden="true" /> {chip.text}</span>
               </button>
             })}
             <span className="num-cell" data-label="Clash">{row.future ? <span className="muted">—</span> : <span className={`tone-chip tone-${row.clashes ? 'warn' : 'ok'}`}>{row.clashes ? `${row.clashes} menunggu` : 'Nol'}</span>}</span>

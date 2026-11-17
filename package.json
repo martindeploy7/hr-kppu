@@ -19,7 +19,9 @@
     "test": "vitest run",
     "preview": "vite preview",
     "test:e2e": "e2e run",
-    "audit:parsers": "tsx scripts/parser-audit.ts"
+    "audit:parsers": "tsx scripts/parser-audit.ts",
+    "docs:pdf": "node docs/panduan-penggunaan/build-pdf.mjs",
+    "docs:screenshots": "node docs/panduan-penggunaan/capture-screenshots.mjs"
   },
   "dependencies": {
     "@fontsource/dm-sans": "5.3.0",

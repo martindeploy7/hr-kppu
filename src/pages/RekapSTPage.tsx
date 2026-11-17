@@ -2,12 +2,15 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { ListSkeleton } from '../components/Skeleton.tsx'
 import { FileText, LogOut, ShieldCheck } from 'lucide-react'
 import { ROLE_LABEL, type User } from '../../shared/workspace.ts'
-import { eachDay, monthBounds } from '../engine/dates.ts'
+import { eachDay, monthBounds, monthLabel } from '../engine/dates.ts'
+import { sourceRecordState } from '../engine/recordReviews.ts'
+import { inspectSourceCoverage } from '../engine/monthlyFlow.ts'
 import { OFFICES } from '../engine/ids.ts'
 import { api } from '../lib/api.ts'
 import { useAuth } from '../state/Auth.tsx'
 import { useHr } from '../state/HrData.tsx'
 import { Note, PageHeader, Panel } from '../components/ui.tsx'
+import { useDialog } from '../components/Dialog.tsx'
 import './rekapst/rekapst.css'
 
 type EmployeeOption = { id: string; nama: string; nip: string; kantor: string; unit: string; jabatan?: string }
@@ -72,6 +75,8 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [coverageError, setCoverageError] = useState('')
+  const dialog = useDialog()
   const [passwordOpen, setPasswordOpen] = useState(false)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -96,6 +101,14 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
     loadRecords().catch(e => { if (active) { setError((e as Error).message); setRecordsLoaded(true); setLoadFailed(true) } })
     return () => { active = false }
   }, [loadRecords])
+
+  // Revisi ruang kerja berubah (mis. setelah konfirmasi kelengkapan): muat ulang agar expectedRevision tidak basi dan ST berikutnya tidak ditolak.
+  const workspaceRevision = hr?.revision
+  useEffect(() => {
+    if (workspaceRevision === undefined || !recordsLoaded || workspaceRevision === data.revision) return
+    loadRecords().catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceRevision])
 
   useEffect(() => {
     if (!canAdd) return
@@ -123,18 +136,36 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
     if (employeeIds.length >= MAX_EMPLOYEES) { setError(`Maksimal ${MAX_EMPLOYEES} pegawai per ST.`); return }
     setError(''); setEmployeeIds(current => current.includes(id) ? current : [...current, id]); setEmployeeQuery('')
   }
-  const officeOptions = user.role === 'operator_st' ? user.offices ?? [] : OFFICES
-  const currentSource = data.sourceIds.find(source => source.office === registerOffice)
-  const hasOtherSt = !!hr?.files.some(file => file.kind === 'surat-tugas' && file.office === registerOffice && file.active !== false && !file.id.startsWith('manual-st:') && file.assignments.some(item => item.start.slice(0, 7) === period))
   const bounds = monthBounds(period)
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date())
   const canConfirmCoverage = !!hr && user.role === 'superadmin' && bounds.end <= today
-  const coverageState = hr?.monthlyPackage.coverage.find(item => item.office === registerOffice && item.source === 'surat-tugas')?.state ?? 'missing'
+  // Konfirmasi kelengkapan ST berlaku untuk seluruh KPPU (Pusat dan Kanwil I sampai VII), bukan per kantor.
+  const stFiles = (hr?.files ?? []).filter(file => file.kind === 'surat-tugas' && file.active !== false && file.period?.start.slice(0, 7) === period)
+  const manualActive = stFiles.filter(file => file.id.startsWith('manual-st:') && file.assignments.some(row => sourceRecordState(file, 'assignment', row.id) === 'active'))
+  const hasManualSt = manualActive.length > 0
+  const hostSource = manualActive.find(file => file.office === 'Pusat') ?? manualActive[0]
+  const hasOtherSt = (hr?.files ?? []).some(file => file.kind === 'surat-tugas' && file.active !== false && !file.id.startsWith('manual-st:') && file.assignments.some(item => item.start.slice(0, 7) === period))
+  const coverageState = hr ? inspectSourceCoverage(hr.files, bounds.start, bounds.end).find(item => item.source === 'surat-tugas')?.state ?? 'missing' : 'missing'
+  /** Server menghapus deklarasi pada register kantor-bulan yang sama saat ST ditambahkan; bulan yang terdampak diperiksa di sini sebelum menyimpan. */
+  const reopenedMonths = (months: string[]) => months.filter(month => {
+    const range = monthBounds(month)
+    const declarations = hr
+      ? hr.files.find(file => file.kind === 'surat-tugas' && file.active !== false && file.id.startsWith('manual-st:') && file.office === registerOffice && file.period?.start.slice(0, 7) === month)?.coverageDeclarations
+      : month === period ? data.sourceIds.find(source => source.office === registerOffice)?.coverage : undefined
+    return !!declarations?.some(item => item.status === 'complete' && item.start <= range.end && item.end >= range.start)
+  })
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!employeeIds.length) { setError('Pilih minimal satu pegawai dari daftar master.'); return }
     if (dateError) { setError(dateError); return }
+    const reopen = reopenedMonths([...new Set(dayList.map(day => day.slice(0, 7)))])
+    const reopenLabel = reopen.map(monthLabel).join(' dan ')
+    if (reopen.length && !await dialog.confirm({
+      title: 'Konfirmasi kelengkapan ST akan dibuka kembali',
+      message: `Menambah ST akan membuka kembali konfirmasi kelengkapan ST ${reopenLabel} (seluruh KPPU). UM final bulan ini ditahan sampai dikonfirmasi ulang.`,
+      confirmLabel: 'Tambah ST dan buka kembali', cancelLabel: 'Jangan tambah',
+    })) return
     setBusy(true); setError(''); setMessage('')
     try {
       const result = await api<{ created: number; skipped: number; revision: number }>('/rekap-st', { method: 'POST', body: JSON.stringify({
@@ -142,9 +173,11 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
         startDate, endDate: effectiveEnd, destination,
       }) })
       setData(current => ({ ...current, revision: result.revision }))
-      setMessage(`Rekap ST ${letterNo} tersimpan: ${result.created} baris dibuat${result.skipped ? `, ${result.skipped} baris sudah ada dan dilewati` : ''}.`)
+      const reopenNote = reopen.length ? ` Konfirmasi kelengkapan ST ${reopenLabel} (seluruh KPPU) dibuka kembali; konfirmasi ulang agar UM final.` : ''
+      setMessage(`Rekap ST ${letterNo} tersimpan: ${result.created} baris dibuat${result.skipped ? `, ${result.skipped} baris sudah ada dan dilewati` : ''}.${reopenNote}`)
+      toast?.(`Rekap ST ${letterNo} tersimpan.${reopenNote}`)
       setLetterNo(''); setLetterDate(''); setEmployeeQuery(''); setEmployeeIds([]); setEndDate(''); setDestination('')
-      toast?.('Rekap ST tersimpan')
+      void hr?.reload() // status cakupan dan tombol konfirmasi mengikuti data server tanpa menunggu polling
       try { await loadRecords() }
       catch (e) { setError(`Rekap tersimpan, tetapi daftar gagal dimuat ulang: ${(e as Error).message}`) }
     } catch (e) { setError((e as Error).message) }
@@ -152,32 +185,38 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
   }
 
   const voidRecord = async (record: RekapRecord) => {
-    const reason = window.prompt(`Jelaskan alasan membatalkan ST ${record.letterNo} untuk ${record.name} (minimal 10 karakter):`)
-    if (!reason || reason.trim().length < 10) return
+    const reason = await dialog.prompt({ title: `Batalkan ST ${record.letterNo}?`, message: `Peserta: ${record.name}, ${idDate(record.activityDate)}. Pembatalan tercatat sebagai jejak audit.`, label: 'Alasan pembatalan', minLength: 10, placeholder: 'Mis. ST dibatalkan karena tugas dialihkan, lihat memo tertanggal ...', confirmLabel: 'Batalkan ST', cancelLabel: 'Jangan batalkan', tone: 'danger' })
+    if (!reason) return
     setBusy(true); setError('')
     try {
-      await api(`/rekap-st/${record.id}/void`, { method: 'POST', body: JSON.stringify({ expectedRevision: data.revision, reason: reason.trim() }) })
+      await api(`/rekap-st/${record.id}/void`, { method: 'POST', body: JSON.stringify({ expectedRevision: data.revision, reason }) })
       await loadRecords()
       setMessage(`Rekap ST ${record.letterNo} dibatalkan dengan jejak audit.`)
+      toast?.(`Rekap ST ${record.letterNo} dibatalkan`)
+      void hr?.reload()
     } catch (e) { setError((e as Error).message) }
     finally { setBusy(false) }
   }
 
   const confirmCoverage = async () => {
     if (!hr || !canConfirmCoverage) return
-    const basis = window.prompt(`Jelaskan dasar konfirmasi kelengkapan Rekap ST ${registerOffice} untuk ${period} (minimal 10 karakter):`)
-    if (!basis || basis.trim().length < 10) return
-    if (data.records.some(record => record.registerOffice === registerOffice && record.status === 'active')) {
-      if (!currentSource) { setError('Sumber rekap ST belum terbaca ulang. Muat ulang halaman lalu coba lagi.'); return }
-      if (!window.confirm(`Konfirmasi seluruh rekap ST ${registerOffice} untuk bulan ${period} sudah dimasukkan?`)) return
-      try { await hr.declareFileCoverage(currentSource.id, bounds.start, bounds.end, 'complete', basis.trim()); setMessage(`Kelengkapan Rekap ST ${registerOffice} untuk ${period} dikonfirmasi.`) }
-      catch (e) { setError((e as Error).message) }
-      return
-    }
-    if (hasOtherSt) { setError('Ada ST lama dari Excel pada kantor dan periode ini. Konfirmasi cakupannya melalui halaman Impor Sumber.'); return }
-    if (!window.confirm(`Konfirmasi tidak ada ST untuk ${registerOffice} pada seluruh bulan ${period}?`)) return
-    try { await hr.declareNilSt(registerOffice, bounds.start, bounds.end, basis.trim()); setMessage(`Rekap ST nihil ${registerOffice} untuk ${period} dicatat.`) }
-    catch (e) { setError((e as Error).message) }
+    setCoverageError('')
+    if (hasManualSt && !hostSource) { setCoverageError('Sumber rekap ST belum terbaca ulang. Muat ulang halaman lalu coba lagi.'); return }
+    if (!hasManualSt && hasOtherSt) { setCoverageError('Ada ST lama dari Excel pada periode ini. Konfirmasi cakupannya melalui halaman Setoran & Review.'); return }
+    const complete = hasManualSt
+    const basis = await dialog.prompt({
+      title: complete ? `Konfirmasi rekap ST ${monthLabel(period)} lengkap` : `Konfirmasi tidak ada ST pada ${monthLabel(period)}`,
+      message: complete ? 'Pastikan seluruh ST bulan ini, dari Pusat dan Kanwil I sampai VII, sudah dimasukkan. Konfirmasi berlaku untuk seluruh KPPU.' : 'Tidak ada ST di seluruh KPPU (Pusat dan Kanwil I sampai VII) pada bulan ini.',
+      label: 'Dasar konfirmasi', minLength: 10, placeholder: 'Mis. daftar ST Pusat dan seluruh Kanwil sudah dicocokkan dengan buku register.',
+      confirmLabel: complete ? 'Konfirmasi lengkap' : 'Konfirmasi nihil',
+    })
+    if (!basis) return
+    try {
+      if (complete) await hr.declareFileCoverage(hostSource!.id, bounds.start, bounds.end, 'complete', basis)
+      else await hr.declareNilSt('Pusat', bounds.start, bounds.end, basis)
+      const done = complete ? `Kelengkapan rekap ST ${monthLabel(period)} (seluruh KPPU) dikonfirmasi.` : `Rekap ST nihil ${monthLabel(period)} (seluruh KPPU) dicatat.`
+      setMessage(done); toast?.(done)
+    } catch (e) { setCoverageError((e as Error).message) }
   }
 
   const changePassword = async (event: FormEvent) => {
@@ -203,19 +242,20 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
     </PageHeader>
 
     {error && <p role="alert" className="form-error">{error}</p>}
-    {message && <p role="status" className="st-success">{message}</p>}
+    {message && <p role={toast ? undefined : 'status'} className="st-success">{message}</p>}
 
     {canAdd && <Panel title="Tambah rekap surat tugas" sub="Satu ST: satu nomor, satu rentang tanggal, beberapa pegawai.">
       {!employees.length && <Note tone="warn">Belum ada pegawai di master untuk kantor ini. Minta Superadmin melengkapi master pegawai sebelum mengisi ST.</Note>}
       <form onSubmit={submit}>
         <div className="st-entry-grid">
-          {user.role === 'superadmin' && <label>Kantor register ST<select required value={registerOffice} onChange={e => { setRegisterOffice(e.target.value); setEmployeeIds([]); setEmployeeQuery('') }}>{OFFICES.map(office => <option key={office}>{office}</option>)}</select></label>}
+          {user.role === 'superadmin' && <label>Kantor register ST<select required aria-describedby="st-office-hint" value={registerOffice} onChange={e => { setRegisterOffice(e.target.value); setEmployeeIds([]); setEmployeeQuery('') }}>{OFFICES.map(office => <option key={office}>{office}</option>)}</select></label>}
           <label>No. ST<input required maxLength={100} value={letterNo} onChange={e => setLetterNo(e.target.value)} placeholder="256/" /></label>
           <label>Tanggal ST<input type="date" lang="id" required value={letterDate} onChange={e => setLetterDate(e.target.value)} /></label>
           <label>Tanggal tugas mulai<input type="date" lang="id" required value={startDate} onChange={e => setStartDate(e.target.value)} /></label>
           <label>Tanggal tugas selesai<input type="date" lang="id" required min={startDate} value={effectiveEnd} onChange={e => setEndDate(e.target.value)} /></label>
           <label className="st-destination-field">Tujuan<input required maxLength={250} value={destination} onChange={e => setDestination(e.target.value)} placeholder="Kota, Provinsi" /></label>
         </div>
+        {user.role === 'superadmin' && <p id="st-office-hint" className="muted small">Kantor register ST hanya label asal surat. Konfirmasi kelengkapan ST berlaku untuk seluruh KPPU.</p>}
         {dateError && <p role="alert" className="form-error">{dateError}</p>}
         <div className="st-multi">
           <span className="st-multi-label">Pegawai yang ditugaskan ({employeeIds.length}/{MAX_EMPLOYEES})</span>
@@ -236,10 +276,11 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
       </form>
     </Panel>}
 
-    {canConfirmCoverage && <Panel title="Kelengkapan ST bulanan" sub="Superadmin mengonfirmasi kelengkapan setelah mencocokkan seluruh rekap kantor.">
-      <details className="st-how"><summary>Cara kerja</summary><p>Menambah ST tidak otomatis menyatakan register lengkap. Tanpa konfirmasi, bulan ini tetap berstatus belum dikonfirmasi di rekonsiliasi.</p></details>
-      <div className="st-coverage-row"><label>Kantor register<select value={registerOffice} onChange={e => setRegisterOffice(e.target.value)}>{officeOptions.map(office => <option key={office}>{office}</option>)}</select></label><div><span>Status cakupan</span><strong>{coverageState === 'complete' ? 'Lengkap' : coverageState === 'nil' ? 'Nihil' : coverageState === 'partial' ? 'Parsial' : coverageState === 'unconfirmed' ? 'Data ada, belum dikonfirmasi' : 'Belum dikonfirmasi'}</strong></div><button className="btn secondary" disabled={busy || ['complete', 'nil'].includes(coverageState)} onClick={() => void confirmCoverage()}>{data.records.some(record => record.registerOffice === registerOffice && record.status === 'active') ? 'Konfirmasi rekap lengkap' : 'Konfirmasi nihil ST'}</button></div>
-      {hasOtherSt && <p className="muted small">Register ST dari Excel lama terdeteksi; konfirmasikan cakupan file tersebut di halaman Impor Sumber.</p>}
+    {canConfirmCoverage && <Panel title="Kelengkapan ST bulanan (seluruh KPPU)" sub="Satu konfirmasi untuk Pusat dan Kanwil I sampai VII, setelah seluruh rekap ST dicocokkan.">
+      <details className="st-how"><summary>Cara kerja</summary><p>Menambah ST tidak otomatis menyatakan rekap lengkap. Tanpa konfirmasi, bulan ini tetap berstatus belum dikonfirmasi di rekonsiliasi. Menambah ST pada register yang sudah dikonfirmasi membuka kembali konfirmasinya.</p></details>
+      <div className="st-coverage-row"><div><span>Status cakupan {monthLabel(period)}</span><strong>{coverageState === 'complete' ? 'Lengkap' : coverageState === 'nil' ? 'Nihil' : coverageState === 'partial' ? 'Parsial' : coverageState === 'unconfirmed' ? 'Data ada, belum dikonfirmasi' : 'Belum dikonfirmasi'}</strong></div><button className="btn secondary" disabled={busy || ['complete', 'nil'].includes(coverageState)} onClick={() => void confirmCoverage()}>{['complete', 'nil'].includes(coverageState) ? 'Sudah dikonfirmasi' : hasManualSt ? 'Konfirmasi rekap lengkap' : 'Konfirmasi nihil ST'}</button></div>
+      {coverageError && <p role="alert" className="form-error">{coverageError}</p>}
+      {hasOtherSt && <p className="muted small">Register ST dari Excel lama terdeteksi; konfirmasikan cakupan file tersebut di halaman Setoran &amp; Review.</p>}
     </Panel>}
 
     <Panel title={`Daftar rekap · ${period}`} sub={operator ? `Kantor cakupan: ${user.offices?.join(', ') || 'belum ditetapkan'}` : 'Catatan aktif masuk ke rekonsiliasi. Pembatalan tercatat sebagai jejak audit.'}>

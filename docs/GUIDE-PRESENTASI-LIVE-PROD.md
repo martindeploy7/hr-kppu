@@ -411,6 +411,6 @@ Rujukan:
 
 - [Alur fitur untuk client](ALUR-FITUR-UNTUK-CLIENT.md).
 - [Konsep inti absensi dan UM](KONSEP-PROJECT.md).
-- [Manual pengguna PDF](PANDUAN-PENGGUNA-KPPU-HR.pdf).
+- [Panduan Penggunaan Web SDM KPPU (PDF)](PANDUAN-PENGGUNAAN-WEB-SDM-KPPU.pdf).
 - [Daftar kasus khusus demo Netlify](../demo/SKENARIO-DATA.md).
 - Implementasi: [impor](../src/pages/ImportPage.tsx), [identitas](../src/pages/IdentityPage.tsx), [rekonsiliasi](../src/pages/ReconcilePage.tsx), [keputusan hari](../src/components/DayReviewEditor.tsx), [UM](../src/pages/MealPage.tsx), dan [pengajuan](../src/components/SubmissionPanel.tsx).

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { ArrowRight, CheckCircle2, ClipboardCheck, Cpu, Database, FileText, Globe, PartyPopper, RotateCcw, Search, ShieldCheck, Swords, UploadCloud, Wallet } from 'lucide-react'
 import { useHr } from '../state/HrData.tsx'
@@ -46,6 +46,7 @@ export function ReconcilePage({ nav, toast, focus }: { nav: Nav; toast: (m: stri
   const [limit, setLimit] = useState(20)
   const [openCase, setOpenCase] = useState<string | null>(null)
   const [openDay, setOpenDay] = useState<{ emp: string; date: string } | null>(null)
+  const queueHeading = useRef<HTMLHeadingElement>(null)
   useEffect(() => setLimit(20), [state, type, office, q, scope])
 
   const resolvedIds = useMemo(() => new Set(hr.resolutions.map(r => r.issueId)), [hr.resolutions])
@@ -109,6 +110,7 @@ export function ReconcilePage({ nav, toast, focus }: { nav: Nav; toast: (m: stri
     </div>
 
     {tab === 'issues' ? <Panel>
+      <h3 ref={queueHeading} tabIndex={-1} className="rc-queue-title">Antrean clash<span>{fmt.format(filtered.length)} {state === 'open' ? 'menunggu' : 'sudah diputuskan'}</span></h3>
       <div className="toolbar">
         <label className="search"><Search size={15} /><input placeholder="Cari nama, NIP, unit…" value={q} onChange={e => setQ(e.target.value)} /></label>
         <select className="select" value={office} onChange={e => setOffice(e.target.value)} aria-label="Kantor"><option>Semua</option>{offices.map(o => <option key={o}>{o}</option>)}</select>
@@ -123,7 +125,7 @@ export function ReconcilePage({ nav, toast, focus }: { nav: Nav; toast: (m: stri
         ? (state === 'open' && clashTotal > 0 && clashOpen === 0 && scope === 'clash' && !q && office === 'Semua')
           ? <div className="rc-celebrate"><PartyPopper size={30} /><strong>Semua clash pekan ini sudah diputuskan</strong><p>Status hari dan uang makan sudah dihitung ulang dari keputusan Anda.</p><button className="btn primary" onClick={() => nav('meal')}>Lihat Uang Makan <ArrowRight size={14} /></button></div>
           : <Empty icon={CheckCircle2} title={state === 'open' ? 'Tidak ada kasus menunggu pada filter ini' : 'Belum ada keputusan pada filter ini'}>{q || office !== 'Semua' || type !== 'all' ? 'Ubah kata kunci, kantor, atau jenis clash untuk melihat kasus lain.' : state === 'open' ? 'Pilih "Semua catatan" di atas untuk melihat catatan yang tidak menahan uang makan.' : 'Keputusan yang Anda simpan akan muncul di sini.'}</Empty>
-        : <div className="rc-cards">{filtered.slice(0, limit).map(c => <ClashCard key={c.id} c={c} toast={toast} editable={editable} onOpen={() => setOpenCase(c.id)} />)}</div>}
+        : <div className="rc-cards">{filtered.slice(0, limit).map(c => <ClashCard key={c.id} c={c} toast={toast} editable={editable} onOpen={() => setOpenCase(c.id)} afterAction={card => { const next = card.nextElementSibling?.querySelector<HTMLElement>('.rc-decide .rc-btn, .rc-decided .btn'); (next ?? queueHeading.current)?.focus() }} />)}</div>}
       {filtered.length > limit && <button className="btn secondary more" onClick={() => setLimit(l => l + 20)}>Tampilkan {Math.min(20, filtered.length - limit)} kasus lagi</button>}
     </Panel> : <Matrix months={hr.weekRecon.months} range={hr.weekRecon.period} onOpen={(emp, date) => setOpenDay({ emp, date })} />}
 
@@ -191,27 +193,30 @@ function sources(day: DayRecord | undefined): Src[] {
   ]
 }
 
-function ClashCard({ c, toast, editable, onOpen }: { c: Case; toast: (m: string) => void; editable: boolean; onOpen: () => void }) {
+function ClashCard({ c, toast, editable, onOpen, afterAction }: { c: Case; toast: (m: string) => void; editable: boolean; onOpen: () => void; afterAction: (card: HTMLElement) => void }) {
   const hr = useHr()
   const e = c.month.employee
   const day = c.month.days.find(d => d.date === c.dates[0])
   const actions = ACTIONS[c.type] ?? [{ decision: 'valid' as const, label: 'Tandai sudah ditinjau', tone: 'primary' as const }]
-  const primary = actions.find(a => a.tone === 'primary') ?? actions[0]
-  const [edited, setEdited] = useState<string | null>(null)
-  const [hint, setHint] = useState(primary.decision)
+  // Catatan hanya berubah karena diketik pengguna. Kosong = diisi otomatis sesuai pilihan saat tombol ditekan.
+  const [typed, setTyped] = useState('')
+  const card = useRef<HTMLElement>(null)
   // Satu keputusan berlaku untuk seluruh isu pemblokir pada pegawai-hari tersebut (mis. dinas-vs-scan + status berbeda),
   // jika tidak hari itu tetap tertahan oleh isu lain yang belum diputuskan.
   const caseDays = c.dates.map(date => c.month.days.find(d => d.date === date)).filter(Boolean) as DayRecord[]
   const ids = [...new Set([...c.issues.map(i => i.id), ...caseDays.flatMap(d => d.issues.filter(i => i.blocksMeal).map(i => i.id))])]
   const dayCount = new Set(c.dates).size
   const decided = c.issues.map(i => hr.resolutions.find(r => r.issueId === i.id)).filter(Boolean) as Resolution[]
-  const note = edited ?? defaultNote(hint, c.type, day)
   const decide = (d: Resolution['decision']) => {
-    const text = edited ?? defaultNote(d, c.type, day)
+    const text = typed.trim() ? typed : defaultNote(d, c.type, day)
     if (text.trim().length < 3) { toast('Isi catatan keputusan minimal 3 karakter'); return }
+    // Fokus dipindah ke kartu berikutnya sebelum kartu ini hilang dari antrean, agar pengguna keyboard tidak kehilangan posisi.
+    if (card.current) afterAction(card.current)
     hr.resolve(ids, d, text); toast(`Keputusan disimpan untuk ${dayCount} hari`)
   }
-  return <article className={`rc-card ${c.resolved ? 'is-done' : ''}`}>
+  // Hasil UM dari keputusan yang sudah tersimpan, bukan tarif harian yang terkesan berlaku.
+  const outcome = decided[0] ? umImpact(decided[0].decision, c.type, day, c.month.rate) : ''
+  return <article ref={card} className={`rc-card ${c.resolved ? 'is-done' : ''}`}>
     <header className="rc-card-head">
       <div className="rc-who"><strong>{e.nama}</strong><small>{e.nip || 'Tanpa NIP'} · {e.kantor} · {e.unit?.replace(/ - Sekretaris Jenderal$/, '') || 'unit belum diisi'}</small></div>
       <div className="rc-meta"><span className={`tone-chip ${typeTone(c.type)}`}>{ISSUE_LABEL[c.type]}</span><span className="tone-chip tone-idle">{rangeLabel(c.dates)}{c.dates.length > 1 ? ` · ${c.dates.length} hari` : ''}</span><SeverityPill severity={c.severity} /></div>
@@ -224,15 +229,15 @@ function ClashCard({ c, toast, editable, onOpen }: { c: Case; toast: (m: string)
       </div>)}
     </div>
     {c.resolved ? <div className="rc-decided"><CheckCircle2 size={16} /><div><b>Sudah diputuskan: {decided[0] ? DECISION_LABEL[decided[0].decision] : ''}</b>{decided[0] && <small>{decided[0].reviewer} · “{decided[0].note}”</small>}</div>
-      {editable && <button className="btn danger" onClick={() => { hr.unresolve(ids); toast('Keputusan dibatalkan') }}><RotateCcw size={14} /> Batalkan keputusan</button>}</div>
+      {editable && <button className="btn danger" onClick={() => { if (card.current) afterAction(card.current); hr.unresolve(ids); toast('Keputusan dibatalkan') }}><RotateCcw size={14} /> Batalkan keputusan</button>}</div>
     : editable ? <div className="rc-decide">
-      <label><span>Catatan keputusan (jejak audit) · terisi otomatis, boleh diubah</span><textarea rows={2} value={note} onChange={ev => setEdited(ev.target.value)} /></label>
+      <label><span>Catatan keputusan (jejak audit). Kosongkan untuk memakai catatan otomatis sesuai pilihan.</span><textarea rows={2} value={typed} placeholder="Mis. sudah dikonfirmasi ke sekretaris Direktorat." onChange={ev => setTyped(ev.target.value)} /></label>
       <div className="rc-btns">{actions.map(a => {
         const impact = umImpact(a.decision, c.type, day, c.month.rate)
-        return <button key={a.decision + a.label} className={`btn rc-btn ${a.tone === 'primary' ? 'primary' : 'secondary'}`} onMouseEnter={() => setHint(a.decision)} onFocus={() => setHint(a.decision)} onClick={() => decide(a.decision)}>{a.label}{impact && <small> → {impact}</small>}</button>
+        return <button key={a.decision + a.label} className={`btn rc-btn ${a.tone === 'primary' ? 'primary' : 'secondary'}`} onClick={() => decide(a.decision)}>{a.label}{impact && <small> → {impact}</small>}</button>
       })}</div>
     </div> : <div className="rc-decided wait"><span>Keputusan kasus ini memerlukan akun Admin atau Superadmin.</span></div>}
-    <footer><button className="rc-link" onClick={onOpen}><ClipboardCheck size={13} /> Buka bukti lengkap</button><span><Wallet size={12} /> UM {e.nama.split(' ')[0]}: {money.format(c.month.rate)}/hari</span></footer>
+    <footer><button className="rc-link" onClick={onOpen}><ClipboardCheck size={13} /> Buka bukti lengkap</button><span><Wallet size={12} /> {c.resolved ? <>UM {e.nama.split(' ')[0]}: {outcome || 'mengikuti keputusan'}</> : <>UM {e.nama.split(' ')[0]}: {money.format(c.month.rate)}/hari jika hadir sah</>}</span></footer>
   </article>
 }
 

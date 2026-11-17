@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useDialog } from '../../components/Dialog.tsx'
 import { LoaderCircle, Plus, Save, SlidersHorizontal, X } from 'lucide-react'
 import { api } from '../../lib/api.ts'
 import { isHHMM, normalizePhone, type AutomationOverview, type AutomationSettings } from '../../../shared/automation.ts'
@@ -16,14 +17,15 @@ export function SettingsSection({ overview, canWrite, onOverview, notify }: { ov
   const [draft, setDraft] = useState<AutomationSettings>(overview.settings)
   const [phoneInput, setPhoneInput] = useState('')
   const [saving, setSaving] = useState(false)
+  const dialog = useDialog()
   const [error, setError] = useState('')
   const saved = JSON.stringify(overview.settings)
   useEffect(() => { setDraft(overview.settings) }, [saved]) // eslint-disable-line react-hooks/exhaustive-deps
   const dirty = JSON.stringify(draft) !== saved
   const set = <K extends keyof AutomationSettings>(k: K, v: AutomationSettings[K]) => setDraft(d => ({ ...d, [k]: v }))
 
-  const toggleTestMode = () => {
-    if (draft.testMode && !window.confirm('Pesan akan dikirim ke nomor pegawai sungguhan. Lanjutkan?')) return
+  const toggleTestMode = async () => {
+    if (draft.testMode && !await dialog.confirm({ title: 'Matikan mode uji?', message: 'Pesan akan dikirim ke nomor pegawai sungguhan, bukan ke nomor uji.', confirmLabel: 'Matikan mode uji', tone: 'danger' })) return
     set('testMode', !draft.testMode)
   }
   const addPhone = () => {

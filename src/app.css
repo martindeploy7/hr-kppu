@@ -515,3 +515,48 @@ table.evidence .loc{display:flex;align-items:center;gap:3px;color:var(--ink-soft
 .week-picker{min-width:0;max-width:100%}
 .week-picker .select{min-width:0;max-width:100%;text-overflow:ellipsis}
 @media(max-width:760px){.week-picker{display:flex;flex-direction:column;align-items:stretch;gap:4px;width:100%}.week-picker .select{width:100%}}
+
+/* ===== Dialog dalam aplikasi (pengganti window.prompt / confirm) ===== */
+@keyframes dlg-in{from{opacity:0;transform:scale(.97)}}
+.dlg-scrim{position:fixed;inset:0;z-index:90;display:grid;place-items:center;padding:16px;background:color-mix(in srgb,var(--brand-navy) 45%,transparent);animation:fade-in var(--dur-fast) var(--ease-out)}
+.dlg{box-sizing:border-box;width:min(480px,100%);max-height:calc(100dvh - 32px);overflow-y:auto;padding:22px 24px;border:1px solid var(--line-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow-pop);color:var(--ink);animation:dlg-in var(--dur-fast) var(--ease-out)}
+.dlg h2{margin:0 0 8px;color:var(--brand-navy);font:700 var(--fs-lg) Manrope,'DM Sans',sans-serif;line-height:1.4}
+.dlg-message{margin:0 0 14px;color:var(--ink-soft);font-size:var(--fs-md);line-height:1.6}
+.dlg-field{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}
+.dlg-field label{color:var(--ink);font-size:var(--fs-sm);font-weight:700}
+.dlg-field textarea{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--field-line);border-radius:var(--radius-md);background:var(--surface);color:var(--ink);font:inherit;font-size:var(--fs-md);resize:vertical}
+.dlg-field textarea[aria-invalid=true]{border-color:var(--danger)}
+.dlg-hint{display:flex;justify-content:space-between;gap:12px;margin:0;color:var(--ink-muted);font-size:var(--fs-xs);line-height:1.5}
+.dlg-hint.is-error{color:var(--danger);font-weight:600}
+.dlg-count{flex:0 0 auto;font-variant-numeric:tabular-nums}
+.dlg-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px}
+.dlg-actions .btn{min-height:44px}
+@media(prefers-reduced-motion:reduce){.dlg{animation:fade-in var(--dur-fast) var(--ease-out)}}
+.toast span{min-width:0}
+.toast-undo{flex:0 0 auto;margin-left:6px;min-height:32px;padding:4px 10px;border:1px solid color-mix(in srgb,var(--surface) 55%,transparent);border-radius:var(--radius-sm);background:transparent;color:var(--surface);font:inherit;font-weight:700;cursor:pointer;transition:background-color var(--dur-press) var(--ease-out),transform var(--dur-press) var(--ease-out)}
+.toast-undo:active{transform:scale(.97)}
+@media (hover:hover) and (pointer:fine){.toast-undo:hover{background:color-mix(in srgb,var(--surface) 16%,transparent)}}
+.toast :focus-visible{outline-color:var(--surface)}
+.st-coverage-row{grid-template-columns:minmax(0,1fr) auto}
+@media(max-width:760px){.st-coverage-row{grid-template-columns:minmax(0,1fr)}}
+.review-errors{margin:0;padding-left:18px;font-size:var(--fs-sm);line-height:1.5}
+
+/* Mobile: sel matriks >= 36px, tabel bukti drawer membungkus keterangan */
+@media(max-width:760px){
+.cell{width:36px;height:36px}
+table.matrix th{min-width:38px}
+table.evidence,table.evidence tbody{display:block;width:100%}
+table.evidence thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+table.evidence tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px 12px;padding:10px 12px;border-top:1px solid var(--surface-sunken)}
+table.evidence tr:first-child{border-top:0}
+table.evidence td{display:block;min-width:0;padding:0;border:0;overflow-wrap:break-word}
+table.evidence td[data-label="Sumber"],table.evidence td[data-label="Keterangan"],table.evidence td[data-label="Rujukan"],table.evidence td[data-label="Gunakan"]{grid-column:1/-1}
+table.evidence td::before{content:attr(data-label);display:block;margin-bottom:2px;color:var(--ink-muted);font-size:var(--fs-2xs);font-weight:700;letter-spacing:.03em;text-transform:uppercase}
+.day-review .evidence td:first-child{width:auto;text-align:left}
+.day-review .evidence td[data-label="Gunakan"]{display:flex;align-items:center;gap:8px}
+.day-review .evidence td[data-label="Gunakan"]::before{margin:0}
+}
+.page-head small{align-self:center}
+
+/* Ruang Kerja: tombol aksi akun tidak saling menempel. */
+.account-actions { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }

@@ -1,3 +1,4 @@
+import { useDialog } from '../components/Dialog.tsx'
 import { useMemo, useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { AlertTriangle, ArrowDownUp, Clock, Download, Hourglass, ListChecks, Search, Settings2, Users, WalletCards, X } from 'lucide-react'
@@ -16,10 +17,11 @@ import { Drawer, Kpi, Note, PageHeader, Panel, Seg, StatusChip } from '../compon
 import type { Nav } from '../App.tsx'
 import './meal.css'
 
-type Outcome = 'ok' | 'late' | 'early' | 'duty' | 'leave' | 'absent' | 'incomplete' | 'nodata' | 'decision' | 'estimate' | 'other'
+type Outcome = 'ok' | 'late' | 'early' | 'duty' | 'leave' | 'absent' | 'incomplete' | 'nodata' | 'decision' | 'estimate' | 'pending' | 'other'
 const OUTCOMES: { id: Outcome; label: string; color: string }[] = [
   { id: 'ok', label: 'Dapat UM', color: 'var(--ok)' },
   { id: 'estimate', label: 'Menunggu setoran', color: 'var(--money-estimate)' },
+  { id: 'pending', label: 'Pekan belum disetor', color: 'var(--idle)' },
   { id: 'decision', label: 'Menunggu keputusan', color: 'var(--warn)' },
   { id: 'late', label: 'Terlambat', color: 'var(--danger)' },
   { id: 'early', label: 'Pulang cepat', color: 'var(--danger-line)' },
@@ -37,7 +39,8 @@ function classify(d: DayRecord): Outcome | null {
   if (!d.workday || d.reviewState === 'future' || d.status === 'belum-berlangsung' || d.status === 'libur') return null
   const m = d.meal
   if (m.state === 'eligible') return 'ok'
-  if (m.state === 'held') return m.estimate ? 'estimate' : 'decision'
+  // Held because the week's sources are not all submitted yet is not an admin task; only real clashes are "Menunggu keputusan".
+  if (m.state === 'held') return m.estimate ? 'estimate' : m.heldBy === 'coverage' ? 'pending' : 'decision'
   if (d.lateMin > 0 && m.reason.startsWith('Terlambat')) return 'late'
   if (m.reason.startsWith('Pulang')) return 'early'
   if (['dinas-luar', 'dinas-lokal', 'diklat'].includes(d.status)) return 'duty'
@@ -53,6 +56,7 @@ type SortKey = 'nama' | 'mealDays' | 'heldDays' | 'bruto'
 export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void }) {
   const hr = useHr()
   const { user } = useAuth()
+  const dialog = useDialog()
   const [q, setQ] = useState('')
   const [office, setOffice] = useState('Semua')
   const [sort, setSort] = useState<SortKey>('nama')
@@ -67,9 +71,9 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
 
   const presetImpact = useMemo(() => POLICY_PRESETS.map(p => {
     const policy = { ...hr.policy, ...p.patch }
-    const r = reconcile(hr.files, hr.roster, monthBounds(hr.activePeriod || '2000-01'), policy, hr.resolutions, undefined, hr.dayReviews, coverageLookup)
+    const r = reconcile(hr.files, hr.roster, view === 'week' ? calculation.period : monthBounds(hr.activePeriod || '2000-01'), policy, hr.resolutions, undefined, hr.dayReviews, coverageLookup)
     return { ...p, days: r.months.reduce((s, m) => s + m.mealDays, 0), bruto: r.months.reduce((s, m) => s + m.bruto, 0), active: (Object.keys(p.patch) as (keyof MealPolicy)[]).every(k => hr.policy[k] === p.patch[k]) }
-  }), [hr.files, hr.roster, hr.activePeriod, hr.policy, hr.resolutions, hr.dayReviews, coverageLookup])
+  }), [hr.files, hr.roster, hr.activePeriod, hr.policy, hr.resolutions, hr.dayReviews, coverageLookup, view, calculation.period.start, calculation.period.end])
 
   const rows = months
     .filter(m => (office === 'Semua' || m.employee.kantor === office) && (!q || `${m.employee.nama} ${m.employee.nip} ${m.employee.unit}`.toLowerCase().includes(q.toLowerCase())))
@@ -125,7 +129,7 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
     <section className="meal-hero">
       <div className="mh-card mh-final"><span className="mh-label"><WalletCards size={14} /> UM final</span><strong>{grossReady ? money.format(total(m => m.bruto)) : 'Pending'}</strong><small>{taxReady ? `Netto ${money.format(total(m => m.netto))} · PPh ${money.format(total(m => m.pph))}` : 'Hari tanpa clash dan setoran lengkap; PPh/netto belum ditetapkan'}</small></div>
       <div className="mh-card mh-est"><span className="mh-label"><Hourglass size={14} /> UM perkiraan</span><strong>{money.format(total(m => m.estimateBruto))}</strong><small>{fmt.format(total(m => m.estimateDays))} hari menunggu setoran lengkap</small></div>
-      <div className="mh-card"><span className="mh-label"><ListChecks size={14} /> Hari UM</span><strong>{fmt.format(total(m => m.mealDays))}</strong><small>{fmt.format(total(m => m.heldDays))} hari ditahan · <button className="link" onClick={() => nav('reconcile')}>keputusan</button></small></div>
+      <div className="mh-card"><span className="mh-label"><ListChecks size={14} /> Hari UM</span><strong>{fmt.format(total(m => m.mealDays))}</strong><small>{outcomeCounts.decision ? <><button className="link" onClick={() => nav('reconcile')}>{fmt.format(outcomeCounts.decision)} menunggu keputusan</button> · </> : null}{fmt.format(outcomeCounts.pending + outcomeCounts.estimate)} menunggu setoran</small></div>
       <div className="mh-card"><span className="mh-label"><Users size={14} /> Pegawai penerima</span><strong>{rows.filter(m => m.mealDays > 0).length}</strong><small>dari {rows.length} pegawai</small></div>
     </section>
 
@@ -149,8 +153,12 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
       </Panel>
     </div>
 
-    {user.role === 'superadmin' && <Panel title="Dampak pilihan aturan" sub="Aturan: scan masuk paling lambat 08:00 dan pulang tidak sebelum jadwal (Sen–Kam 16:00, Jumat 16:30).">
-      <div className="presets">{presetImpact.map(p => <button key={p.id} className={`preset ${p.active ? 'on' : ''}`} onClick={() => hr.setPolicy(p.patch)}>
+    {user.role === 'superadmin' && <Panel title="Dampak pilihan aturan" sub={`${view === 'week' ? `Pekan terpilih, ${formatID(calculation.period.start, { short: true })}–${formatID(calculation.period.end, { short: true })}` : `Akumulasi ${monthLabel(hr.activePeriod)}`}. Aturan: scan masuk paling lambat 08:00 dan pulang tidak sebelum jadwal (Sen–Kam 16:00, Jumat 16:30).`}>
+      <div className="presets">{presetImpact.map(p => <button key={p.id} className={`preset ${p.active ? 'on' : ''}`} onClick={async () => {
+        if (p.active) return
+        // A preset changes the UM rule for every user and every month, so ask first.
+        if (await dialog.confirm({ title: `Terapkan aturan "${p.label}"?`, message: <>Aturan uang makan berubah untuk semua pengguna dan semua bulan. Perkiraan bulan ini: {fmt.format(p.days)} hari, bruto {money.format(p.bruto)}.</>, confirmLabel: 'Terapkan aturan' })) hr.setPolicy(p.patch)
+      }}>
         <strong>{p.label}</strong><small>{p.detail}</small>
         <span>{fmt.format(p.days)} hari · Bruto {money.format(p.bruto)}</span>
       </button>)}</div>
@@ -172,13 +180,13 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
       <div className="table-wrap tall"><table className="data clickable meal-table">
         <thead><tr><th>Pegawai</th><th>Golongan → tarif</th><th>Hari kerja</th><th className="num">Hari UM</th><th className="num">Nominal</th></tr></thead>
         <tbody>{shown.map(m => <tr key={m.employee.id} onClick={() => setDetail(m)} tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDetail(m)}>
-          <td><strong>{m.employee.nama}</strong><small>{m.employee.nip || <span className="warn-text"><AlertTriangle size={11} /> tanpa NIP</span>} · {m.employee.kantor}</small></td>
-          <td>{m.employee.golongan || '—'} → <b>{m.amountPendingDays || m.groupAssumed ? 'tarif pending' : m.employee.rateHistory?.length ? 'tarif harian' : money.format(m.rate)}</b><small>{m.groupAssumed ? 'Kelompok belum diketahui' : `Kelompok ${m.group}`}</small></td>
-          <td><div className="day-strip">{m.days.filter(d => d.workday).map(d => { const o = classify(d); const c = o ? OUTCOME_COLOR[o] : 'transparent'; return <i key={d.date} className={o ? '' : 'future'} style={{ background: c }} title={`${formatID(d.date, { short: true })} · ${o ? OUTCOME_LABEL[o] : 'Belum berlangsung'}${d.meal.reason ? ` — ${d.meal.reason}` : ''}`} /> })}</div></td>
-          <td className="num strong">{m.mealDays}{m.heldDays ? <small className="held">{m.heldDays} ditahan</small> : null}</td>
-          <td className="num">{m.amountPendingDays ? 'Pending' : <strong className="money-final">{money.format(m.bruto)}</strong>}{m.estimateBruto > 0 && <small className="money-est">+ perkiraan {money.format(m.estimateBruto)}</small>}</td>
+          <td data-label="Pegawai"><strong>{m.employee.nama}</strong><small>{m.employee.nip || <span className="warn-text"><AlertTriangle size={11} /> tanpa NIP</span>} · {m.employee.kantor}</small></td>
+          <td data-label="Golongan → tarif">{m.employee.golongan || '—'} → <b>{m.amountPendingDays || m.groupAssumed ? 'tarif pending' : m.employee.rateHistory?.length ? 'tarif harian' : money.format(m.rate)}</b><small>{m.groupAssumed ? 'Kelompok belum diketahui' : `Kelompok ${m.group}`}</small></td>
+          <td data-label="Hari kerja"><div className="day-strip">{m.days.filter(d => d.workday).map(d => { const o = classify(d); const c = o ? OUTCOME_COLOR[o] : 'transparent'; return <i key={d.date} className={o ? '' : 'future'} style={{ background: c }} title={`${formatID(d.date, { short: true })} · ${o ? OUTCOME_LABEL[o] : 'Belum berlangsung'}${d.meal.reason ? ` — ${d.meal.reason}` : ''}`} /> })}</div></td>
+          <td className="num strong" data-label="Hari UM">{m.mealDays}{m.heldDays ? <small className="held">{m.heldDays} ditahan</small> : null}</td>
+          <td className="num" data-label="Nominal">{m.amountPendingDays ? 'Pending' : <strong className="money-final">{money.format(m.bruto)}</strong>}{m.estimateBruto > 0 && <small className="money-est">+ perkiraan {money.format(m.estimateBruto)}</small>}</td>
         </tr>)}{shown.length === 0 && <tr><td colSpan={5} className="muted">Tidak ada pegawai yang cocok. Ubah pencarian atau kantor{outcome ? ', atau hapus filter hasil di atas' : ''}.</td></tr>}</tbody>
-        <tfoot><tr><td>Jumlah ({shown.length} pegawai)</td><td /><td /><td className="num">{fmt.format(shown.reduce((s, m) => s + m.mealDays, 0))}</td><td className="num">{money.format(shown.reduce((s, m) => s + m.bruto, 0))}</td></tr></tfoot>
+        <tfoot><tr><td data-label="Jumlah">Jumlah ({shown.length} pegawai)</td><td /><td /><td className="num" data-label="Hari UM">{fmt.format(shown.reduce((s, m) => s + m.mealDays, 0))}</td><td className="num" data-label="Nominal">{money.format(shown.reduce((s, m) => s + m.bruto, 0))}</td></tr></tfoot>
       </table></div>
     </Panel>
 

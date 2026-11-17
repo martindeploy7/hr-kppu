@@ -104,7 +104,16 @@ export function splitPeople(raw: string): string[] {
     .replace(/,\s*(?:(?:S|M|A|B|D)\.[A-Za-z.]{1,20}|Ph\.?D\.?)\s*(?=,|;|\n|$)/gi, '')
   return text.split(/\n|;|,|\s+dan\s+|\s&\s/i)
     .map(s => s.replace(/^[\s\d.)•\-–]+(?=[A-Za-z])/, '').replace(/\.{2,}$/, '').trim())
-    .filter(s => s.length > 1 && /[A-Za-z]/.test(s) && !isTitleOnly(s))
+    .filter((s, i) => s.length > 1 && /[A-Za-z]/.test(s) && !isTitleOnly(s) && !(i > 0 && isDegreeSuffix(s)))
+}
+
+// Gelar akademik yang ditulis setelah koma ("Tisa Amelia Sapitri,Se.", "Budi, S.H., M.H.") bukan peserta tambahan.
+const DEGREES = new Set(['se', 'sh', 'st', 'ss', 'sp', 'si', 'sip', 'sap', 'spd', 'ssos', 'skom', 'sak', 'sik', 'sked', 'sfarm', 'sag', 'shum', 'spsi', 'sei', 'sm', 'stp', 'mm', 'mh', 'mt', 'msi', 'mkom', 'mpd', 'mak', 'mba', 'msc', 'mag', 'mhum', 'mpp', 'mse', 'amd', 'phd', 'dr', 'drs', 'dra', 'ir'])
+export function isDegreeSuffix(raw: string) {
+  const s = cleanText(raw)
+  // Hanya potongan pendek: nama orang yang kebetulan pendek ("Sri") tetap peserta karena tidak ada di daftar gelar.
+  if (s.length > 10 || /\s{2,}/.test(s)) return false
+  return s.split(/\s+/).every(part => DEGREES.has(part.toLowerCase().replace(/[^a-z]/g, '')))
 }
 
 export function titleCase(s: string) {

@@ -38,7 +38,9 @@ export type DayRecord = {
   issues: Issue[]
   resolved: Resolution[]
   /** estimate: nominal yang akan dibayar bila hari ini hanya tertahan karena setoran pekan belum lengkap. */
-  meal: { state: MealState; reason: string; amount: number; amountReady?: boolean; taxPct?: number; estimate?: number }
+  meal: { state: MealState; reason: string; amount: number; amountReady?: boolean; taxPct?: number; estimate?: number
+    /** Why a held day is held, so summaries can tell "waiting for a weekly submission" from "waiting for an admin decision". */
+    heldBy?: 'coverage' | 'decision' | 'identity' | 'future' | 'other' }
 }
 
 export type EmployeeMonth = {
@@ -136,7 +138,7 @@ export function locationCentroids(files: SourceFile[]): Record<string, [number, 
   return out
 }
 
-export function reconcile(files: SourceFile[], roster: Roster, period: { start: ISODate; end: ISODate }, policy: MealPolicy, resolutions: Resolution[], asOf = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date()), dayReviews: DayReview[] = [], isSourceCoverageComplete?: (office: string, date: ISODate) => boolean): Reconciliation {
+export function reconcile(files: SourceFile[], roster: Roster, period: { start: ISODate; end: ISODate }, policy: MealPolicy, resolutions: Resolution[], asOf = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date()), dayReviews: DayReview[] = [], isSourceCoverageComplete?: ((office: string, date: ISODate) => boolean) & { missing?: (date: ISODate) => string[] }): Reconciliation {
   const sourceFiles = files.filter(f => f.active !== false)
   files = sourceFiles.map(effectiveSource)
   policy = enforcePolicy(policy)
@@ -270,20 +272,22 @@ export function reconcile(files: SourceFile[], roster: Roster, period: { start: 
       rec.sourceCoverageComplete = isSourceCoverageComplete?.(employee.kantor, date) ?? true
       // Nama peserta ST yang belum dicocokkan diperiksa sebelum cakupan setoran, agar perkiraan UM tidak memuat hari yang mungkin dinas.
       const unresolvedSt = unresolvedStByEmployee.get(employee.id)?.find(a => a.start <= date && a.end >= date)
-      if (rec.meal.state === 'eligible' && unresolvedSt) { rec.meal = { state: 'held', amount: 0, reason: `Nama "${unresolvedSt.name}" pada ST ${unresolvedSt.letterNo ?? ''} belum dicocokkan dan bisa jadi pegawai ini; selesaikan di Pencocokan Identitas` }; rec.reviewState = 'flag'; rec.autoValidated = false }
+      if (rec.meal.state === 'eligible' && unresolvedSt) { rec.meal = { state: 'held', heldBy: 'identity', amount: 0, reason: `Nama "${unresolvedSt.name}" pada ST ${unresolvedSt.letterNo ?? ''} belum dicocokkan dan bisa jadi pegawai ini; selesaikan di Pencocokan Identitas` }; rec.reviewState = 'flag'; rec.autoValidated = false }
+      const missingSources = rec.sourceCoverageComplete ? [] : isSourceCoverageComplete?.missing?.(date) ?? []
+      const missingText = missingSources.length ? missingSources.join(', ').replace(/, ([^,]*)$/, ' dan $1') : 'Mesin Offline, Mesin Online, dan Rekap ST'
       if (workday && rec.meal.state === 'eligible' && !rec.sourceCoverageComplete) {
-        rec.meal = { state: 'held', amount: 0, estimate: rec.meal.amountReady ? rec.meal.amount : undefined, reason: 'Setoran pekan ini belum lengkap (Offline, Online, dan ST); UM final setelah ketiga sumber disetor' }
+        rec.meal = { state: 'held', heldBy: 'coverage', amount: 0, estimate: rec.meal.amountReady ? rec.meal.amount : undefined, reason: `Menunggu setoran ${missingText} pekan ini; UM final setelah semua sumber dinyatakan lengkap` }
       }
       if (workday && rec.reviewState === 'not-found' && !rec.decision) {
         rec.meal = rec.sourceCoverageComplete
           ? { state: 'excluded', amount: 0, reason: 'Tidak ada bukti kehadiran pada setoran pekan ini' }
-          : { state: 'held', amount: 0, reason: 'Belum ada data; menunggu setoran pekan ini lengkap' }
+          : { state: 'held', heldBy: 'coverage', amount: 0, reason: `Belum ada data; menunggu setoran ${missingText} pekan ini` }
       }
-      if (unresolvedIdentityEvidence(selectedEvidence, employee.id, roster.identity).length) { rec.meal = { state: 'held', amount: 0, reason: 'Identifier numerik belum terverifikasi; perbaiki/mapping sumber' }; rec.reviewState = 'flag' }
-      if (selectedEvidence.some(e => e.officePending)) { rec.meal = { state: 'held', amount: 0, reason: 'Kantor sumber belum terpetakan; konfirmasi kantor sebelum mereview hari ini' }; rec.reviewState = 'flag' }
+      if (unresolvedIdentityEvidence(selectedEvidence, employee.id, roster.identity).length) { rec.meal = { state: 'held', heldBy: 'identity', amount: 0, reason: 'Identifier numerik belum terverifikasi; perbaiki/mapping sumber' }; rec.reviewState = 'flag' }
+      if (selectedEvidence.some(e => e.officePending)) { rec.meal = { state: 'held', heldBy: 'identity', amount: 0, reason: 'Kantor sumber belum terpetakan; konfirmasi kantor sebelum mereview hari ini' }; rec.reviewState = 'flag' }
       if (date > asOf) {
         rec.status = 'belum-berlangsung'; rec.basis = 'Tanggal setelah waktu analisis'
-        rec.meal = { state: 'held', amount: 0, reason: 'Tanggal belum berlangsung' }
+        rec.meal = { state: 'held', heldBy: 'future', amount: 0, reason: 'Tanggal belum berlangsung' }
         rec.issues = []; rec.resolved = []; rec.reviewState = 'future'; rec.decision = undefined
       }
       records.push(rec)
@@ -376,10 +380,13 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   if (officePresence) candidates.add(complete ? 'hadir' : 'tidak-lengkap')
   if (remoteEv.length) candidates.add(complete ? 'hadir-wfa' : 'tidak-lengkap')
   // Presensi online yang ditolak tidak menjadi clash bila sumber lain sudah membuktikan kehadiran.
-  if (codes.has('WFA') && !remoteEv.length || (rejected.length && !officePresence && !remoteEv.length) || approvalPending || codes.has('T')) candidates.add('tidak-lengkap')
+  // Kode WFA di mesin tanpa jam hanyalah penanda status; bila sumber lain sudah memberi pasangan jam lengkap, itu bukan konflik.
+  if (codes.has('WFA') && !remoteEv.length && !complete || (rejected.length && !officePresence && !remoteEv.length) || approvalPending || codes.has('T')) candidates.add('tidak-lengkap')
   // Hadir di kantor vs hadir WFA sama-sama kehadiran: bila satu pasangan jam sudah dipilih (putusan sama atau keputusan
   // admin), jenis kehadiran mengikuti pasangan itu dan tidak menjadi konflik status.
   if (agreedPair && candidates.has('hadir') && candidates.has('hadir-wfa')) candidates.delete(agreedPair.kind === 'daring' && agreedPair.mode === 'WFA' ? 'hadir' : 'hadir-wfa')
+  // Jam identik di mesin kantor dan presensi WFA: putusan UM sama, jadi info saja; scan mesin kantor yang dipakai.
+  else if (complete && candidates.has('hadir') && candidates.has('hadir-wfa')) candidates.delete(paired.some(e => OFFICE_KINDS.includes(e.kind)) ? 'hadir-wfa' : 'hadir')
   // Clash hanya bila salah satu sisi benar-benar bisa mendapat UM (pasangan jam lengkap, masuk ≤ batas, pulang ≥ jadwal).
   // Bila semua kemungkinan berujung tanpa UM (mis. kode DL + scan masuk saja), status dipilih otomatis dan dicatat sebagai info.
   const couldEarnMeal = complete && !!clockIn && !!clockOut && onTime(clockIn) && (!official || clockOut >= official.end)
@@ -402,6 +409,8 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   }
   else if (partialDay) { status = 'tidak-ada-data'; basis = 'Data mesin tanggal ini belum lengkap saat diekspor' }
   else if (covered && codes.has('X')) { status = 'tanpa-keterangan'; basis = 'Bukti absensi mencatat Absent tanpa pengecualian; menunggu keputusan admin' }
+  // Status grid presensi daring (mis. "WFA - hadir" tanpa jam) adalah bukti, tetapi tidak membuktikan masuk ≤ 08:00.
+  else if (evs.some(e => e.present && !e.clockIn && !e.clockOut)) { status = 'tidak-lengkap'; basis = 'Hanya status presensi daring tanpa jam; tidak cukup untuk uang makan' }
   else { status = 'tidak-ada-data'; basis = 'Belum ditemukan bukti absensi atau keterangan pada tanggal ini' }
   if (dayReview) { status = dayReview.status; basis = `Ditetapkan ${dayReview.reviewer}: ${STATUS_LABEL[dayReview.status]}` }
 
@@ -417,7 +426,7 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   const scanAtOffice = officeEv.some(hasTimes) || daringWfo.length > 0
   if ((pdCode || stOut.length) && scanAtOffice) {
     const edge = stOut.some(a => a.start === date || a.end === date)
-    const sev: Severity = stOut.length ? (edge ? 'rendah' : 'tinggi') : 'sedang'
+    const sev: Severity = stOut.length ? (edge ? 'sedang' : 'tinggi') : 'sedang'
     add('dinas-vs-scan-kantor', sev, `${stOut.length ? `ST ${stOut.map(a => a.letterNo ?? '(tanpa nomor)').join(', ')} ${stOut[0].start === stOut[0].end ? formatID(stOut[0].start) : `${formatID(stOut[0].start, { year: false })}–${formatID(stOut[0].end)}`}` : 'Kode perjalanan dinas'} tetapi ada absen kantor ${clockIn ?? ''}${clockOut ? `–${clockOut}` : ''}.${edge ? ' Tanggal ini hari berangkat/pulang, sehingga scan pagi masih wajar.' : ''}`, couldEarnMeal)
   }
   if (leaveCode && presenceEv.some(hasTimes)) add('cuti-vs-hadir', 'sedang', `${DAY_CODE_LABEL[leaveCode as 'S']} tercatat, namun ada jam hadir ${clockIn ?? '—'}–${clockOut ?? '—'}.`, couldEarnMeal)
@@ -461,9 +470,9 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
     if (!r || r.signature !== issue.signature) continue
     resolved.push(r)
     // Admin memilih absensi sebagai bukti yang valid (mis. ST batal); berlaku juga bila ada ST/kode dinas.
-    if (!dayReview && r.decision === 'akui-hadir') { finalStatus = complete ? (remoteEv.length && !officePresence ? 'hadir-wfa' : 'hadir') : 'tidak-lengkap'; finalBasis = `Diputuskan HR: hadir (${r.reviewer})` }
-    if (!dayReview && r.decision === 'akui-dinas') { finalStatus = 'dinas-luar'; finalBasis = `Diputuskan HR: dinas (${r.reviewer})` }
-    if (!dayReview && r.decision === 'tidak-hadir') { finalStatus = 'tanpa-keterangan'; finalBasis = `Diputuskan HR: tidak sah (${r.reviewer})` }
+    if (!dayReview && r.decision === 'akui-hadir') { finalStatus = complete ? (remoteEv.length && !officePresence ? 'hadir-wfa' : 'hadir') : 'tidak-lengkap'; finalBasis = `Diputuskan admin: hadir (${r.reviewer})` }
+    if (!dayReview && r.decision === 'akui-dinas') { finalStatus = 'dinas-luar'; finalBasis = `Diputuskan admin: dinas (${r.reviewer})` }
+    if (!dayReview && r.decision === 'tidak-hadir') { finalStatus = 'tanpa-keterangan'; finalBasis = `Diputuskan admin: tidak sah (${r.reviewer})` }
   }
   const open = issues.filter(i => !resolved.some(r => r.issueId === i.id))
   if (partialDay && finalStatus === 'tidak-lengkap' && clockIn && !clockOut) { finalStatus = remoteEv.length && !officePresence ? 'hadir-wfa' : 'hadir'; finalBasis = `${finalBasis} — jam pulang belum tersinkron (ekspor belum lengkap)` }
@@ -482,7 +491,7 @@ function evaluateDay(employee: Employee, date: ISODate, workday: boolean, covere
   const autoMeal = settled && meal.state === 'held' && (finalStatus === 'tidak-lengkap' || finalStatus === 'tidak-ada-data') && !partialDay
     ? { state: 'excluded' as const, reason: rawEvidence.some(e => e.present && !e.clockIn) ? `Sumber hanya mencatat kode ${rawEvidence.find(e => e.present && !e.clockIn)?.codeLabel ?? 'kehadiran'} tanpa jam; tidak membuktikan masuk ≤ 08:00` : finalStatus === 'tidak-ada-data' ? 'Sumber mencatat hari ini tanpa scan maupun keterangan; admin dapat mengoreksi lewat rekonsiliasi' : 'Scan masuk/pulang tidak lengkap atau presensi online tidak disetujui; admin dapat mengoreksi lewat rekonsiliasi', amount: 0 }
     : meal
-  const finalMeal = reviewHeld ? { state: 'held' as const, reason: reviewError ? `Keputusan perlu diperbarui: ${reviewError}` : hasSource ? 'Clash antar-sumber: menunggu admin memilih bukti yang valid' : 'Belum ditemukan data absensi', amount: 0 } : autoMeal
+  const finalMeal = reviewHeld ? { state: 'held' as const, heldBy: 'decision' as const, reason: reviewError ? `Keputusan perlu diperbarui: ${reviewError}` : hasSource ? 'Clash antar-sumber: menunggu admin memilih bukti yang valid' : 'Belum ditemukan data absensi', amount: 0 } : autoMeal
   return { employeeId: employee.id, date, workday, covered, sourceCoverageComplete: true, reviewState, autoValidated, reviewSignature, decision: dayReview, reviewError, evidence: rawEvidence, assignments: rawAssignments, status: finalStatus, basis: finalBasis, clockIn, clockOut, scheduleKnown, lateMin, earlyMin, overtimeMin, complete, timeKnown, issues, resolved, meal: finalMeal }
 }
 

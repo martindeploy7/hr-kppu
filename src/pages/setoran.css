@@ -121,3 +121,14 @@ button.hero-tile { cursor: pointer; }
   .src-cell { min-height: 44px; }
   .submission-workspace .week-picker { width: 100%; }
 }
+
+/* Label sumber pada papan setoran: kolom berjudul di desktop, label singkat terlihat di mobile (bukan hanya ikon) */
+.src-short{display:none}
+.src-cell{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+@media(max-width:760px){
+.src-short{display:block;color:var(--ink-soft);font-size:var(--fs-xs);font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.board-cols .src-cell{align-items:stretch}
+.office-source-extra .link,.setoran-page .note .link{display:inline-flex;align-items:center;min-height:44px;padding-block:0}
+.setoran-page select,.setoran-page .warn-toggle{min-height:44px}
+.setoran-page .page-head small{flex-basis:100%}
+}

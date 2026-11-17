@@ -92,15 +92,16 @@ export function inspectOfficeCoverage(files: SourceFile[], start: ISODate, end: 
 }
 
 /** Hari dianggap tercakup bila ketiga sumber pekan tersebut sudah disetor (atau ST dinyatakan nihil). */
+const SOURCE_NAME: Record<CoverageSource, string> = { offline: 'Mesin Offline', online: 'Mesin Online', 'surat-tugas': 'Rekap ST' }
+/** Coverage is KPPU-wide (one confirmation covers Pusat and Kanwil I–VII), so the office argument is ignored. */
 export function createCoverageLookup(files: SourceFile[]) {
-  const cache = new Map<string, boolean>()
-  return (_office: string, date: ISODate) => {
-    const cached = cache.get(date)
-    if (cached !== undefined) return cached
-    const ready = inspectSourceCoverage(files, date, date).every(item => item.ready)
-    cache.set(date, ready)
-    return ready
+  const cache = new Map<string, string[]>()
+  const missing = (date: ISODate) => {
+    let cached = cache.get(date)
+    if (!cached) { cached = inspectSourceCoverage(files, date, date).filter(item => !item.ready).map(item => SOURCE_NAME[item.source]); cache.set(date, cached) }
+    return cached
   }
+  return Object.assign((_office: string, date: ISODate) => missing(date).length === 0, { missing })
 }
 
 export function inspectMonthlyPackage(files: SourceFile[], period: string, offices: string[] = OFFICES): MonthlyPackage {

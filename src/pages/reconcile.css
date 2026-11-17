@@ -75,3 +75,6 @@
 .recon .cell{transition:none}
 @media(max-width:1100px){.recon .rc-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.rc-compare{grid-template-columns:1fr}.recon .rc-tiles{grid-template-columns:1fr 1fr}.rc-btn{width:100%;min-height:44px}.rc-card{padding:12px}.rc-link{min-height:44px}.recon .search{flex-basis:100%;min-width:0}.recon .pager{flex-wrap:wrap}}
+.rc-queue-title{display:flex;align-items:baseline;gap:10px;margin:0 0 10px;color:var(--brand-navy);font:700 var(--fs-lg) Manrope,'DM Sans',sans-serif}
+.rc-queue-title span{color:var(--ink-muted);font:600 var(--fs-sm) 'DM Sans',sans-serif}
+.rc-queue-title:focus-visible{outline:2px solid var(--focus);outline-offset:3px;border-radius:var(--radius-sm)}

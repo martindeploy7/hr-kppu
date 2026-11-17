@@ -21,7 +21,11 @@ describe('cakupan setoran pada rekonsiliasi', () => {
     expect(result.reviewState).toBe('valid')
     expect(result.sourceCoverageComplete).toBe(false)
     expect(result.meal.state).toBe('held')
-    expect(result.meal.reason).toContain('Setoran pekan ini belum lengkap')
+    expect(result.meal.heldBy).toBe('coverage')
+    expect(result.meal.reason).toContain('Menunggu setoran')
+    // With a real lookup the reason names exactly the sources that are still missing.
+    const named = reconcile(files, roster, range, policy, [], '2026-10-06', [review], createCoverageLookup(files)).months[0].days[0]
+    expect(named.meal.reason).toMatch(/Menunggu setoran .*Mesin Online/)
   })
 
   test('cakupan yang baru dilengkapi membuat hari valid masuk hitungan progresif', () => {

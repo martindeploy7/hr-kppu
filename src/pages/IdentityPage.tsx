@@ -5,6 +5,7 @@ import { mergeKey, type IdentityItem } from '../engine/roster.ts'
 import type { Employee } from '../engine/types.ts'
 import { fmt } from '../lib/format.ts'
 import { Empty, Kpi, Note, PageHeader, Panel, Seg } from '../components/ui.tsx'
+import { useDialog } from '../components/Dialog.tsx'
 import type { Nav } from '../App.tsx'
 import './identity.css'
 
@@ -14,8 +15,15 @@ function SourceList({ sources }: { sources: string[] }) {
   return <span className="src-list">{(open || rest <= 0 ? sources : sources.slice(0, 3)).join(', ')}{rest > 0 && <> <button type="button" className="link" aria-expanded={open} onClick={() => setOpen(v => !v)}>{open ? 'Sembunyikan' : `+${rest} file lainnya`}</button></>}</span>
 }
 
-export function IdentityPage({ nav, toast }: { nav: Nav; toast: (m: string) => void }) {
+export function IdentityPage({ nav, toast }: { nav: Nav; toast: (m: string, undo?: () => void) => void }) {
   const hr = useHr()
+  const dialog = useDialog()
+  const merge = async (from: Employee, into: Employee, label: string) => {
+    // Penggabungan mengubah identitas di seluruh perhitungan; tidak ada tombol urung di daftar ini, jadi minta konfirmasi dulu.
+    const ok = await dialog.confirm({ title: 'Gabungkan dua identitas?', message: <>{from.nama}{from.nip ? ` (${from.nip})` : ''} akan digabung ke {into.nama}{into.nip ? ` (${into.nip})` : ''}. Seluruh absensi, ST, dan keputusan atas {label} dihitung sebagai satu pegawai. Penggabungan ini tidak dapat diurungkan dari halaman ini.</>, confirmLabel: 'Gabungkan', tone: 'danger' })
+    if (!ok) return
+    hr.decide(mergeKey(from.id), into.id); toast(`${from.nama} digabung ke ${into.nip ? `NIP ${into.nip}` : into.nama}`)
+  }
   const [tab, setTab] = useState<'perlu' | 'tanpa-nip' | 'otomatis'>('perlu')
   const { identity, conflicts, byId, employees } = hr.roster
   const st = identity.filter(i => i.context === 'surat-tugas')
@@ -53,9 +61,9 @@ export function IdentityPage({ nav, toast }: { nav: Nav; toast: (m: string) => v
           <div className="conflict-people">{emps.map(e => <div key={e.id}><strong>{e.nama}</strong><span>{e.nip || 'tanpa NIP'}{e.nika ? ` · NIKA ${e.nika}` : ''}</span><small>{e.kantor} · {e.unit || '—'} · <SourceList sources={e.sources} /></small></div>)}</div>
           <p>{c.detail}</p>
           <div className="row-actions">
-            {c.kind === 'nip-berbeda' && emps.length === 2 && <button className="btn primary" onClick={() => { hr.decide(mergeKey(emps[1].id), emps[0].id); toast(`${emps[1].nama} digabung ke NIP ${emps[0].nip || emps[0].id}`) }}><GitMerge size={14} /> Gabungkan (pakai NIP {emps[0].nip ? `…${emps[0].nip.slice(-4)}` : 'pertama'})</button>}
-            {c.kind === 'nip-berbeda' && emps.length === 2 && emps[1].nip && <button className="btn secondary" onClick={() => { hr.decide(mergeKey(emps[0].id), emps[1].id); toast('Digabung') }}>Pakai NIP …{emps[1].nip.slice(-4)}</button>}
-            <button className="btn secondary" onClick={() => { hr.decide(c.key, null); toast('Ditandai sebagai orang berbeda') }}>Orang berbeda</button>
+            {c.kind === 'nip-berbeda' && emps.length === 2 && <button className="btn primary" onClick={() => void merge(emps[1], emps[0], emps[1].nama)}><GitMerge size={14} /> Gabungkan (pakai NIP {emps[0].nip ? `…${emps[0].nip.slice(-4)}` : 'pertama'})</button>}
+            {c.kind === 'nip-berbeda' && emps.length === 2 && emps[1].nip && <button className="btn secondary" onClick={() => void merge(emps[0], emps[1], emps[0].nama)}>Pakai NIP …{emps[1].nip.slice(-4)}</button>}
+            <button className="btn secondary" onClick={() => { hr.decide(c.key, null); toast('Ditandai sebagai orang berbeda', () => hr.undoDecision(c.key)) }}>Orang berbeda</button>
           </div>
         </div>
       })}</div>
@@ -78,9 +86,16 @@ export function IdentityPage({ nav, toast }: { nav: Nav; toast: (m: string) => v
 function IdentityRow({ item, toast, decided, compact, absensi }: { item: IdentityItem; toast: (m: string) => void; decided: boolean; compact?: boolean; absensi?: boolean }) {
   const hr = useHr()
   const [search, setSearch] = useState(false)
+  const dialog = useDialog()
   const linked = item.employeeId ? hr.roster.byId.get(item.employeeId) : undefined
-  const pick = (id: string | null) => {
-    if (absensi && id && item.employeeId) { hr.decide(mergeKey(item.employeeId), id); toast(`"${item.name}" digabung`) }
+  const pick = async (id: string | null) => {
+    if (absensi && id && item.employeeId) {
+      // Same irreversible merge as the Konflik panel, so it gets the same confirmation.
+      const target = hr.roster.byId.get(id)
+      const ok = await dialog.confirm({ title: 'Gabungkan dua identitas?', message: <>{item.name} akan digabung ke {target?.nama ?? 'pegawai terpilih'}{target?.nip ? ` (NIP ${target.nip})` : ''}. Semua catatan absensinya ikut pindah.</>, confirmLabel: 'Gabungkan' })
+      if (!ok) return
+      hr.decide(mergeKey(item.employeeId), id); toast(`"${item.name}" digabung`)
+    }
     else { hr.decide(item.key, id); toast(id ? `"${item.name}" ditautkan` : `"${item.name}" diabaikan`) }
     setSearch(false)
   }

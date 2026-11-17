@@ -34,3 +34,16 @@
 .meal-page .select{max-width:100%}
 .meal-how{margin:4px 0 8px}
 .meal-how>summary{cursor:pointer;color:var(--info);font-size:var(--fs-sm);font-weight:600;padding:6px 0}
+
+/* Mobile: daftar nominatif jadi kartu bertumpuk agar HARI UM dan NOMINAL selalu terlihat tanpa geser horizontal */
+@media(max-width:760px){
+.meal-page .meal-table,.meal-page .meal-table tbody,.meal-page .meal-table tfoot{display:block;width:100%}
+.meal-page .meal-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.meal-page .meal-table tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 12px;padding:12px;border-top:1px solid var(--line)}
+.meal-page .meal-table td{display:block;min-width:0;padding:0;border:0;text-align:left}
+.meal-page .meal-table td[data-label="Pegawai"],.meal-page .meal-table td[data-label="Golongan → tarif"],.meal-page .meal-table td[data-label="Hari kerja"],.meal-page .meal-table td[data-label="Jumlah"]{grid-column:1/-1}
+.meal-page .meal-table td.num::before{content:attr(data-label);display:block;color:var(--ink-muted);font-size:var(--fs-2xs);font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.meal-page .meal-table td:empty{display:none}
+.meal-page .meal-table tfoot tr{background:var(--surface-warm);font-weight:700}
+.meal-page .meal-table td[colspan]{grid-column:1/-1}
+}

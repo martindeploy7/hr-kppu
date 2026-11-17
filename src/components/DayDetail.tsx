@@ -27,10 +27,10 @@ export function DayDetail({ day, showMeal = true, canReview = false }: { day: Da
     {evidence.length > 0 ? <div className="table-wrap"><table className="evidence">
       <thead><tr><th>Sumber</th><th>Masuk</th><th>Pulang</th><th>Keterangan</th><th>Rujukan</th></tr></thead>
       <tbody>{evidence.map(e => <tr key={e.id}>
-        <td><SourceChip kind={e.kind} /><small>{e.office}</small></td>
-        <td className="mono">{e.clockIn ?? (e.present ? 'hadir*' : '—')}</td>
-        <td className="mono">{e.clockOut ?? (e.present && !e.incomplete ? 'hadir*' : '—')}</td>
-        <td>
+        <td data-label="Sumber"><SourceChip kind={e.kind} /><small>{e.office}</small></td>
+        <td className="mono" data-label="Masuk">{e.clockIn ?? (e.present ? 'hadir*' : '—')}</td>
+        <td className="mono" data-label="Pulang">{e.clockOut ?? (e.present && !e.incomplete ? 'hadir*' : '—')}</td>
+        <td data-label="Keterangan">
           {e.code && <span className="code">{DAY_CODE_LABEL[e.code]}{e.codeLabel && e.codeLabel !== e.code ? ` · "${e.codeLabel}"` : ''}</span>}
           {e.mode && <span className="code">{e.mode}{e.approvalStatus ? ` · ${APPROVAL_LABEL[e.approvalStatus]}` : ''}</span>}
           {e.location && <span className="loc"><MapPin size={11} /> {e.location}{e.coordIn ? ` (${e.coordIn[0].toFixed(4)}, ${e.coordIn[1].toFixed(4)})` : ''}</span>}
@@ -44,7 +44,7 @@ export function DayDetail({ day, showMeal = true, canReview = false }: { day: Da
           {e.officePending && <span className="flag">Kantor perlu dikonfirmasi</span>}
           {e.notes?.map(n => <span key={n} className="flag">{NOTE_LABEL[n] ?? n}</span>)}
         </td>
-        <td><small title={fileName(e.fileId)}>{fileName(e.fileId)}</small><small>{e.ref}</small>{hr.files.find(f => f.id === e.fileId) && <RecordReview file={hr.files.find(f => f.id === e.fileId)!} kind="evidence" recordId={e.id} />}</td>
+        <td data-label="Rujukan"><small title={fileName(e.fileId)}>{fileName(e.fileId)}</small><small>{e.ref}</small>{hr.files.find(f => f.id === e.fileId) && <RecordReview file={hr.files.find(f => f.id === e.fileId)!} kind="evidence" recordId={e.id} />}</td>
       </tr>)}</tbody>
     </table></div> : <p className="muted small">Tidak ada catatan absensi pada tanggal ini. Periksa apakah setoran pekan ini sudah lengkap.</p>}
     {day.evidence.some(e => e.present) && <p className="muted small">* Sumber hanya mencatat kode "Normal" tanpa jam.</p>}

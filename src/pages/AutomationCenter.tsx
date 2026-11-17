@@ -57,7 +57,7 @@ export function AutomationCenter({ toast }: { toast: (m: string) => void }) {
 
   const heading = <div className="page-heading"><div><h2>Automation Center</h2><p>Pantau pengiriman WhatsApp, atur aturan otomatis, dan kelola kampanye HR.</p>
     <details className="ac-how"><summary>Cara kerja</summary><p>Halaman ini diperbarui otomatis tiap 10 detik. Mode uji mengalihkan semua pesan ke nomor uji. Simulasi menandai pesan terkirim tanpa menghubungi WhatsApp. Jeda menahan seluruh antrean.</p></details></div></div>
-  if (!canRead) return <>{heading}<div className="card ac-notice"><ShieldCheck size={22} /><p>Halaman ini dikelola oleh HR dan Superadmin.</p></div></>
+  if (!canRead) return <>{heading}<div className="card ac-notice"><ShieldCheck size={22} /><p>Halaman ini hanya untuk Superadmin dan Admin.</p></div></>
 
   return <div className="ac-page">
     {heading}

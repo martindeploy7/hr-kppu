@@ -1,5 +1,5 @@
 import type { Cell, Sheet } from '../engine/types.ts'
-import { unzipSync, strFromU8 } from 'fflate'
+import { unzipSync, zipSync, strFromU8 } from 'fflate'
 
 let mod: Promise<typeof import('xlsx')> | undefined
 export const loadXlsx = () => (mod ??= import('xlsx'))
@@ -54,5 +54,14 @@ export async function downloadWorkbook(fileName: string, sheets: { name: string;
     if (s.widths) ws['!cols'] = s.widths.map(wch => ({ wch }))
     XLSX.utils.book_append_sheet(wb, ws, s.name.slice(0, 31))
   }
-  XLSX.writeFile(wb, fileName)
+  // SheetJS menulis zip tanpa kompresi memadai (XML teks utuh, ±16 MB untuk satu bulan). Tulis tanpa kompresi dengan
+  // string bersama, lalu kemas ulang dengan deflate tingkat 9 (fflate): isi sel tidak berubah, ukuran turun sekitar 10x.
+  const raw = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx', compression: false, bookSST: true }) as ArrayBuffer)
+  const files = unzipSync(raw)
+  const packed = zipSync(Object.fromEntries(Object.entries(files).map(([name, data]) => [name, [data, { level: 9 }] as [Uint8Array, { level: 9 }]])))
+  const url = URL.createObjectURL(new Blob([packed as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
+  const link = document.createElement('a')
+  link.href = url; link.download = fileName
+  document.body.append(link); link.click(); link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }

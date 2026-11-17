@@ -81,6 +81,18 @@ describe('POST /api/rekap-st (satu ST, banyak pegawai, rentang tanggal)', () => 
     expect(rows).toHaveLength(2)
     expect(rows.every(row => row.office === 'Pusat')).toBe(true)
   })
+  test('a new ST from any office reopens the KPPU-wide "lengkap" confirmation for that month', async () => {
+    expect((await post({ letterNo: '600/', employeeIds: ['1'], startDate: '2026-06-02', endDate: '2026-06-02' })).status).toBe(201)
+    const [w] = await connection.db.select().from(workspaces).where(eq(workspaces.id, 'default'))
+    const pusat = w.state.files.find(file => file.id.startsWith('manual-st:') && file.office === 'Pusat' && file.assignments.some(a => a.letterNo === '600/'))!
+    pusat.coverageDeclarations = [{ start: '2026-06-01', end: '2026-06-30', status: 'complete', basis: 'Rekap ST Juni sudah lengkap', actorId: 'x', at: '2026-07-01T00:00:00Z' }]
+    await connection.db.update(workspaces).set({ state: w.state, revision: w.revision + 1 }).where(eq(workspaces.id, 'default'))
+    expect((await post({ letterNo: '601/', registerOffice: 'Kanwil I', employeeIds: ['4'], startDate: '2026-06-10', endDate: '2026-06-10' })).status).toBe(201)
+    const [after] = await connection.db.select().from(workspaces).where(eq(workspaces.id, 'default'))
+    const reopened = after.state.files.find(file => file.id === pusat.id)!.coverageDeclarations!
+    expect(reopened.map(d => d.status)).toEqual(['partial'])
+    expect(reopened[0].basis).toContain('dibuka kembali setelah input ST 601/ (Kanwil I)')
+  })
   test('unknown employee is 422 and writes nothing', async () => {
     const before = (await manualRows()).length
     expect((await post({ letterNo: '500/', employeeIds: ['1', 'ghost'], startDate: '2026-04-20', endDate: '2026-04-20' })).status).toBe(422)

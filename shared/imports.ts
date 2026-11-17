@@ -63,7 +63,10 @@ export type ImportChange = { kind: 'presensi' | 'surat-tugas' | 'master'; status
 export type ImportDaySummary = { status: string; mealState: string; amount: number; amountReady: boolean; clockIn: string; clockOut: string; issues: number }
 export type ImportReviewImpact = { computed: boolean; touchedDates: number; changedDays: number; newlyHeld: number; changedAmounts: number; issuesBefore: number; issuesAfter: number; examples: { employeeId: string; name: string; date: string; before: ImportDaySummary; after: ImportDaySummary }[]; note?: string }
 export type ImportImpactResponse = {
-  checksum: string; revision: number; mode: ImportMode; source: { id: string; kind: SourceKind; office: string; parsedRows: number; selectedRows: number; omittedMasterCount: number }
+  checksum: string; revision: number; mode: ImportMode
+  /** Set when a 'complete' coverage claim extends past the last date in the uploaded attendance file. */
+  coverageNote?: string
+  source: { id: string; kind: SourceKind; office: string; parsedRows: number; selectedRows: number; omittedMasterCount: number }
   counts: ImportCounts; changes: ImportChange[]; offset: number; limit: number; totalChanges: number; hasMore: boolean
   registers?: { incomingKey: string; label: string; selectedRows: number; targetCount: number; counts: ImportCounts }[]
   replacedScopes: { sourceId: string; registerKey: string; label: string; rows: number }[]
