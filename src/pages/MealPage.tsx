@@ -225,8 +225,8 @@ function PolicyEditor() {
         <div className="toggle-row"><span><strong>Jam masuk dan pulang</strong><small>Masuk paling lambat 08:00 dan pulang paling cepat 16:30, sama untuk setiap hari kerja. Hanya jam masuk atau hanya jam pulang tidak dapat uang makan. Aturan ini tetap dan tidak bisa diubah dari sini.</small></span></div>
         {toggle('parametersApproved', 'Parameter uang makan telah diverifikasi', 'Sahkan setelah tarif bruto dan kalender libur dikonfirmasi.')}
         {toggle('taxParametersApproved', 'Parameter PPh/netto telah disahkan', 'PPh dan netto baru dihitung setelah aturan pajak resmi disahkan; angka awal tidak digunakan otomatis.')}
-        {toggle('countWfa', 'WFA dihitung hadir', 'Presensi WFA lewat aplikasi yang disetujui.')}
-        {toggle('holdOnIssues', 'Tahan hari yang punya isu terbuka', 'Mis. dinas luar tapi scan di kantor, jam diisi manual.')}
+        <div className="toggle-row"><span><strong>WFA dihitung hadir</strong><small>Presensi WFA lewat aplikasi yang disetujui selalu dihitung hadir. Aturan ini tetap dan tidak bisa diubah dari sini.</small></span></div>
+        <div className="toggle-row"><span><strong>Hari yang punya isu terbuka ditahan</strong><small>Mis. dinas luar tapi scan di kantor, jam diisi manual. Hari tersebut selalu ditahan sampai isunya diputuskan. Aturan ini tetap dan tidak bisa diubah dari sini.</small></span></div>
         {toggle('includeNonAsn', 'Bayar pegawai non-ASN', 'NIP placeholder (0000…) di aplikasi HP.')}
       </div>
       <div className="rates">

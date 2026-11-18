@@ -1,6 +1,6 @@
 # Panduan Presentasi Website Produksi KPPU HR
 
-Tanggal: 27 Oktober 2026  
+Tanggal: 18 November 2026  
 Website: <https://absensi-kkpu.onrender.com/>  
 Durasi utama: sekitar 25 menit  
 Audiens: SDM, Keuangan, pimpinan, dan perwakilan Kanwil
@@ -22,7 +22,7 @@ Lakukan persiapan sekitar 15 menit sebelum jadwal presentasi.
 
 1. Buka website dan tunggu hingga halaman login atau ruang kerja tampil. Buka lebih awal agar waktu pemuatan layanan selesai sebelum sesi.
 2. Masuk dengan akun Admin/SDM yang cakupannya seluruh kantor. Untuk bagian persetujuan, siapkan akun Keuangan berbeda pada profil browser lain.
-3. Tentukan periode yang sudah memiliki data. September 2026 dapat dipakai apabila paket latihan bulan tersebut memang sudah diimpor ke produksi.
+3. Tentukan periode yang sudah memiliki data. Untuk demo ini pakai **April 2026**, karena dataset demo di produksi ada di bulan itu (lihat bagian Data demo di produksi di bawah).
 4. Periksa **Impor Sumber**: Mesin Offline, Mesin Online, dan ST Pusat serta Kanwil I sampai VII harus siap untuk membuka rekonsiliasi.
 5. Pilih satu pegawai dengan bukti lengkap, satu pegawai dengan isu, dan satu hari tanpa bukti jika tersedia. Catat nama dan tanggalnya pada lembar persiapan di bawah.
 6. Buka **Uang Makan** untuk mengetahui kondisi aktual: bruto sudah muncul, tarif pending, atau PPh/netto belum ditetapkan. Gunakan kondisi tersebut dalam narasi.
@@ -31,7 +31,27 @@ Lakukan persiapan sekitar 15 menit sebelum jadwal presentasi.
 
 Paket latihan lokal yang pernah dibuat tersedia di [folder dummy manual](../artifacts/dummy-manual-e2e-2026-09/README.md). Keberadaan folder tersebut tidak berarti seluruh datanya telah diunggah ke produksi.
 
-Variasi 8 pegawai dan 15 jenis isu yang baru ditambahkan berada pada demo Netlify. Untuk presentasi produksi, pilih contoh dari data yang benar-benar terlihat setelah login. Jangan mengharapkan nama, tanggal, atau angka demo muncul otomatis di produksi.
+Variasi 8 pegawai dan 15 jenis isu yang baru ditambahkan berada pada demo Netlify, bukan di produksi. Produksi punya dataset demo sendiri, dijelaskan di bawah.
+
+### Catatan teknis: website produksi di Render Free
+
+Produksi berjalan di Render Free (RAM 512 MB, CPU 0,1) di Singapura, jadi ada beberapa hal praktis yang perlu diingat presenter.
+
+- **Buka 1 sampai 2 menit sebelum mulai.** Website tertidur setelah 15 menit tanpa akses, dan bangun lagi (cold start) butuh sekitar 1 menit. Bila jeda sejak terakhir dibuka lebih dari 15 menit, muat ulang lagi sebelum sesi.
+- **Menyimpan unggahan atau keputusan clash pada bulan yang penuh bisa makan 20 sampai 60 detik.** Tunggu sampai status tersimpan muncul. Jangan klik dua kali.
+- **Jika muncul 502**, tunggu sekitar satu menit lalu muat ulang halaman. Data aman di database.
+
+### Data demo di produksi
+
+Produksi sekarang berisi dataset demo: master pegawai sintetis (386 orang; hanya nama dan NIP/NI PPPK yang asli, field lain sintetis) dan sumber April 2026 per pekan (Mesin Offline, Mesin Online, Rekap ST) untuk pekan 1 sampai 5. Pilih periode **April 2026**. Tiga pegawai berikut cocok sebagai contoh:
+
+| Pegawai | Yang ditunjukkan | Angka acuan |
+| --- | --- | --- |
+| Cepi Sumantri | Pegawai bersih tanpa isu. | 21 hari UM, Rp 735.000 |
+| Fitri Ayundhani | Clash terbuka pada 13 April 2026. Setelah admin memilih **Akui hadir**, UM naik. | Rp 518.000 menjadi Rp 555.000 |
+| Rifqi Maulana | Pada 8 April hanya ada jam pulang 18:48, tanpa jam masuk, jadi hari itu tidak dapat UM. | Total Rp 665.000 |
+
+Semua angka di tabel adalah **angka acuan, cocokkan saat demo**. Catat angka yang benar-benar tampil pada lembar persiapan di bawah. Memutuskan clash Fitri mengubah data bersama (lihat langkah 7 di atas), jadi putuskan sebelum sesi apakah keputusannya akan benar-benar disimpan.
 
 ### Lembar persiapan presenter
 
@@ -187,7 +207,7 @@ Gunakan contoh yang memang tersedia. Cukup dua atau tiga kasus untuk menunjukkan
 | Contoh | Yang ditunjukkan | Pesan utama |
 | --- | --- | --- |
 | Telat check-in | Jam masuk, menit keterlambatan, dan alasan UM. | Hari bisa valid sebagai hadir, sementara UM gugur karena ketentuan waktu. |
-| Tidak check-out atau tidak check-in | Salah satu jam kosong pada bukti. | UM menunggu bukti yang lengkap; status hadir tidak boleh disahkan dari pasangan jam yang belum tersedia. |
+| Tidak check-out atau tidak check-in | Salah satu jam kosong pada bukti. | Hari itu tidak dapat UM dan alasannya tertulis jelas, misalnya "Hanya ada jam masuk 07:45, tanpa jam pulang; tidak dapat UM". Status hadir tetap tidak boleh disahkan dari pasangan jam yang belum tersedia. |
 | Offline + online + ST pada hari sama | Catatan absensi dan daftar ST dalam satu detail hari. | Beberapa sumber tidak otomatis dijumlah menjadi beberapa hari hadir; admin menetapkan aktivitas yang berlaku untuk tanggal itu. |
 | WFA | Bukti online dengan mode WFA dan pasangan jam lengkap. | WFA dapat menjadi hari UM setelah divalidasi dan memenuhi ketentuan waktu. |
 | Dinas | ST yang mencakup tanggal tersebut. | Hari tetap tercatat sebagai aktivitas dinas; pada aturan aplikasi saat ini dinas tidak masuk UM. |
@@ -215,6 +235,14 @@ Untuk melihat daftar permasalahan menurut kategori, beralih ke **Detail isu**. T
 
 > “Hasil bertambah dari hari yang sudah sah dan memenuhi ketentuan. Petugas dapat melihat hasil yang sudah siap meskipun pemeriksaan hari atau pegawai lain masih berjalan.”
 
+### Aturan jam UM (tetap)
+
+Aturannya sama untuk setiap hari kerja, Senin sampai Jumat: hari kerja mendapat UM hanya bila jam masuk paling lambat 08:00 (tepat 08:00 masih dihitung) **dan** jam pulang paling cepat 16:30. Jadwal yang tertulis di file mesin tidak dipakai, dan jadwal Ramadan tidak lagi dipertimbangkan.
+
+> “Batas jam ini tetap. Di **Aturan & tarif** ia tampil sebagai aturan tetap, tanpa pilihan batas kedatangan dan tanpa saklar pulang cepat.”
+
+Hari yang hanya punya jam masuk atau hanya jam pulang tidak mendapat UM, dengan alasan yang tertulis jelas, misalnya "Hanya ada jam masuk 07:45, tanpa jam pulang; tidak dapat UM". Dua pengecualian tetap berstatus **ditahan**, bukan gugur: clash ketika sumber lain punya pasangan jam yang lengkap (admin memutuskan di Rekonsiliasi), dan tanggal ketika ekspor mesin terpotong (file diambil sebelum pegawai pulang).
+
 ### Tarif yang dijelaskan kepada client
 
 | Status | Golongan asli | Tarif harian |
@@ -234,8 +262,8 @@ Apabila tarif efektif berubah di tengah bulan, perhitungan mengikuti rentang tar
 
 - **Tarif/golongan pending:** jelaskan data atau pengesahan parameter yang belum lengkap. Sistem tidak memberikan nominal siap bayar dari golongan tebakan.
 - **PPh/netto belum ditetapkan:** jelaskan bahwa bruto sudah bisa dibaca, sedangkan penghitungan pajak dan netto menunggu parameter yang disahkan.
-- **Tepat pukul 08:00:** tunjukkan operator batas yang aktif. Perlakuannya mengikuti pilihan sebelum 08:00 atau termasuk tepat 08:00; jika belum diputuskan, kasus batas menunggu pengesahan.
-- **Hari ditahan:** buka alasannya. Bedakan menunggu keputusan, bukti belum lengkap, dan informasi tarif yang belum siap.
+- **Tepat pukul 08:00:** masuk 08:00 pas masih mendapat UM. Tidak ada pilihan yang perlu diputuskan.
+- **Hari ditahan:** buka alasannya. Bedakan clash antar-sumber yang menunggu keputusan admin, ekspor mesin yang terpotong (perlu ekspor ulang), dan informasi tarif yang belum siap.
 
 Di Excel, tunjukkan sheet **Nominatif**, **Rincian Harian**, **Ditahan**, **Review Sumber**, dan **Parameter**. Sebut ekspor dari halaman ini sebagai rekap progresif jika pemeriksaan belum selesai.
 
@@ -352,6 +380,7 @@ Buka halaman ini sebagai penutup penjelasan fitur. Tunjukkan hubungan data dan a
 | Perubahan pengguna lain membuat revisi berbeda | Tunggu penyimpanan atau muat ulang keadaan server, lalu tinjau kembali. | “Ada pembaruan pada ruang kerja bersama; kita gunakan data terbarunya.” |
 | Bruto pending atau netto belum ditetapkan | Buka keterangan tarif/parameter. | “Informasi ini belum lengkap untuk menghasilkan nominal yang disahkan.” |
 | Ajukan belum aktif | Tunjukkan persyaratan yang belum terpenuhi. | “Hasil progresif tersedia, sementara finalisasi menunggu pemeriksaan bulan ini selesai.” |
+| Halaman lambat, simpan terasa lama, atau muncul 502 | Tunggu 20 sampai 60 detik tanpa klik ulang. Bila 502, tunggu satu menit lalu muat ulang. | “Layanan demo ini berjalan di paket gratis, jadi kadang butuh waktu. Datanya aman di database.” |
 | WhatsApp perlu konfigurasi | Tunjukkan status dan lanjutkan ke pratinjau. | “Koneksi perangkat perlu disiapkan; pratinjau template sudah dapat kita tinjau.” |
 
 ## 12. Jawaban singkat untuk pertanyaan client
@@ -404,7 +433,8 @@ Lanjutkan diskusi dengan client mengenai format sumber yang digunakan tiap kanto
 
 - Pada 27 Oktober 2026, halaman publik produksi merespons HTTP 200. Endpoint `/api/health` memberikan `ok: true` dan revision aplikasi `0ef80d0734a5`.
 - Label dan urutan fitur pada panduan disusun dari implementasi lokal dengan HEAD `0ef80d0`. Revision aplikasi tersebut bukan nomor revisi data workspace.
-- Jumlah pegawai, kasus, status koneksi WhatsApp, parameter aktif, dan pengajuan pada akun produksi belum diperiksa melalui sesi login saat penulisan panduan. Isi lembar persiapan menggunakan kondisi yang tampil pada akun presenter.
+- Aturan UM jam masuk 08:00 dan jam pulang 16:30 mengikuti pembaruan commit `c2cc51f`. Cek ulang `/api/health` sebelum presentasi untuk memastikan produksi sudah memakai revision terbaru.
+- Jumlah pegawai, kasus, status koneksi WhatsApp, parameter aktif, dan pengajuan pada akun produksi belum diperiksa melalui sesi login saat penulisan panduan. Angka contoh pada bagian Data demo di produksi adalah angka acuan; isi lembar persiapan menggunakan kondisi yang tampil pada akun presenter.
 - Pemeriksaan naskah: tidak memuat em dash; contoh angka ditandai sebagai ilustrasi; kasus demo Netlify tidak dinyatakan sebagai data produksi; kondisi pengajuan dan komunikasi mengikuti implementasi yang diperiksa.
 
 Rujukan:

@@ -11,6 +11,7 @@ import { useAuth } from '../state/Auth.tsx'
 import { useHr } from '../state/HrData.tsx'
 import { Note, PageHeader, Panel } from '../components/ui.tsx'
 import { useDialog } from '../components/Dialog.tsx'
+import { reopenedConfirmationMonths } from './rekapst/reopen.ts'
 import './rekapst/rekapst.css'
 
 type EmployeeOption = { id: string; nama: string; nip: string; kantor: string; unit: string; jabatan?: string }
@@ -146,14 +147,10 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
   const hostSource = manualActive.find(file => file.office === 'Pusat') ?? manualActive[0]
   const hasOtherSt = (hr?.files ?? []).some(file => file.kind === 'surat-tugas' && file.active !== false && !file.id.startsWith('manual-st:') && file.assignments.some(item => item.start.slice(0, 7) === period))
   const coverageState = hr ? inspectSourceCoverage(hr.files, bounds.start, bounds.end).find(item => item.source === 'surat-tugas')?.state ?? 'missing' : 'missing'
-  /** Server menghapus deklarasi pada register kantor-bulan yang sama saat ST ditambahkan; bulan yang terdampak diperiksa di sini sebelum menyimpan. */
-  const reopenedMonths = (months: string[]) => months.filter(month => {
-    const range = monthBounds(month)
-    const declarations = hr
-      ? hr.files.find(file => file.kind === 'surat-tugas' && file.active !== false && file.id.startsWith('manual-st:') && file.office === registerOffice && file.period?.start.slice(0, 7) === month)?.coverageDeclarations
-      : month === period ? data.sourceIds.find(source => source.office === registerOffice)?.coverage : undefined
-    return !!declarations?.some(item => item.status === 'complete' && item.start <= range.end && item.end >= range.start)
-  })
+  /** Server membuka kembali konfirmasi (lengkap atau nihil) bulan itu untuk seluruh KPPU saat ST dari kantor mana pun ditambahkan, jadi peringatan memakai syarat yang sama. */
+  const reopenedMonths = (months: string[]) => reopenedConfirmationMonths(hr
+    ? hr.files
+    : data.sourceIds.map(source => ({ kind: 'surat-tugas', coverageDeclarations: source.coverage })), hr ? months : months.filter(month => month === period))
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()

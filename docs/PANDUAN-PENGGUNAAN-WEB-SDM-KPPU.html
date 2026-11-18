@@ -136,7 +136,7 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
     <thead><tr><th style="width:24%">Peran</th><th>Yang bisa dilakukan</th></tr></thead>
     <tbody>
       <tr><td><span class="ui">Superadmin</span></td><td>Semua halaman dan semua tindakan: mengunggah setoran, mengisi dan mengonfirmasi Rekap ST, mengubah data pegawai, mengatur aturan uang makan, mengajukan dan mengunci hasil, mengelola akun dan WhatsApp.</td></tr>
-      <tr><td><span class="ui">Admin</span></td><td>Membuka semua halaman, tetapi hanya untuk dibaca. Satu hal boleh diubah: keputusan rekonsiliasi, yaitu memutuskan clash, mengesahkan status hari, dan mengeluarkan bukti yang keliru. Keputusan pencocokan identitas disimpan bersama keputusan itu, sehingga tombolnya juga aktif untuk Admin. Menu Tambah Data tidak tampil.</td></tr>
+      <tr><td><span class="ui">Admin · rekonsiliasi</span></td><td>Di panduan ini disingkat Admin. Membuka semua halaman, tetapi hanya untuk dibaca. Satu hal boleh diubah: keputusan rekonsiliasi, yaitu memutuskan clash, mengesahkan status hari, dan mengeluarkan bukti yang keliru. Keputusan pencocokan identitas disimpan bersama keputusan itu, sehingga tombolnya juga aktif untuk Admin. Menu Tambah Data tidak tampil.</td></tr>
       <tr><td><span class="ui">Operator Rekap ST</span></td><td>Hanya halaman Rekap ST, untuk satu kantor. Operator memasukkan surat tugas pegawai kantornya, melihat daftar ST kantor itu, dan mengganti password sendiri.</td></tr>
     </tbody>
   </table>
@@ -191,7 +191,7 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
 
   <div class="step"><span class="step-num">1</span><div><p>Buka alamat web SDM yang diberikan administrator, lalu isi <span class="ui">Email akun</span> dan <span class="ui">Password</span>. Akun dibuat oleh Superadmin. Password minimal 14 karakter.</p></div></div>
   <figure class="shot login"><img src="panduan-penggunaan/assets/01-masuk.png" width="920" height="1304" alt="Layar masuk ke ruang kerja SDM"><figcaption>Layar masuk. Tidak ada pendaftaran sendiri dan tidak ada tombol lupa password. Pemulihan password dilakukan administrator.</figcaption></figure>
-  <div class="step"><span class="step-num">2</span><div><p>Lihat pojok kanan atas. <span class="ui">Periode KPPU</span> adalah bulan yang sedang dikerjakan. Pilihan ini dipakai oleh Setoran, Rekap ST, Rekonsiliasi, dan Uang Makan sekaligus. Di sebelahnya, <span class="ui">Peran akun</span> menunjukkan nama dan peran Anda. Semua keputusan dicatat atas nama akun itu, karena itu satu akun dipakai satu orang.</p></div></div>
+  <div class="step"><span class="step-num">2</span><div><p>Lihat pojok kanan atas. <span class="ui">Periode KPPU</span> adalah bulan yang sedang dikerjakan. Pilihan ini dipakai oleh Setoran, Rekap ST, Rekonsiliasi, dan Uang Makan sekaligus. Di sebelahnya, <span class="ui">Peran akun</span> menunjukkan nama dan peran Anda. Semua keputusan dicatat atas nama akun itu, karena itu satu akun dipakai satu orang. Periode yang diubah Superadmin disimpan untuk semua pengguna. Bila Admin mengubahnya, perubahan itu hanya berlaku di layar Admin sampai halaman dimuat ulang.</p></div></div>
   <div class="step"><span class="step-num">3</span><div><p>Baca menu samping. Menu dibagi tiga kelompok: Absensi &amp; uang makan, Kepegawaian, dan Komunikasi &amp; akses. Lencana merah di samping menu berarti ada pekerjaan yang menunggu. Lencana di <span class="ui">Setoran &amp; Review</span> menghitung pekan yang sudah lewat tetapi belum lengkap. Lencana di <span class="ui">Rekonsiliasi</span> menghitung hari yang menunggu keputusan, dan lencana di <span class="ui">Pencocokan Identitas</span> menghitung nama yang masih perlu dicocokkan.</p></div></div>
   <div class="step"><span class="step-num">4</span><div><p>Perhatikan kotak di bagian bawah menu samping. Tulisan <span class="ui">Tersimpan di server</span> beserta nomor revisi berarti perubahan terakhir sudah aman. Selama tertulis <span class="ui">Menyimpan perubahan</span>, tunggu sebelum berpindah halaman atau menutup peramban.</p></div></div>
 
@@ -228,13 +228,13 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
     <tbody>
       <tr><td><span class="ui">Mesin Offline</span></td><td>Ekspor mesin absensi di Pusat dan Kanwil, termasuk rekap lokal Kanwil. Isinya jam scan masuk dan pulang.</td></tr>
       <tr><td><span class="ui">Mesin Online</span></td><td>Presensi dari aplikasi di ponsel: WFO atau WFA, jam, status persetujuan, dan lokasi bila tersedia.</td></tr>
-      <tr><td><span class="ui">Rekap ST</span></td><td>Rekap surat tugas: nomor, peserta, tanggal tugas, dan tujuan. Bisa diisi langsung di halaman Rekap ST atau diunggah sebagai Excel.</td></tr>
+      <tr><td><span class="ui">Rekap ST</span></td><td>Rekap surat tugas: nomor, peserta, tanggal tugas, dan tujuan. Cara yang dianjurkan adalah mengisinya langsung di halaman Rekap ST. Kartu Rekap ST di Setoran &amp; Review juga masih menerima file Excel.</td></tr>
     </tbody>
   </table>
 
   <h3>Membaca halaman</h3>
   <figure class="shot"><img src="panduan-penggunaan/assets/02-setoran-papan.png" width="2272" height="1854" alt="Halaman Setoran dan Review dengan empat ubin ringkasan, banner langkah berikutnya, dan papan bulan"><figcaption>Setoran &amp; Review untuk April 2026: empat ubin di atas, satu banner Langkah berikutnya, lalu papan dengan satu baris per pekan.</figcaption></figure>
-  <p>Empat ubin di bagian atas bisa diklik. <span class="ui">Pekan lengkap</span> menunjukkan berapa pekan yang sudah lewat dan sudah lengkap ketiga sumbernya. <span class="ui">Clash menunggu</span> membuka Rekonsiliasi. <span class="ui">UM final</span> membuka Uang Makan dan hanya menjumlah hari yang sudah sah. <span class="ui">UM perkiraan</span> menjumlah hari yang datanya ada tetapi pekannya belum lengkap.</p>
+  <p>Ada empat ubin di bagian atas, dan dua di antaranya bisa diklik. <span class="ui">Pekan lengkap</span> menunjukkan berapa pekan yang sudah lewat dan sudah lengkap ketiga sumbernya. <span class="ui">Clash menunggu</span> membuka Rekonsiliasi. <span class="ui">UM final</span> membuka Uang Makan dan hanya menjumlah hari yang sudah sah. <span class="ui">UM perkiraan</span> menjumlah hari yang datanya ada tetapi pekannya belum lengkap. Ubin Pekan lengkap dan UM perkiraan hanya menampilkan angka.</p>
   <p>Banner <span class="ui">Langkah berikutnya</span> selalu menampilkan satu hal saja. Urutan prioritasnya: merah untuk pekan yang sudah lewat tetapi masih kekurangan sumber (dengan tombol unggah sumber itu), kuning untuk clash yang menunggu keputusan, biru untuk pekan yang masih berjalan, dan hijau bila semua lengkap dan tidak ada clash.</p>
   <p>Papan memuat satu baris per pekan. Klik nama pekan untuk memilihnya, atau klik sel sumber untuk langsung membuka unggahan sumber itu pada pekan tersebut.</p>
   <table>
@@ -298,7 +298,7 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
     </tbody>
   </table>
   <figure class="shot phone"><img src="panduan-penggunaan/assets/30-seluler-setoran.png" width="780" height="1688" alt="Papan setoran di layar ponsel"><figcaption>Papan setoran di layar 390 piksel. Sel sumber turun menjadi grid dua kolom di dalam setiap pekan.</figcaption></figure>
-  <div class="tip"><span class="label">Kalau kartu tetap kuning setelah unggah</span><p>Cek tanggal terakhir pada file. Ekspor mesin yang diambil sebelum hari terakhir pekan selesai tidak memuat scan hari-hari terakhir, dan sumbernya tercatat Sebagian sampai tanggal itu. Unggah ekspor yang lebih baru lewat tombol Unggah tambahan / koreksi.</p></div>
+  <div class="tip"><span class="label">Kalau kartu tetap kuning setelah unggah</span><p>Cek tanggal terakhir pada file. Ekspor mesin yang diambil sebelum hari terakhir pekan selesai tidak memuat scan hari-hari terakhir, dan sumbernya tercatat Sebagian sampai tanggal itu. Hari yang ekspornya belum memuat jam pulang ditahan dan uang makannya belum dihitung sampai ekspor yang lebih baru diunggah. Unggah ekspor yang lebih baru lewat tombol Unggah tambahan / koreksi.</p></div>
 </section>
 
 <section class="chapter">
@@ -308,18 +308,18 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
 
   <h3>Menambah satu ST</h3>
   <p>Superadmin dan Operator Rekap ST bisa menambah ST. Admin hanya melihat daftarnya. Operator hanya melihat dan menambah ST untuk pegawai di kantor cakupannya.</p>
-  <div class="step"><span class="step-num">1</span><div><p>Isi <span class="ui">No. ST</span>, <span class="ui">Tanggal ST</span>, <span class="ui">Tanggal tugas mulai</span>, <span class="ui">Tanggal tugas selesai</span>, dan <span class="ui">Tujuan</span>. Rentang tugas paling panjang 31 hari. Bila tugas hanya satu hari, kosongkan tanggal selesai atau isi sama dengan tanggal mulai.</p></div></div>
+  <div class="step"><span class="step-num">1</span><div><p>Isi <span class="ui">No. ST</span>, <span class="ui">Tanggal ST</span>, <span class="ui">Tanggal tugas mulai</span>, <span class="ui">Tanggal tugas selesai</span>, dan <span class="ui">Tujuan</span>. Rentang tugas paling panjang 31 hari. Tanggal tugas selesai wajib diisi. Bila tugas hanya satu hari, isi sama dengan tanggal mulai. Kolom ini otomatis berisi tanggal mulai, jadi cukup periksa lalu ubah bila tugasnya lebih panjang.</p></div></div>
   <div class="step"><span class="step-num">2</span><div><p>Ketik nama atau NIP di kolom <span class="ui">Cari pegawai</span>. Daftar kecocokan muncul di bawahnya. Klik salah satu, atau tekan Enter untuk memilih hasil teratas. Enter di kolom ini hanya memilih pegawai dan tidak mengirim formulir. Escape mengosongkan pencarian. Satu ST menampung paling banyak 50 pegawai.</p></div></div>
   <div class="step"><span class="step-num">3</span><div><p>Periksa ringkasan di atas tombol simpan, misalnya 3 pegawai × 3 hari = 9 baris, beserta tanggal-tanggalnya. Hapus pegawai yang salah dengan tanda silang di kartunya.</p></div></div>
   <div class="step"><span class="step-num">4</span><div><p>Klik <span class="ui">Simpan rekap ST</span>. Baris yang sudah ada dilewati, bukan digandakan.</p></div></div>
   <figure class="shot"><img src="panduan-penggunaan/assets/05-rekap-st-form.png" width="2264" height="1306" alt="Formulir tambah rekap surat tugas dengan tiga pegawai terpilih"><figcaption>Formulir Rekap ST dengan tiga pegawai terpilih. Ringkasan di bawah kartu menghitung jumlah baris yang akan dibuat sebelum disimpan.</figcaption></figure>
-  <div class="note"><span class="label">Kantor register ST</span><p>Pilihan ini (hanya tampil untuk Superadmin) sekadar label asal surat. Ia tidak membatasi pegawai mana yang bisa ditugaskan dan tidak membuat konfirmasi kelengkapan menjadi per kantor.</p></div>
+  <div class="note"><span class="label">Kantor register ST</span><p>Pilihan ini (hanya tampil untuk Superadmin) sekadar label asal surat dan tidak membuat konfirmasi kelengkapan menjadi per kantor. Namun kolom <span class="ui">Cari pegawai</span> mengikuti kantor register yang dipilih. Bawaannya Pusat, jadi untuk menugaskan pegawai Kanwil, pilih dulu kantor register Kanwil yang bersangkutan. Mengganti kantor register juga mengosongkan pegawai yang sudah dipilih.</p></div>
 
   <h3>Konfirmasi kelengkapan bulanan</h3>
-  <p>Menambah ST tidak otomatis menyatakan rekapnya lengkap. Kelengkapan ST dinyatakan sekali per bulan untuk seluruh KPPU, yaitu Pusat dan Kanwil I sampai VII, oleh Superadmin setelah rekap dicocokkan dengan buku register. Panel <span class="ui">Kelengkapan ST bulanan</span> menampilkan statusnya: Belum dikonfirmasi, Data ada belum dikonfirmasi, Parsial, Lengkap, atau Nihil.</p>
-  <div class="step"><span class="step-num">1</span><div><p>Tunggu sampai bulannya berakhir. Konfirmasi tidak bisa dibuat untuk bulan yang belum selesai.</p></div></div>
+  <p>Menambah ST tidak otomatis menyatakan rekapnya lengkap. Kelengkapan ST dinyatakan sekali per bulan untuk seluruh KPPU, yaitu Pusat dan Kanwil I sampai VII, oleh Superadmin setelah rekap dicocokkan dengan buku register. Panel <span class="ui">Kelengkapan ST bulanan</span> menampilkan statusnya: Belum dikonfirmasi, Data ada, belum dikonfirmasi, Parsial, Lengkap, atau Nihil.</p>
+  <div class="step"><span class="step-num">1</span><div><p>Tunggu sampai bulannya berakhir. Panel konfirmasi baru tampil setelah bulan itu selesai, dan hanya untuk Superadmin.</p></div></div>
   <div class="step"><span class="step-num">2</span><div><p>Klik <span class="ui">Konfirmasi rekap lengkap</span>. Bila memang tidak ada ST sama sekali, tombolnya berganti menjadi <span class="ui">Konfirmasi nihil ST</span>. Tulis dasar konfirmasi minimal 10 karakter.</p></div></div>
-  <div class="warning"><span class="label">ST baru membuka kembali konfirmasi</span><p>Menambah ST dari kantor mana pun pada bulan yang sudah dikonfirmasi membuka konfirmasinya lagi. Sebelum menyimpan, layar menampilkan kotak peringatan yang menyebut bulan terdampak dan bahwa uang makan final bulan itu ditahan sampai dikonfirmasi ulang. Pilih <span class="ui">Jangan tambah</span> bila Anda belum siap mengonfirmasi ulang.</p></div>
+  <div class="warning"><span class="label">ST baru membuka kembali konfirmasi</span><p>Menambah ST dari kantor mana pun, Pusat maupun Kanwil, pada bulan yang sudah dikonfirmasi (lengkap atau nihil) membuka kembali konfirmasi itu untuk seluruh KPPU. Sebelum menyimpan, Superadmin melihat kotak peringatan <span class="ui">Konfirmasi kelengkapan ST akan dibuka kembali</span> yang menyebut bulan terdampak dan bahwa uang makan final bulan itu ditahan sampai dikonfirmasi ulang. Pilih <span class="ui">Jangan tambah</span> bila Anda belum siap mengonfirmasi ulang, atau <span class="ui">Tambah ST dan buka kembali</span> untuk melanjutkan. Sesudah menyimpan, cek panel Kelengkapan ST bulanan dan konfirmasi ulang. Operator tidak melihat panel konfirmasi dan belum tentu melihat peringatan ini, tetapi ST yang ia tambahkan tetap membuka kembali konfirmasi.</p></div>
   <div class="tip"><span class="label">Jika ST datang sebagai Excel</span><p>Register ST yang diunggah sebagai Excel tidak bisa dikonfirmasi dari panel ini. Panel menampilkan catatan agar Anda mengonfirmasi cakupan file itu di Setoran &amp; Review, lewat Konfirmasi lengkap pada barisnya di lipatan File sumber.</p></div>
 
   <h3>Daftar rekap dan pembatalan</h3>
@@ -350,7 +350,7 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
 
   <h3>Konflik identitas</h3>
   <p>Bila setelah semua sumber digabung ada pola yang janggal, misalnya dua profil dengan NIP berbeda tetapi sumber yang sama, panel <span class="ui">Konflik identitas</span> muncul di atas daftar. Dua tombol yang menggabungkan menampilkan kotak konfirmasi <span class="ui">Gabungkan dua identitas?</span> yang menyebut kedua nama dan menegaskan bahwa penggabungan tidak bisa diurungkan dari halaman ini. Tombol <span class="ui">Orang berbeda</span> tidak butuh konfirmasi karena bisa dibatalkan: toast di bagian bawah layar membawa tombol <span class="ui">Urungkan</span> selama sekitar 8 detik, dan keputusannya juga bisa dibatalkan kemudian lewat tab Tautan otomatis.</p>
-  <div class="warning"><span class="label">Penggabungan di tab Pegawai tanpa NIP</span><p>Memilih kandidat di tab ini langsung menggabungkan dua profil, tanpa kotak konfirmasi dan tanpa tombol urung di daftar. Bandingkan NIP, kantor, dan unit kandidat sebelum mengklik. Jangan menggabungkan dua orang hanya karena namanya mirip.</p></div>
+  <div class="warning"><span class="label">Penggabungan di tab Pegawai tanpa NIP</span><p>Memilih kandidat di tab ini membuka kotak konfirmasi <span class="ui">Gabungkan dua identitas?</span>. Setelah Anda menekan <span class="ui">Gabungkan</span>, penggabungan tidak bisa diurungkan dari halaman ini. Bandingkan NIP, kantor, dan unit kandidat sebelum menekannya, dan jangan menggabungkan dua orang hanya karena namanya mirip.</p></div>
   <div class="tip"><span class="label">NIP di Excel</span><p>Simpan kolom NIP sebagai teks agar 18 digitnya utuh. Excel yang mengubah NIP menjadi angka ilmiah (1,99E+17) merusak pencocokan. Bila identitas peserta ST kosong, biarkan kosong. Jangan menyalinnya dari baris sebelumnya.</p></div>
   <h4>Hari yang tertahan karena nama panggilan</h4>
   <p>Bila Rekap ST menulis nama panggilan yang belum cocok dengan pegawai manapun (misalnya hanya nama depan), hari itu tertahan tanpa muncul sebagai clash. Rekonsiliasi menampilkan catatan kuning dengan tautan ke halaman ini. Selesaikan pencocokannya di sini, dan hari itu terhitung lagi.</p>
@@ -376,7 +376,7 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
   <h3>Antrean clash</h3>
   <p>Setiap clash menjadi satu kartu. Kartu memuat nama, NIP, kantor, tanggal, jenis clash, dan tingkat (Rendah, Sedang, atau Tinggi). Di bawahnya ada tiga kolom berdampingan: apa kata Mesin Offline, apa kata Mesin Online, dan apa kata Surat Tugas pada hari itu. Perbedaan antar kolom itulah yang perlu Anda putuskan.</p>
   <div class="step"><span class="step-num">1</span><div><p>Baca ketiga kolom. Isinya jam masuk dan pulang, kode pengecualian, mode WFO atau WFA beserta status Approved, dan nomor serta tujuan ST. Kolom yang kosong bertuliskan tidak ada catatan.</p></div></div>
-  <div class="step"><span class="step-num">2</span><div><p>Tulis catatan keputusan di kotak yang tersedia. Boleh dikosongkan: sistem lalu memakai catatan standar sesuai tombol yang Anda tekan. Catatan minimal 3 karakter dan tersimpan di jejak audit.</p></div></div>
+  <div class="step"><span class="step-num">2</span><div><p>Tulis catatan keputusan di kotak yang tersedia. Di kartu antrean, catatan boleh dikosongkan: sistem lalu memakai catatan standar sesuai tombol yang Anda tekan. Catatan tersimpan di jejak audit.</p></div></div>
   <div class="step"><span class="step-num">3</span><div><p>Tekan satu tombol keputusan. Setiap tombol menampilkan dampaknya pada uang makan, misalnya <span class="ui">Akui hadir di kantor</span> dengan keterangan dapat UM Rp 37.000, atau <span class="ui">Akui dinas</span> dengan keterangan tanpa UM. Satu keputusan berlaku untuk semua hari di dalam kartu itu.</p></div></div>
   <div class="step"><span class="step-num">4</span><div><p>Kartu pindah ke daftar <span class="ui">Sudah diputuskan</span> dan fokus berpindah ke kartu berikutnya. Untuk membatalkan, buka daftar itu dan tekan <span class="ui">Batalkan keputusan</span>.</p></div></div>
   <figure class="shot"><img src="panduan-penggunaan/assets/10-rekonsiliasi-antrean.png" width="2264" height="1982" alt="Dua kartu clash dengan perbandingan tiga sumber dan tombol keputusan"><figcaption>Dua clash di Pekan 2, jenis Dinas luar tapi scan di kantor. Mesin Offline mencatat kode perjalanan dinas bersama jam di kantor, sedangkan ST menyatakan pegawai bertugas.</figcaption></figure>
@@ -385,17 +385,19 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
     <caption>Jenis clash yang paling sering muncul dan pilihan keputusannya</caption>
     <thead><tr><th style="width:30%">Jenis</th><th>Pilihan keputusan</th></tr></thead>
     <tbody>
-      <tr><td>Pasangan scan berbeda antar sumber</td><td>Pakai jam mesin offline; Dinas yang valid (tanpa UM); Tidak hadir atau tidak sah.</td></tr>
-      <tr><td>Status harian berbeda antar sumber</td><td>ST atau dinas yang valid (tanpa UM); Absensi hadir yang valid; Tidak hadir atau tidak sah.</td></tr>
+      <tr><td>Pasangan scan berbeda antar sumber</td><td>Pakai jam mesin offline; Dinas yang valid (tanpa UM); Tidak hadir / tidak sah.</td></tr>
+      <tr><td>Status harian berbeda antar sumber</td><td>ST/dinas yang valid (tanpa UM); Absensi hadir yang valid; Tidak hadir / tidak sah.</td></tr>
       <tr><td>Dinas luar tapi scan di kantor</td><td>Akui dinas (scan tidak dihitung); Akui hadir di kantor.</td></tr>
-      <tr><td>Cuti atau sakit tapi ada absen hadir</td><td>Tetap cuti atau sakit; Akui hadir (cuti dibatalkan).</td></tr>
-      <tr><td>Surat tugas tumpang tindih</td><td>Sudah diklarifikasi, satu ST berlaku; Keduanya sah (ST berurutan).</td></tr>
-      <tr><td>Dinas di mesin, ST tidak ditemukan</td><td>ST ada atau dinas sah; Tidak sah, dihitung tanpa keterangan.</td></tr>
-      <tr><td>WFO di luar kantor, jam identik, jam manual</td><td>Diterima setelah diverifikasi; Tidak sah.</td></tr>
+      <tr><td>Cuti/sakit tapi ada absen hadir</td><td>Tetap cuti/sakit; Akui hadir (cuti dibatalkan).</td></tr>
+      <tr><td>Surat tugas tumpang tindih</td><td>Sudah diklarifikasi: satu ST berlaku; Keduanya sah (ST berurutan).</td></tr>
+      <tr><td>Dinas di mesin, ST tidak ditemukan</td><td>ST ada / dinas sah; Tidak sah → tanpa keterangan.</td></tr>
+      <tr><td>WFO dengan koordinat di luar kantor</td><td>Lokasi dapat diterima; Presensi tidak sah.</td></tr>
+      <tr><td>Jam identik dengan hari sebelumnya</td><td>Jam sudah diverifikasi; Tidak sah.</td></tr>
+      <tr><td>Jam diisi manual (absen error)</td><td>Bukti pendukung ada; Tidak sah.</td></tr>
       <tr><td>Penugasan tanpa nomor ST</td><td>Nomor ST sudah dikonfirmasi.</td></tr>
     </tbody>
   </table>
-  <p>Bila kartu belum cukup untuk memutuskan, klik <span class="ui">Buka bukti lengkap</span> di dasar kartu. Panel samping menampilkan semua bukti per tanggal beserta tombol keputusan yang sama.</p>
+  <p>Bila kartu belum cukup untuk memutuskan, klik <span class="ui">Buka bukti lengkap</span> di dasar kartu. Panel samping menampilkan semua bukti per tanggal beserta tombol keputusan yang sama. Berbeda dari kartu, di panel ini catatan keputusan wajib diisi, minimal 3 karakter. Bila kosong, layar menampilkan pesan Isi catatan keputusan minimal 3 karakter dan keputusan tidak tersimpan. Aturan yang sama berlaku untuk tombol keputusan di panel Detail hari pada Matriks harian.</p>
 
   <h3>Matriks harian</h3>
   <p>Matriks menampilkan satu sel untuk setiap pegawai pada setiap hari dalam pekan terpilih. Pilihan <span class="ui">Saring</span> di atasnya mengatur siapa yang tampil: <span class="ui">Perlu tindakan</span> (bawaan, yaitu yang punya hari flag atau tidak ditemukan), <span class="ui">Flag</span>, <span class="ui">Tidak ditemukan</span>, atau <span class="ui">Semua</span>. Pencarian dan filter kantor melengkapinya, dan daftar dibagi per 50 pegawai.</p>
@@ -421,7 +423,7 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
   <div class="step"><span class="step-num">3</span><div><p>Isi <span class="ui">Alasan / dasar keputusan</span>, minimal 3 karakter, lalu klik <span class="ui">Sahkan hari ini</span>. Bila hari itu sudah punya keputusan, tombolnya bertuliskan <span class="ui">Simpan perubahan keputusan</span> dan ada tombol <span class="ui">Hapus keputusan</span>. Semua kekurangan isian ditampilkan sekaligus, jadi Anda tidak perlu mengulang tombol berkali-kali.</p></div></div>
   <p>Bila bukti atau identitas berubah setelah Anda memutuskan, panel menampilkan peringatan bahwa keputusan perlu ditinjau ulang sebelum uang makan dihitung. Hari yang belum berlangsung tidak bisa disahkan. Bukti yang identitasnya belum cocok juga ditolak sampai Pencocokan Identitas selesai.</p>
   <h4>Mengeluarkan bukti yang keliru</h4>
-  <p>Di baris tabel bukti ada tautan <span class="ui">Tinjau bukti</span>, dan untuk ST, <span class="ui">Tinjau peserta ST</span>. Tautan itu membuka formulir kecil: tulis alasan (minimal 10 karakter), klik <span class="ui">Lihat dampak</span> untuk melihat hari mana yang berubah dan bagaimana uang makannya, centang konfirmasi, lalu klik <span class="ui">Tolak bukti ini</span> atau <span class="ui">Keluarkan peserta ST</span>. Catatan aslinya tetap diarsipkan dan bisa diaktifkan kembali dengan cara yang sama. Mengeluarkan bukti berbeda dari memutuskan clash: yang pertama mencabut bukti dari perhitungan, yang kedua memilih bukti mana yang dipercaya.</p>
+  <p>Di baris tabel bukti ada tautan <span class="ui">Tinjau bukti</span>, dan untuk ST, <span class="ui">Tinjau peserta ST</span>, masing-masing diikuti kode referensi. Tautan itu membuka formulir kecil: tulis alasan (minimal 10 karakter), klik <span class="ui">Lihat dampak</span> untuk melihat hari mana yang berubah dan bagaimana uang makannya, centang konfirmasi, lalu klik <span class="ui">Tolak bukti ini</span> atau <span class="ui">Keluarkan peserta ST</span>. Catatan aslinya tetap diarsipkan dan bisa diaktifkan kembali dengan cara yang sama. Mengeluarkan bukti berbeda dari memutuskan clash: yang pertama mencabut bukti dari perhitungan, yang kedua memilih bukti mana yang dipercaya.</p>
   <figure class="shot phone"><img src="panduan-penggunaan/assets/31-seluler-matriks.png" width="780" height="1688" alt="Matriks harian di layar ponsel"><figcaption>Matriks harian di layar ponsel. Kolom nama tetap terlihat, dan tabel bergulir ke samping di dalam kotaknya.</figcaption></figure>
   <div class="note"><span class="label">Hak mengubah</span><p>Superadmin dan Admin sama-sama bisa memutuskan clash, mengesahkan hari, dan mengeluarkan bukti. Operator tidak punya akses ke halaman ini.</p></div>
 </section>
@@ -459,6 +461,8 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
     <li>Hari dinas atau ST tidak dihitung uang makan. Begitu pula dinas lokal, cuti, sakit, dan izin.</li>
     <li>Presensi WFA yang berstatus Approved dan memuat jam masuk dan pulang dihitung hadir. Status online tanpa jam (misalnya WFA - hadir saja) tidak dihitung.</li>
     <li>Pegawai Non-ASN ditahan sampai ada keputusan tentang dasar pembayarannya.</li>
+    <li>Hari yang punya isu terbuka, termasuk clash, ditahan sampai isunya diputuskan.</li>
+    <li>Hari yang ekspor mesinnya belum mencakup jam pulang (ekspor diambil sebelum jam pulang tercatat) ditahan dengan alasan data mesin belum lengkap, dan uang makannya tidak dihitung. Unggah ekspor yang lebih baru untuk melepasnya.</li>
   </ul>
   <table class="keep">
     <caption>Tarif bruto per hari</caption>
@@ -472,12 +476,12 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
   <p>Pegawai yang golongannya kosong tidak diberi tarif tebakan. Nominalnya tertulis Pending sampai golongan dilengkapi lewat Data Pegawai atau Tambah Data. Bruto adalah uang makan sebelum PPh. Kolom PPh dan netto hanya terisi setelah Superadmin mengesahkan parameter pajak; sebelum itu daftar hanya memuat bruto dan netto tertulis Belum ditetapkan.</p>
 
   <h3>Daftar nominatif dan rincian per hari</h3>
-  <p>Tabel <span class="ui">Daftar nominatif</span> memuat satu baris per pegawai: golongan dan tarif, deretan titik berwarna (satu titik per hari kerja, dengan alasan di keterangan saat kursor diarahkan), jumlah hari UM, dan nominal. Cari dengan nama, NIP, atau unit, saring menurut kantor, dan urutkan menurut nama, hari UM, hari ditahan, atau bruto. Klik baris untuk membuka rincian per hari.</p>
+  <p>Tabel <span class="ui">Daftar nominatif</span> memuat satu baris per pegawai: golongan dan tarif, deretan titik berwarna (satu titik per hari kerja, dengan alasan di keterangan saat kursor diarahkan), jumlah hari UM, dan nominal. Cari dengan nama, NIP, atau unit, saring menurut kantor, dan urutkan menurut Nama, Hari UM terbanyak, Ditahan terbanyak, atau Bruto terbesar. Klik baris untuk membuka rincian per hari.</p>
   <figure class="shot narrow"><img src="panduan-penggunaan/assets/14-uang-makan-rincian.png" width="1720" height="814" alt="Panel rincian uang makan satu pegawai"><figcaption>Rincian uang makan satu pegawai pada Pekan 2. Setiap hari menyebut alasannya, misalnya pulang 30 menit sebelum pukul 16.30. Klik sebuah hari untuk membuka bukti lengkapnya.</figcaption></figure>
   <p>Tombol <span class="ui">Unduh daftar nominatif</span> menghasilkan satu berkas Excel dengan enam sheet: Nominatif, Rincian Harian, Rincian Sumber, Ditahan, Review Sumber, dan Parameter. Nama berkas memuat pekan atau bulan, dan nama kantor bila filter kantor aktif.</p>
 
   <h3>Aturan dan tarif</h3>
-  <p>Tombol <span class="ui">Aturan &amp; tarif</span> hanya muncul untuk Admin dan Superadmin. Admin bisa membaca isinya tetapi semua isiannya terkunci. Batas jam masuk 08.00 dan jam pulang 16.30 tertulis di sana sebagai aturan tetap dan tidak bisa diubah. Superadmin bisa mengubah pengesahan parameter uang makan dan parameter PPh, WFA dihitung hadir, penahanan hari yang punya isu terbuka, pembayaran pegawai Non-ASN, tarif per golongan, persentase PPh, dan daftar hari libur nasional serta cuti bersama.</p>
+  <p>Tombol <span class="ui">Ubah aturan &amp; tarif</span> di kartu Aturan aktif hanya muncul untuk Admin dan Superadmin, dan membuka panel <span class="ui">Aturan &amp; tarif</span>. Admin bisa membaca isinya tetapi semua isiannya terkunci. Tiga aturan tertulis sebagai baris tetap dan tidak bisa diubah dari sana: batas jam masuk 08.00 dan jam pulang 16.30 (<span class="ui">Jam masuk dan pulang</span>), WFA dihitung hadir (<span class="ui">WFA dihitung hadir</span>), dan hari yang punya isu terbuka selalu ditahan (<span class="ui">Hari yang punya isu terbuka ditahan</span>). Superadmin bisa mengubah sakelar <span class="ui">Parameter uang makan telah diverifikasi</span>, <span class="ui">Parameter PPh/netto telah disahkan</span>, dan <span class="ui">Bayar pegawai non-ASN</span>, serta tarif per golongan, persentase PPh, dan daftar hari libur nasional serta cuti bersama.</p>
   <div class="warning"><span class="label">Ubah dengan hati-hati</span><p>Panel <span class="ui">Dampak pilihan aturan</span> (hanya Superadmin) menampilkan pilihan siap pakai beserta jumlah hari dan bruto yang akan dihasilkan. Mengklik pilihan itu mengubah aturan ruang kerja untuk semua pengguna setelah Anda menyetujui kotak konfirmasi. Baca perkiraan hari dan bruto di kotak itu sebelum menekan Terapkan aturan.</p></div>
   <figure class="shot compact"><img src="panduan-penggunaan/assets/15-uang-makan-bulan.png" width="2296" height="946" alt="Tampilan Akumulasi bulan dengan panel pengajuan di atas ubin ringkasan"><figcaption>Tampilan Akumulasi bulan. Panel pengajuan muncul di atas ubin dan tombol Ajukan masih nonaktif karena paket sumber bulan itu belum lengkap.</figcaption></figure>
 </section>
@@ -486,7 +490,7 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
   <div class="eyebrow">Bab 7</div>
   <h2>Pengajuan dan penguncian bulanan</h2>
   <p class="lede">Setelah bulan selesai dan semua hari punya keputusan, hasil diajukan sebagai satu salinan tetap untuk seluruh KPPU, diperiksa oleh orang kedua, lalu dikunci.</p>
-  <p>Panel <span class="ui">Pengajuan &amp; snapshot periode KPPU</span> hanya tampil di Uang Makan pada tampilan <span class="ui">Akumulasi bulan</span>. Teks bantu panel masih menyebut SDM dan Keuangan. Maksudnya Superadmin: pengajuan, persetujuan, dan penguncian dilakukan oleh akun Superadmin yang berbeda.</p>
+  <p>Panel <span class="ui">Pengajuan &amp; snapshot periode KPPU</span> hanya tampil di Uang Makan pada tampilan <span class="ui">Akumulasi bulan</span>. Satu pengajuan mencakup Pusat dan seluruh Kanwil. Pengajuan, persetujuan, dan penguncian dilakukan oleh akun Superadmin yang berbeda untuk setiap tahap.</p>
 
   <h3>Syarat sebelum bisa mengajukan</h3>
   <p>Tombol <span class="ui">Ajukan</span> aktif setelah semuanya terpenuhi, dan panel menjelaskan mana yang belum.</p>
@@ -502,10 +506,10 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
   <div class="step"><span class="step-num">2</span><div><p>Superadmin kedua, bukan yang mengajukan, membuka <span class="ui">Lihat rincian</span> dan memeriksa nominatif. Setelah itu ia mengisi <span class="ui">Catatan tindakan</span> (minimal 3 karakter) dan mengklik <span class="ui">Setujui</span>.</p></div></div>
   <div class="step"><span class="step-num">3</span><div><p>Akun kedua itu mengklik <span class="ui">Kunci</span>. Hasil terkunci tidak berubah lagi walau data kerja diperbarui setelahnya.</p></div></div>
   <div class="step"><span class="step-num">4</span><div><p>Klik <span class="ui">Unduh snapshot Excel</span> untuk menyimpan salinan hasil yang sudah terkunci.</p></div></div>
-  <p>Pengaju tidak bisa menyetujui atau mengunci pengajuannya sendiri. <span class="ui">Batalkan pengajuan</span> tersedia selama statusnya masih submitted atau approved, dengan catatan tindakan minimal 3 karakter.</p>
+  <p>Pengaju tidak bisa menyetujui atau mengunci pengajuannya sendiri. <span class="ui">Setujui</span>, <span class="ui">Kunci</span>, dan <span class="ui">Batalkan pengajuan</span> baru aktif setelah <span class="ui">Catatan tindakan</span> terisi minimal 3 karakter. <span class="ui">Batalkan pengajuan</span> tersedia selama statusnya masih submitted atau approved.</p>
 
   <h3>Koreksi setelah terkunci</h3>
-  <p>Bila ada kekeliruan di bulan yang sudah terkunci, Superadmin mengklik <span class="ui">Ajukan koreksi</span> pada versi terkunci, dengan alasan minimal 10 karakter. Sistem membuat versi baru dan menampilkan selisih: hari dan nominal yang berubah dibandingkan versi sebelumnya, beserta total selisih netto. Versi baru harus disetujui dan dikunci lagi oleh akun lain. Versi lama tetap tersimpan sebagai arsip dengan status digantikan.</p>
+  <p>Bila ada kekeliruan di bulan yang sudah terkunci, Superadmin mengklik <span class="ui">Ajukan koreksi</span> pada versi terkunci, dengan alasan minimal 10 karakter. Sistem membuat versi baru dan menampilkan selisih: hari dan nominal yang berubah dibandingkan versi sebelumnya, beserta total selisih netto. Versi baru harus disetujui dan dikunci lagi oleh akun lain. Versi lama tetap tersimpan sebagai arsip dengan status arsip digantikan.</p>
   <div class="note"><span class="label">Selisih bukan pembayaran</span><p>Angka selisih menjadi bahan pemeriksaan. Aplikasi tidak membuat pembayaran atau penagihan dari selisih itu, dan aplikasi memang tidak mencairkan uang. Hasil akhirnya berupa daftar nominatif untuk dasar administrasi.</p></div>
 </section>
 
@@ -521,7 +525,7 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
   <ul>
     <li><span class="ui">Komposisi</span>: pegawai per kantor, status kepegawaian, dan jenis kelamin.</li>
     <li><span class="ui">Struktur organisasi</span>: per unit, jabatan fungsional, peringkat jabatan, dan jenjang pendidikan. Daftar unit dan jabatan punya kotak cari serta urutan Terbanyak atau A sampai Z.</li>
-    <li><span class="ui">Demografi</span>: piramida usia per kelompok 5 tahun, dan ulang tahun 30 hari ke depan dengan tautan Atur pesan ke Automation Center.</li>
+    <li><span class="ui">Demografi</span>: piramida usia per kelompok 5 tahun, dan ulang tahun 30 hari ke depan dengan tautan <span class="ui">Atur pesan</span> yang membuka Automation Center.</li>
     <li><span class="ui">Perubahan pegawai</span>: yang akan pensiun, pegawai baru, dan yang mengundurkan diri. Jendela waktunya 3, 6, atau 12 bulan. Hanya tanggal yang terisi di master yang dihitung.</li>
     <li><span class="ui">Kualitas data</span>: kelengkapan 13 isian penting, diurutkan dari yang paling banyak kosong.</li>
   </ul>
@@ -536,7 +540,7 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
   <figure class="shot"><img src="panduan-penggunaan/assets/20-pegawai-daftar.png" width="2880" height="1800" alt="Daftar Data Pegawai"><figcaption>Data Pegawai. Kolom Sumber meringkas asal profil: dua sumber pertama ditulis, sisanya menjadi +N.</figcaption></figure>
   <p>Klik baris untuk membuka profil. Profil memuat identitas dan isian kepegawaian (isian yang diturunkan dari NIP ditandai dari NIP), kehadiran bulan aktif dengan kode seperti di matriks, tautan <span class="ui">Lihat isu pegawai ini</span> ke Rekonsiliasi, sumber data, identitas di tiap sumber, dan ST periode itu. Dua panel bagian bawah menyangkut uang makan. <span class="ui">Status kerja bertanggal</span> mencatat tugas belajar atau diperbantukan ke instansi lain, yang menggugurkan uang makan hanya pada rentang efektif yang dicatat. <span class="ui">Tarif efektif pegawai</span> mencatat perubahan tarif atau pajak. Rentang di kedua panel tidak boleh tumpang tindih dan harus punya dasar dokumen.</p>
   <figure class="shot narrow"><img src="panduan-penggunaan/assets/21-pegawai-profil.png" width="1720" height="1652" alt="Profil satu pegawai"><figcaption>Profil pegawai. Tanggal lahir, pensiun, dan mulai kerja pada gambar ini diganti nilai contoh.</figcaption></figure>
-  <p>Superadmin melihat tombol <span class="ui">Lengkapi data</span> dan <span class="ui">Tambah data pegawai</span>. Admin dan Operator tidak.</p>
+  <p>Superadmin melihat tombol <span class="ui">Tambah data pegawai</span> di bagian atas halaman, tombol <span class="ui">Lengkapi data</span> di profil, dan tombol <span class="ui">Lengkapi data pegawai</span> di People Dashboard. Admin tidak melihat tombol-tombol itu, dan Operator tidak membuka halaman ini.</p>
 
   <h3>Tambah Data</h3>
   <p>Halaman ini khusus Superadmin dan punya dua mode di pojok kanan atas: <span class="ui">Impor massal</span> dan <span class="ui">Isi manual</span>. Pegawai sudah terbentuk dari sumber absensi. Halaman ini melengkapi isiannya: golongan, jabatan, peringkat, pendidikan, tanggal lahir, nomor WhatsApp, tanggal mulai kerja, pensiun, dan pengunduran diri.</p>
@@ -556,7 +560,7 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
   <div class="eyebrow">Bab 9</div>
   <h2>Automation Center dan WhatsApp</h2>
   <p class="lede">Halaman ini mengirim pesan WhatsApp otomatis dari HR: ulang tahun, hari raya, masa kerja, pengingat, dan kampanye. Mode uji menyala sejak awal, jadi tidak ada pesan yang sampai ke pegawai sebelum Anda mematikannya.</p>
-  <p>Superadmin bisa membaca dan mengubah semuanya. Admin hanya membaca. Peran lain melihat catatan bahwa halaman ini dikelola Superadmin. Data di halaman menyegar sendiri tiap 10 detik.</p>
+  <p>Superadmin bisa membaca dan mengubah semuanya. Admin hanya membaca, dan halaman menampilkan catatan Anda memiliki akses baca saja. Perubahan dilakukan HR atau Superadmin. Operator tidak punya akses ke halaman ini. Data di halaman menyegar sendiri tiap 10 detik.</p>
 
   <h3>Kesehatan automation</h3>
   <p>Bagian pertama menjawab apakah pesan benar-benar akan terkirim hari ini. Satu dari empat mode selalu terlihat.</p>
@@ -587,7 +591,7 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
 
   <h3>Pengaturan pengiriman dan mengaktifkan pengiriman sungguhan</h3>
   <figure class="shot"><img src="panduan-penggunaan/assets/26-automation-pengaturan.png" width="2264" height="1164" alt="Pengaturan pengiriman dengan tiga sakelar dan batas laju"><figcaption>Pengaturan pengiriman. Mode uji menyala dan belum ada nomor uji, sehingga pesan otomatis dilewati.</figcaption></figure>
-  <p>Selain tiga sakelar mode, bagian ini memuat nomor uji, jendela kirim (bawaan pukul 07.00 sampai 20.00 WIB), batas harian, jeda antar pesan beserta variasi acaknya, jumlah percobaan maksimum, alamat portal HR, dan tanda tangan pengirim. Bila mode uji menyala, minimal satu nomor uji harus terisi. Untuk beralih ke pengiriman sungguhan, urutannya:</p>
+  <p>Selain tiga sakelar mode, bagian ini memuat nomor uji, jendela kirim (bawaan pukul 07.00 sampai 20.00 WIB), batas harian, <span class="ui">Jeda minimum (detik)</span> dan <span class="ui">Variasi acak (detik)</span> untuk jeda antar pesan, <span class="ui">Maks. percobaan</span> untuk jumlah percobaan, alamat portal HR, dan tanda tangan pengirim. Bila mode uji menyala, minimal satu nomor uji harus terisi. Untuk beralih ke pengiriman sungguhan, urutannya:</p>
   <div class="step"><span class="step-num">1</span><div><p>Tautkan WhatsApp dengan kode QR dan pastikan status Terhubung.</p></div></div>
   <div class="step"><span class="step-num">2</span><div><p>Uji dulu di mode uji: isi nomor uji, buka sebuah aturan, dan kirim tes. Periksa isi dan nama penerima di ponsel penguji.</p></div></div>
   <div class="step"><span class="step-num">3</span><div><p>Matikan sakelar <span class="ui">Mode uji</span>. Layar meminta konfirmasi, karena sesudah itu pesan terkirim ke pegawai sungguhan. Klik <span class="ui">Simpan pengaturan</span>.</p></div></div>
@@ -607,14 +611,14 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
       <tr><td>Data prototype lokal</td><td><span class="ui">Periksa data prototype lokal</span> membaca data lama dari peramban asal, mengunduh salinannya, dan menampilkan pratinjau. Data lama tidak dihapus.</td><td>Superadmin</td></tr>
       <tr><td>Buat akun</td><td>Isi nama, email, password awal (minimal 14 karakter), peran, dan kantor cakupan. Sampaikan akses lewat kanal privat, tidak lewat dokumen bersama.</td><td>Superadmin</td></tr>
       <tr><td>Ubah peran atau nonaktifkan</td><td>Pilih peran baru di tabel <span class="ui">Akun terdaftar</span>, lalu <span class="ui">Simpan peran</span>. Mengubah peran mencabut sesi akun itu. <span class="ui">Nonaktifkan</span> meminta alasan, dan akun yang dinonaktifkan tidak bisa masuk. Akun sendiri dan Superadmin terakhir tidak bisa diturunkan atau dinonaktifkan.</td><td>Superadmin</td></tr>
-      <tr><td>Riwayat perubahan</td><td><span class="ui">Muat riwayat</span> menampilkan 100 perubahan material terakhir: waktu, aktor, jenis tindakan, nomor revisi, dan alasan.</td><td>Superadmin dan Admin</td></tr>
+      <tr><td>Riwayat perubahan server</td><td>Panel <span class="ui">Riwayat perubahan server</span> dengan tombol <span class="ui">Muat riwayat</span> menampilkan 100 perubahan material terakhir: waktu, aktor, jenis tindakan, nomor revisi, dan alasan.</td><td>Superadmin dan Admin</td></tr>
     </tbody>
   </table>
   <figure class="shot short"><img src="panduan-penggunaan/assets/27-akses-akun.png" width="2296" height="1250" alt="Panel Buat akun dan Akun terdaftar"><figcaption>Buat akun dan Akun terdaftar. Nama dan email pada gambar diganti. Akun dengan peran lama menampilkan catatan merah dan tidak bisa masuk sampai peran barunya disimpan.</figcaption></figure>
 
   <h3>Matriks akses</h3>
   <table>
-    <thead><tr><th>Halaman atau tindakan</th><th>Superadmin</th><th>Admin</th><th>Operator Rekap ST</th></tr></thead>
+    <thead><tr><th>Halaman atau tindakan</th><th>Superadmin</th><th>Admin · rekonsiliasi</th><th>Operator Rekap ST</th></tr></thead>
     <tbody>
       <tr><td>Setoran &amp; Review: melihat</td><td>Ya</td><td>Ya</td><td>Tidak</td></tr>
       <tr><td>Setoran: unggah, pernyataan tidak ada data, tarik file</td><td>Ya</td><td>Tidak</td><td>Tidak</td></tr>
@@ -642,7 +646,7 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
       <tr><td>Mesin Offline</td><td>Ekspor mesin absensi kantor, termasuk rekap lokal Kanwil.</td></tr>
       <tr><td>Mesin Online</td><td>Presensi dari aplikasi di ponsel (WFO dan WFA).</td></tr>
       <tr><td>Rekap ST</td><td>Daftar surat tugas, satu surat berisi beberapa pegawai dan satu rentang tanggal.</td></tr>
-      <tr><td>Kantor register ST</td><td>Label asal surat saat memasukkan ST. Tidak membatasi pegawai dan tidak memecah konfirmasi kelengkapan.</td></tr>
+      <tr><td>Kantor register ST</td><td>Label asal surat saat memasukkan ST. Tidak memecah konfirmasi kelengkapan, tetapi pencarian pegawai di formulir mengikuti kantor register yang dipilih.</td></tr>
       <tr><td>Clash</td><td>Hari yang buktinya bertentangan antar sumber dan menahan uang makan sampai Admin memutuskan.</td></tr>
       <tr><td>Valid otomatis</td><td>Hari yang punya bukti dan tidak bertentangan, sehingga tidak perlu keputusan.</td></tr>
       <tr><td>Flag</td><td>Hari yang menunggu keputusan. Di matriks ditandai !.</td></tr>
@@ -666,22 +670,22 @@ figure.shot figcaption::before { content: "Gambar " counter(fig) ". "; font-weig
   <table class="dense">
     <thead><tr><th style="width:30%">Yang terlihat</th><th>Yang perlu diperiksa</th></tr></thead>
     <tbody>
-      <tr><td>Aplikasi membuka bulan yang salah</td><td>Ganti Periode KPPU di pojok kanan atas. Bila belum ada periode yang tersimpan, aplikasi membuka bulan terbaru yang terdeteksi dari file sumber, dan itu bisa bukan bulan yang Anda maksud.</td></tr>
-      <tr><td>Akun tidak bisa masuk dan menyebut peran tidak berlaku</td><td>Akun masih memegang peran lama. Minta Superadmin memilih Superadmin, Admin, atau Operator Rekap ST untuk akun itu di Ruang Kerja &amp; Akses.</td></tr>
+      <tr><td>Aplikasi membuka bulan yang salah</td><td>Ganti Periode KPPU di pojok kanan atas. Perubahan oleh Superadmin tersimpan untuk semua pengguna, sedangkan perubahan oleh Admin hanya berlaku sampai halaman dimuat ulang. Bila belum ada periode yang tersimpan, aplikasi membuka bulan terbaru yang terdeteksi dari file sumber, dan itu bisa bukan bulan yang Anda maksud.</td></tr>
+      <tr><td>Akun tidak bisa masuk dan menyebut peran tidak berlaku</td><td>Akun masih memegang peran lama. Minta Superadmin memilih Superadmin, Admin · rekonsiliasi, atau Operator Rekap ST untuk akun itu di Ruang Kerja &amp; Akses.</td></tr>
       <tr><td>Tombol unggah tidak ada</td><td>Unggah hanya untuk Superadmin. Akun Admin hanya melihat Lihat sumber.</td></tr>
       <tr><td>File ditolak: terdeteksi sebagai sumber lain</td><td>Pindahkan file ke kartu yang sesuai. Bila ragu, buka lipatan Format file yang dapat dibaca.</td></tr>
       <tr><td>Banyak baris di karantina atau file tidak terbaca</td><td>Pakai file asli dari sumbernya tanpa disimpan ulang. Periksa header dan format tanggal, simpan kolom NIP sebagai teks, lalu buka catatan file di lipatan File sumber.</td></tr>
       <tr><td>Sel sumber tetap kuning atau merah setelah unggah</td><td>Lihat tanggal terakhir di file. Ekspor yang berakhir sebelum akhir pekan tercatat Sebagian. Untuk Rekap ST, periksa juga konfirmasi bulanan di halaman Rekap ST.</td></tr>
-      <tr><td>Konfirmasi kelengkapan ST tiba-tiba terbuka lagi</td><td>Seseorang menambah ST baru pada bulan itu. Periksa daftar rekap, lalu konfirmasi ulang.</td></tr>
-      <tr><td>Konfirmasi rekap lengkap tidak aktif</td><td>Bulannya belum berakhir, atau bulan itu hanya punya ST dari Excel. Untuk yang kedua, konfirmasi lewat File sumber di Setoran &amp; Review.</td></tr>
+      <tr><td>Konfirmasi kelengkapan ST tiba-tiba terbuka lagi</td><td>Seseorang menambah ST baru pada bulan itu, dari kantor mana pun. Periksa daftar rekap, lalu konfirmasi ulang.</td></tr>
+      <tr><td>Konfirmasi rekap lengkap tidak aktif</td><td>Panel Kelengkapan ST bulanan baru tampil setelah bulannya berakhir, dan hanya untuk Superadmin. Bila bulan itu hanya punya ST dari Excel, tombolnya menampilkan pesan agar Anda mengonfirmasi lewat File sumber di Setoran &amp; Review. Tombol juga nonaktif bila statusnya sudah Lengkap atau Nihil.</td></tr>
       <tr><td>Hari tertahan dan tidak ada clash di antrean</td><td>Cek catatan kuning di atas Rekonsiliasi: nama panggilan di Rekap ST mungkin belum dicocokkan. Selesaikan di Pencocokan Identitas.</td></tr>
       <tr><td>Satu pegawai muncul dua kali</td><td>Buka Pencocokan Identitas, tab Pegawai tanpa NIP atau panel Konflik identitas. Jangan menghapus profil atas dasar nama yang mirip.</td></tr>
       <tr><td>UM final masih Rp 0 dan ada angka perkiraan</td><td>Salah satu dari tiga sumber pekan itu belum dinyatakan lengkap. Cek papan di Setoran &amp; Review, sel yang bukan hijau atau biru.</td></tr>
       <tr><td>Nominal tertulis Pending</td><td>Golongan pegawai belum terisi. Lengkapi lewat Data Pegawai atau Tambah Data.</td></tr>
       <tr><td>Netto tidak terlihat</td><td>Parameter PPh belum disahkan Superadmin, atau belum dianggap lengkap. Bruto tidak sama dengan netto.</td></tr>
       <tr><td>Tombol Ajukan tidak bisa diklik</td><td>Baca keterangan di bawah tombol: paket sumber belum lengkap, atau masih ada hari tanpa keputusan, isu terbuka, parameter belum disahkan, atau status simpan belum Tersimpan.</td></tr>
-      <tr><td>Setujui atau Kunci tidak muncul</td><td>Akun yang mengajukan tidak bisa menyetujui atau mengunci. Gunakan akun Superadmin lain, dan isi Catatan tindakan lebih dulu.</td></tr>
-      <tr><td>Perubahan belum tersimpan</td><td>Unduh Backup pekerjaan dari kotak merah, lalu coba Coba simpan. Bila server menolak karena data berubah oleh pengguna lain, pilih Muat data server dan ulangi perubahan Anda.</td></tr>
+      <tr><td>Setujui atau Kunci tidak muncul, atau tidak bisa diklik</td><td>Akun yang mengajukan tidak melihat tombol itu. Gunakan akun Superadmin lain. Bila tombolnya tampil tetapi nonaktif, isi Catatan tindakan minimal 3 karakter.</td></tr>
+      <tr><td>Perubahan belum tersimpan</td><td>Unduh Backup pekerjaan dari kotak merah, lalu coba Coba simpan. Bila server menolak karena data berubah oleh pengguna lain, muat ulang datanya (Muat data server di kotak merah, atau Muat ulang di halaman Rekap ST), lalu ulangi perubahan Anda.</td></tr>
       <tr><td>Pesan WhatsApp tidak terkirim</td><td>Cek Kesehatan automation: apakah mode uji, simulasi, atau jeda aktif, apakah WhatsApp Terhubung, apakah nomor pegawai dan agamanya terisi, dan apakah hari raya sudah dikonfirmasi.</td></tr>
       <tr><td>Kode QR WhatsApp tidak muncul</td><td>Periksa status di kartu koneksi. Bila tertulis belum dikonfigurasi di server, hubungi pengelola sistem. Jangan mengirim kode QR ke siapa pun.</td></tr>
     </tbody>

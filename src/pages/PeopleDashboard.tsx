@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { Cake, CalendarDays, Database, Plus, UploadCloud, UsersRound } from 'lucide-react'
 import { useHr } from '../state/HrData.tsx'
+import { useAuth } from '../state/Auth.tsx'
 import type { Employee } from '../engine/types.ts'
 import { ageFrom, fmt, pct } from '../lib/format.ts'
 import { formatID } from '../engine/dates.ts'
@@ -21,6 +22,7 @@ const DEFAULT_DESCRIPTION = 'Pilih nama pegawai untuk membuka profil lengkap.'
 
 export function PeopleDashboard({ nav }: { nav: Nav }) {
   const { roster } = useHr()
+  const canAddData = useAuth().user.role === 'superadmin' // App.nav menolak halaman Tambah Data untuk peran lain
   const allEmps = roster.employees
   const [office, setOffice] = useState<string>(ALL_OFFICES)
   const [months, setMonths] = useState<WindowMonths>(12)
@@ -59,7 +61,7 @@ export function PeopleDashboard({ nav }: { nav: Nav }) {
   const movement = useMemo(() => buildMovement(emps, months, today), [emps, months, today])
   const yearAhead = useMemo(() => buildMovement(emps, 12, today).pensions, [emps, today])
 
-  if (!allEmps.length) return <div className="page"><Empty icon={UploadCloud} title="Belum ada data pegawai" action={<div className="row-actions"><button className="btn primary" onClick={() => nav('import')}>Impor file absensi</button><button className="btn secondary" onClick={() => nav('add')}>Tambah data pegawai</button></div>}>Daftar pegawai dibentuk dari sumber absensi, lalu dilengkapi lewat isi manual atau impor massal.</Empty></div>
+  if (!allEmps.length) return <div className="page"><Empty icon={UploadCloud} title="Belum ada data pegawai" action={<div className="row-actions"><button className="btn primary" onClick={() => nav('import')}>Impor file absensi</button>{canAddData && <button className="btn secondary" onClick={() => nav('add')}>Tambah data pegawai</button>}</div>}>Daftar pegawai dibentuk dari sumber absensi, lalu dilengkapi lewat isi manual atau impor massal.</Empty></div>
 
   const todayLabel = new Intl.DateTimeFormat('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())
   const monthFmt = new Intl.DateTimeFormat('id-ID', { month: 'short' })
@@ -90,7 +92,7 @@ export function PeopleDashboard({ nav }: { nav: Nav }) {
       </div>
       <div className="pd-hero-actions">
         <button className="btn secondary" onClick={() => nav('employees')}><UsersRound size={17} /> Buka Data Pegawai</button>
-        <button className="btn primary" onClick={() => nav('add')}><Plus size={17} /> Lengkapi data pegawai</button>
+        {canAddData && <button className="btn primary" onClick={() => nav('add')}><Plus size={17} /> Lengkapi data pegawai</button>}
       </div>
     </section>
 
