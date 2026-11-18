@@ -11,6 +11,9 @@ import '@fontsource/manrope/latin-800.css'
 import './styles.css'
 import './app.css'
 import './theme.css'
+import { installChunkReload } from './lib/chunkReload.ts'
+
+installChunkReload()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

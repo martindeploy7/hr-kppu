@@ -11,6 +11,7 @@ import { PageSkeleton, type SkeletonVariant } from './components/Skeleton.tsx'
 import { DialogProvider, useDialog } from './components/Dialog.tsx'
 import { weeksInMonth } from './engine/dates.ts'
 import { inspectSourceCoverage } from './engine/monthlyFlow.ts'
+import { recoverFromChunkError } from './lib/chunkReload.ts'
 // Satu sumber untuk lazy() dan pemanasan chunk: import() yang sama dipakai bersama, jadi hover/fokus di menu cukup memanggil loader.
 const LOAD = {
   overview: () => import('./pages/AttendanceOverview.tsx'),
@@ -24,17 +25,17 @@ const LOAD = {
   settings: () => import('./pages/WorkspaceSettings.tsx'),
   'rekap-st': () => import('./pages/RekapSTPage.tsx'),
 }
-const AttendanceOverview = lazy(() => LOAD.overview().then(m => ({ default: m.AttendanceOverview })))
-const ReconcilePage = lazy(() => LOAD.reconcile().then(m => ({ default: m.ReconcilePage })))
-const IdentityPage = lazy(() => LOAD.identity().then(m => ({ default: m.IdentityPage })))
-const MealPage = lazy(() => LOAD.meal().then(m => ({ default: m.MealPage })))
-const PeopleDashboard = lazy(() => LOAD.dashboard().then(m => ({ default: m.PeopleDashboard })))
-const EmployeesPage = lazy(() => LOAD.employees().then(m => ({ default: m.EmployeesPage })))
-const AddDataPage = lazy(() => LOAD.add().then(m => ({ default: m.AddDataPage })))
-const AutomationCenter = lazy(() => LOAD.automation().then(m => ({ default: m.AutomationCenter })))
-const WorkspaceSettings = lazy(() => LOAD.settings().then(m => ({ default: m.WorkspaceSettings })))
-const RekapSTPage = lazy(() => LOAD['rekap-st']().then(m => ({ default: m.RekapSTPage })))
-const RekapSTOperator = lazy(() => LOAD['rekap-st']().then(m => ({ default: m.RekapSTOperator })))
+const AttendanceOverview = lazy(() => LOAD.overview().catch(recoverFromChunkError).then(m => ({ default: m.AttendanceOverview })))
+const ReconcilePage = lazy(() => LOAD.reconcile().catch(recoverFromChunkError).then(m => ({ default: m.ReconcilePage })))
+const IdentityPage = lazy(() => LOAD.identity().catch(recoverFromChunkError).then(m => ({ default: m.IdentityPage })))
+const MealPage = lazy(() => LOAD.meal().catch(recoverFromChunkError).then(m => ({ default: m.MealPage })))
+const PeopleDashboard = lazy(() => LOAD.dashboard().catch(recoverFromChunkError).then(m => ({ default: m.PeopleDashboard })))
+const EmployeesPage = lazy(() => LOAD.employees().catch(recoverFromChunkError).then(m => ({ default: m.EmployeesPage })))
+const AddDataPage = lazy(() => LOAD.add().catch(recoverFromChunkError).then(m => ({ default: m.AddDataPage })))
+const AutomationCenter = lazy(() => LOAD.automation().catch(recoverFromChunkError).then(m => ({ default: m.AutomationCenter })))
+const WorkspaceSettings = lazy(() => LOAD.settings().catch(recoverFromChunkError).then(m => ({ default: m.WorkspaceSettings })))
+const RekapSTPage = lazy(() => LOAD['rekap-st']().catch(recoverFromChunkError).then(m => ({ default: m.RekapSTPage })))
+const RekapSTOperator = lazy(() => LOAD['rekap-st']().catch(recoverFromChunkError).then(m => ({ default: m.RekapSTOperator })))
 /** Hangatkan chunk halaman sebelum diklik (hover, fokus, atau awal sentuhan); galat diabaikan karena klik akan mencoba lagi. */
 const warm = (page: Page) => { const load = (LOAD as Partial<Record<Page, () => Promise<unknown>>>)[page]; if (load) void load().catch(() => {}) }
 

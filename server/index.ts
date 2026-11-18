@@ -1,5 +1,4 @@
 import { serve } from '@hono/node-server'
-import { serveStatic } from '@hono/node-server/serve-static'
 import { connect, connectLock } from './db.ts'
 import { createApp } from './app.ts'
 import { migrateDatabase } from './migrate.ts'
@@ -7,6 +6,7 @@ import { createUser } from './create-user.ts'
 import { auditEvents, sessions, users } from './schema.ts'
 import { WhatsAppService } from './whatsapp.ts'
 import { AutomationService } from './automation.ts'
+import { mountStatic } from './static.ts'
 import { and, eq } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 if (!process.env.DATABASE_URL || !process.env.APP_ORIGIN) throw new Error('DATABASE_URL dan APP_ORIGIN wajib diisi')
@@ -38,7 +38,6 @@ const lockSql = connectLock(process.env.DATABASE_URL)
 const automation = new AutomationService(db, whatsapp, { lockSql })
 if (process.env.AUTOMATION_DISABLED !== '1') automation.start()
 const app = createApp(db, { origin: new URL(process.env.APP_ORIGIN).origin, production: process.env.NODE_ENV === 'production' }, whatsapp, automation)
-app.use('/*', serveStatic({ root: './dist' }))
-app.get('*', serveStatic({ path: './dist/index.html' }))
+mountStatic(app)
 const server = serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 8788), hostname: '0.0.0.0' }, info => console.log(`KPPU HR listening on ${info.port}`))
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => server.close(async () => { await automation.stop(); await whatsapp.close(); await lockSql.end(); await sql.end(); process.exit(0) }))
