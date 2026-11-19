@@ -6,8 +6,8 @@ import { effectiveSource, sourceRecordState } from '../src/engine/recordReviews.
 import { buildRoster } from '../src/engine/roster.ts'
 import { reconcile } from '../src/engine/reconcile.ts'
 import { createCoverageLookup } from '../src/engine/monthlyFlow.ts'
-import { eachDay, monthBounds } from '../src/engine/dates.ts'
-import { groupAssignments, type ImportChange, type ImportCounts, type ImportDaySummary, type ImportImpactResponse, type ImportReviewImpact, type ImportValue } from '../shared/imports.ts'
+import { addDays, eachDay, formatID, isWeekend, monthBounds, monthLabel, splitByMonth } from '../src/engine/dates.ts'
+import { groupAssignments, type ImportChange, type ImportCounts, type ImportDaySummary, type ImportImpactResponse, type ImportMonthImpact, type ImportReviewImpact, type ImportValue } from '../shared/imports.ts'
 import type { User, Workspace } from '../shared/workspace.ts'
 import { globalAccess, requireOffice, scopeWorkspace, sourceAllowed } from './scope.ts'
 import { OFFICES, officeFromText, officeFromUnit } from '../src/engine/ids.ts'
@@ -56,18 +56,24 @@ export function mapAssignmentOffices(rows: SourceFile['assignments'], master: Wo
   })
 }
 
-/** Batasi setoran ke pekan terpilih tanpa mengubah tanggal asli; ST lintas pekan tetap utuh. */
+/**
+ * Batasi setoran ke pekan terpilih (Senin–Minggu penuh) tanpa mengubah tanggal asli: baris tetap bertanggal sendiri dan
+ * dihitung di bulan kalendernya, sehingga pekan lintas bulan tidak membuang baris bulan tetangga. ST lintas pekan tetap utuh,
+ * tetapi `period` file hanya mencakup tanggal di dalam pekan ini.
+ */
 export function limitToRange(file: SourceFile, range: { start: string; end: string }): SourceFile {
   const evidence = file.evidence.filter(row => row.date >= range.start && row.date <= range.end)
   const assignments = file.assignments.filter(row => row.start <= range.end && row.end >= range.start)
   const outside = file.evidence.length - evidence.length + file.assignments.length - assignments.length
-  if (!outside) return file
-  const dates = [...evidence.map(row => row.date), ...assignments.flatMap(row => [row.start, row.end])].sort()
+  const clamp = (date: string) => date < range.start ? range.start : date > range.end ? range.end : date
+  const dates = [...evidence.map(row => row.date), ...assignments.flatMap(row => [clamp(row.start), clamp(row.end)])].sort()
+  const period = dates.length ? { start: dates[0], end: dates[dates.length - 1] } : null
+  if (!outside) return file.kind === 'surat-tugas' && period ? { ...file, period } : file
   const people = new Set([...evidence.map(row => row.ids.nip ?? row.ids.nika ?? `${row.office}|${row.name}`), ...assignments.map(row => row.name.toLowerCase())])
   return {
     ...file, evidence, assignments,
     partialDates: file.partialDates?.filter(date => date >= range.start && date <= range.end),
-    period: dates.length ? { start: dates[0], end: dates[dates.length - 1] } : null,
+    period,
     stats: { rows: evidence.length + assignments.length, people: people.size },
     warnings: [`${outside} baris di luar pekan ${range.start} s.d. ${range.end} tidak dipakai pada setoran ini (file asli tetap diarsipkan).`, ...file.warnings],
   }
@@ -204,6 +210,7 @@ function reviewImpact(before: Workspace, after: Workspace, actor: User, touched:
   const oldRoster = buildRoster(oldScope.files, oldScope.master, oldScope.overrides, oldScope.decisions), newRoster = buildRoster(newScope.files, newScope.master, newScope.overrides, newScope.decisions)
   const examples: ReviewImpact['examples'] = []; let changedDays = 0, newlyHeld = 0, changedAmounts = 0, issuesBefore = 0, issuesAfter = 0
   const touchedSet = touched
+  const byMonth: NonNullable<ReviewImpact['byMonth']> = {}
   for (const month of months) {
     // Hanya tanggal tersentuh yang dibandingkan; rekonsiliasi cukup untuk rentang itu (setoran mingguan ≈ 1 pekan), bukan sebulan penuh.
     const bounds = monthBounds(month), inMonth = [...touchedSet].filter(d => d.startsWith(month)).sort()
@@ -220,14 +227,42 @@ function reviewImpact(before: Workspace, after: Workspace, actor: User, touched:
         const oldDay = oldDays.get(date), newDay = newDays.get(date), prior = summarizeDay(oldDay), current = summarizeDay(newDay)
         issuesBefore += prior.issues; issuesAfter += current.issues
         if (json(prior) === json(current)) continue
-        changedDays++
-        if (current.mealState === 'held' && prior.mealState !== 'held') newlyHeld++
-        if (prior.amount !== current.amount || prior.amountReady !== current.amountReady) changedAmounts++
+        const bucket = byMonth[date.slice(0, 7)] ??= { changedDays: 0, newlyHeld: 0, changedAmounts: 0 }
+        changedDays++; bucket.changedDays++
+        if (current.mealState === 'held' && prior.mealState !== 'held') { newlyHeld++; bucket.newlyHeld++ }
+        if (prior.amount !== current.amount || prior.amountReady !== current.amountReady) { changedAmounts++; bucket.changedAmounts++ }
         if (examples.length < 40) examples.push({ employeeId: id, name: newMonth?.employee.nama ?? oldMonth?.employee.nama ?? id, date, before: prior, after: current })
       }
     }
   }
-  return { computed: true, touchedDates: touched.size, changedDays, newlyHeld, changedAmounts, issuesBefore, issuesAfter, examples }
+  return { computed: true, touchedDates: touched.size, changedDays, newlyHeld, changedAmounts, issuesBefore, issuesAfter, examples, byMonth }
+}
+
+/** Rows added/duplicated and changed days per calendar month: a date counts for its own month, whichever weekly file brought it. */
+function monthImpacts(changes: ImportChange[], review: ReviewImpact): ImportMonthImpact[] {
+  const rows = new Map<string, ImportMonthImpact>()
+  const entry = (month: string) => { let row = rows.get(month); if (!row) { row = { month, added: 0, duplicate: 0, changedDays: 0, newlyHeld: 0, changedAmounts: 0 }; rows.set(month, row) } return row }
+  for (const change of changes) {
+    if (change.kind === 'master' || (change.status !== 'added' && change.status !== 'duplicate') || !change.after?.start) continue
+    for (const part of splitByMonth(change.after.start, change.after.end || change.after.start)) entry(part.month)[change.status]++
+  }
+  for (const [month, value] of Object.entries(review.byMonth ?? {})) Object.assign(entry(month), value)
+  return [...rows.values()].sort((a, b) => a.month.localeCompare(b.month))
+}
+
+const dayMonth = (date: string) => formatID(date, { short: true, year: false })
+const dayRange = (start: string, end: string) => start === end ? dayMonth(start) : `${start.slice(0, 7) === end.slice(0, 7) ? start.slice(8).replace(/^0/, '') : dayMonth(start)}–${dayMonth(end)}`
+
+/** Declaring a source complete past the last date in the file usually means a partial export; spell out the dates per month. */
+function coverageGapNote(coverage: { start: string; end: string }, dates: string[]) {
+  const lastDate = dates.at(-1)
+  // Hanya hari kerja sesudah tanggal terakhir yang dianggap celah; ekspor yang berhenti Jumat dengan cakupan sampai Minggu wajar.
+  if (!lastDate || lastDate >= coverage.end || !eachDay(addDays(lastDate, 1), coverage.end).some(date => !isWeekend(date))) return undefined
+  const perMonth = splitByMonth(coverage.start, coverage.end).map(part => {
+    const last = dates.filter(date => date >= part.start && date <= part.end).at(-1)
+    return `${monthLabel(part.month)} ${dayRange(part.start, part.end)} (${last ? `data terakhir ${dayMonth(last)}` : 'tanpa baris data'})`
+  })
+  return `Data di file berakhir ${lastDate}, sedangkan setoran dinyatakan lengkap sampai ${coverage.end}. Tanggal yang dinyatakan lengkap per bulan: ${perMonth.join('; ')}. Pastikan tanggal tanpa baris memang tanpa absensi; bila belum, setor ulang file yang lengkap.`
 }
 
 export function previewImport(state: Workspace, revision: number, parsed: SourceFile, actor: User, rawIntent: ImportIntent): { next: Workspace; impact: ImportImpact } {
@@ -373,7 +408,15 @@ export function previewImport(state: Workspace, revision: number, parsed: Source
   }
   if (file.assignments.length && !file.assignmentImport && selectedIds.length < file.assignments.length) file.assignmentImport = { selectedIds, selectedRegisterKeys: selectedKeys }
   const at = new Date().toISOString()
-  const coverageDeclarations = intent.coverage ? [...(file.coverageDeclarations ?? []), { ...intent.coverage, actorId: actor.id, at }] : file.coverageDeclarations
+  // Deklarasi lintas bulan disimpan terbelah per bulan kalender, satu entri per bulan, dengan dasar dan status yang sama.
+  // Pengaman uang: bagian bulan yang punya hari kerja tetapi tanpa satu baris pun di file absensi tidak ikut dinyatakan lengkap,
+  // supaya ekspor yang berhenti di akhir bulan tidak membuat hari kerja bulan tetangga dianggap tanpa absensi (UM hilang diam-diam).
+  const coverageParts = intent.coverage ? splitByMonth(intent.coverage.start, intent.coverage.end) : []
+  const skippedCoverage = intent.coverage?.status === 'complete' && file.kind !== 'surat-tugas' && coverageParts.length > 1
+    ? coverageParts.filter(part => eachDay(part.start, part.end).some(date => !isWeekend(date)) && !file.evidence.some(row => row.date >= part.start && row.date <= part.end))
+    : []
+  const declaredParts = coverageParts.filter(part => !skippedCoverage.includes(part))
+  const coverageDeclarations = intent.coverage ? [...(file.coverageDeclarations ?? []), ...declaredParts.map(part => ({ ...intent.coverage!, start: part.start, end: part.end, actorId: actor.id, at }))] : file.coverageDeclarations
   const selectedFile = { ...file, ...(intent.completeThrough ? { completeThrough: intent.completeThrough } : {}), ...(coverageDeclarations ? { coverageDeclarations } : {}), active: true, importCommit: undefined }
   const index = next.files.findIndex(f => f.id === selectedFile.id)
   if (index >= 0) next.files[index] = selectedFile; else next.files.push(selectedFile)
@@ -411,11 +454,12 @@ export function previewImport(state: Workspace, revision: number, parsed: Source
   const activeFile = effectiveSource(file)
   const selectedRows = intent.mode === 'replace-registers' ? selectedIds.length : activeFile.evidence.length + activeFile.assignments.length + (activeFile.master?.length ?? 0)
   // An attendance export that stops before the confirmed range end is probably a partial export (e.g. online data only to 21 Okt).
-  const lastDate = activeFile.evidence.map(row => row.date).sort().at(-1)
-  const coverageNote = intent.coverage?.status === 'complete' && activeFile.kind !== 'surat-tugas' && lastDate && lastDate < intent.coverage.end
-    ? `Data di file berakhir ${lastDate}, sedangkan setoran dinyatakan lengkap sampai ${intent.coverage.end}. Pastikan tanggal sesudahnya memang tanpa absensi; bila belum, setor ulang file yang lengkap.`
-    : undefined
-  return { next, impact: { checksum, revision, mode: intent.mode, coverageNote, source: { id: parsed.id, kind: parsed.kind, office: intent.office, parsedRows, selectedRows, omittedMasterCount }, counts, changes: allChanges.slice(offset, offset + limit), offset, limit, totalChanges: allChanges.length, hasMore: offset + limit < allChanges.length, registers: registerResults, replacedScopes, review } }
+  const lastDates = activeFile.evidence.map(row => row.date).sort()
+  const skippedNote = skippedCoverage.length ? `File tidak memuat baris untuk ${skippedCoverage.map(part => `${dayRange(part.start, part.end)} (${monthLabel(part.month)})`).join(', ')}, jadi tanggal itu belum dinyatakan lengkap dan tetap menunggu setoran. Setor file yang memuat tanggal tersebut.` : undefined
+  const gapNote = intent.coverage?.status === 'complete' && activeFile.kind !== 'surat-tugas' ? coverageGapNote({ start: declaredParts[0]?.start ?? intent.coverage.start, end: declaredParts.at(-1)?.end ?? intent.coverage.end }, lastDates) : undefined
+  const coverageNote = [skippedNote, gapNote].filter(Boolean).join(' ') || undefined
+  const byMonth = monthImpacts(allChanges, review)
+  return { next, impact: { checksum, revision, mode: intent.mode, coverageNote, byMonth, source: { id: parsed.id, kind: parsed.kind, office: intent.office, parsedRows, selectedRows, omittedMasterCount }, counts, changes: allChanges.slice(offset, offset + limit), offset, limit, totalChanges: allChanges.length, hasMore: offset + limit < allChanges.length, registers: registerResults, replacedScopes, review } }
 }
 
 export function canRetryImport(file: SourceFile | undefined, actor: User, confirmedImpact: string) {

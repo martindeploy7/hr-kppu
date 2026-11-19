@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { ListSkeleton } from '../components/Skeleton.tsx'
 import { FileText, LogOut, ShieldCheck } from 'lucide-react'
 import { ROLE_LABEL, type User } from '../../shared/workspace.ts'
-import { eachDay, monthBounds, monthLabel } from '../engine/dates.ts'
+import { eachDay, monthBounds, monthLabel, overlapsMonth } from '../engine/dates.ts'
 import { sourceRecordState } from '../engine/recordReviews.ts'
 import { inspectSourceCoverage } from '../engine/monthlyFlow.ts'
 import { OFFICES } from '../engine/ids.ts'
@@ -49,7 +49,7 @@ const stateLabel: Record<string, string> = { active: 'Aktif', excluded: 'Dibatal
 
 export function RekapSTPage({ toast, office }: { toast: (message: string) => void; office?: string }) {
   const hr = useHr(), { user } = useAuth()
-  return <RekapSTContent user={user} hr={hr} toast={toast} initialOffice={office && OFFICES.includes(office) ? office : undefined} initialDate={hr.weekRecon.period.start.slice(0, 7) === hr.activePeriod ? hr.weekRecon.period.start : `${hr.activePeriod}-01`} />
+  return <RekapSTContent user={user} hr={hr} toast={toast} initialOffice={office && OFFICES.includes(office) ? office : undefined} initialDate={hr.weekSlice.displayStart} />
 }
 
 export function RekapSTOperator() {
@@ -145,7 +145,7 @@ function RekapSTContent({ user, hr, operator = false, logout, toast, initialOffi
   const manualActive = stFiles.filter(file => file.id.startsWith('manual-st:') && file.assignments.some(row => sourceRecordState(file, 'assignment', row.id) === 'active'))
   const hasManualSt = manualActive.length > 0
   const hostSource = manualActive.find(file => file.office === 'Pusat') ?? manualActive[0]
-  const hasOtherSt = (hr?.files ?? []).some(file => file.kind === 'surat-tugas' && file.active !== false && !file.id.startsWith('manual-st:') && file.assignments.some(item => item.start.slice(0, 7) === period))
+  const hasOtherSt = (hr?.files ?? []).some(file => file.kind === 'surat-tugas' && file.active !== false && !file.id.startsWith('manual-st:') && file.assignments.some(item => overlapsMonth(item.start, item.end, period)))
   const coverageState = hr ? inspectSourceCoverage(hr.files, bounds.start, bounds.end).find(item => item.source === 'surat-tugas')?.state ?? 'missing' : 'missing'
   /** Server membuka kembali konfirmasi (lengkap atau nihil) bulan itu untuk seluruh KPPU saat ST dari kantor mana pun ditambahkan, jadi peringatan memakai syarat yang sama. */
   const reopenedMonths = (months: string[]) => reopenedConfirmationMonths(hr

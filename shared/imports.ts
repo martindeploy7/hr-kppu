@@ -61,11 +61,19 @@ export type ImportCounts = { added: number; changed: number; removed: number; am
 export type ImportValue = { name: string; office: string; start: string; end: string; detail: string; ref: string }
 export type ImportChange = { kind: 'presensi' | 'surat-tugas' | 'master'; status: 'added' | 'changed' | 'removed' | 'ambiguous' | 'duplicate'; before?: ImportValue; after?: ImportValue; changedFields: string[]; countBefore?: number; countAfter?: number }
 export type ImportDaySummary = { status: string; mealState: string; amount: number; amountReady: boolean; clockIn: string; clockOut: string; issues: number }
-export type ImportReviewImpact = { computed: boolean; touchedDates: number; changedDays: number; newlyHeld: number; changedAmounts: number; issuesBefore: number; issuesAfter: number; examples: { employeeId: string; name: string; date: string; before: ImportDaySummary; after: ImportDaySummary }[]; note?: string }
+export type ImportReviewImpact = { computed: boolean; touchedDates: number; changedDays: number; newlyHeld: number; changedAmounts: number; issuesBefore: number; issuesAfter: number; examples: { employeeId: string; name: string; date: string; before: ImportDaySummary; after: ImportDaySummary }[]; note?: string
+  /** Changed days and amounts split by the calendar month of the date (a date belongs to its own month, whichever weekly file brought it). */
+  byMonth?: Record<string, { changedDays: number; newlyHeld: number; changedAmounts: number }> }
+/** Impact of one upload on one calendar month. `submission` is set when that month already has a meal submission that is not cancelled. */
+export type ImportMonthImpact = { month: string; added: number; duplicate: number; changedDays: number; newlyHeld: number; changedAmounts: number; submission?: { id: string; status: string; version: number } }
 export type ImportImpactResponse = {
   checksum: string; revision: number; mode: ImportMode
   /** Set when a 'complete' coverage claim extends past the last date in the uploaded attendance file. */
   coverageNote?: string
+  /** Rows and changed days per calendar month, in month order. */
+  byMonth?: ImportMonthImpact[]
+  /** Warnings that do not block the upload, e.g. a month that already has a locked meal submission. */
+  warnings?: string[]
   source: { id: string; kind: SourceKind; office: string; parsedRows: number; selectedRows: number; omittedMasterCount: number }
   counts: ImportCounts; changes: ImportChange[]; offset: number; limit: number; totalChanges: number; hasMore: boolean
   registers?: { incomingKey: string; label: string; selectedRows: number; targetCount: number; counts: ImportCounts }[]

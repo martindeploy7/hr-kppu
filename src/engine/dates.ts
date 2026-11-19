@@ -107,6 +107,33 @@ export function weeksInMonth(month: string): WeekSlice[] {
   return slices
 }
 
+/** Splits an inclusive date range at calendar-month boundaries; every date belongs to exactly one part. */
+export function splitByMonth(start: ISODate, end: ISODate): { month: string; start: ISODate; end: ISODate }[] {
+  const parts: { month: string; start: ISODate; end: ISODate }[] = []
+  let cursor = start
+  while (cursor <= end) {
+    const month = cursor.slice(0, 7), last = monthBounds(month).end
+    const partEnd = last < end ? last : end
+    parts.push({ month, start: cursor, end: partEnd })
+    cursor = addDays(partEnd, 1)
+  }
+  return parts
+}
+
+/** True when the inclusive range [start, end] shares at least one date with the calendar month. */
+export function overlapsMonth(start: ISODate, end: ISODate, month: string) {
+  const bounds = monthBounds(month)
+  return start <= bounds.end && end >= bounds.start
+}
+
+/** The parts of a calendar week that fall outside the month shown by the slice (empty when the week stays inside one month). */
+export function weekOtherPart(slice: WeekSlice): { month: string; start: ISODate; end: ISODate }[] {
+  const parts: { month: string; start: ISODate; end: ISODate }[] = []
+  if (slice.weekStart < slice.displayStart) parts.push(...splitByMonth(slice.weekStart, addDays(slice.displayStart, -1)))
+  if (slice.weekEnd > slice.displayEnd) parts.push(...splitByMonth(addDays(slice.displayEnd, 1), slice.weekEnd))
+  return parts
+}
+
 type Partial3 = { d: number; m?: number; y?: number }
 
 function parsePart(text: string): Partial3 | null {
@@ -236,3 +263,4 @@ export function formatID(date: ISODate, opts: { day?: boolean; short?: boolean; 
 }
 export const dayName = (date: ISODate, short = false) => short ? ID_DAYS[weekday(date)].slice(0, 3) : ID_DAYS[weekday(date)]
 export const monthLabel = (month: string) => { const [y, m] = month.split('-').map(Number); return `${ID_MONTHS[m - 1]} ${y}` }
+export const monthName = (month: string) => ID_MONTHS[Number(month.split('-')[1]) - 1]

@@ -18,13 +18,13 @@ import { buildRoster } from '../src/engine/roster.ts'
 import { reconcile } from '../src/engine/reconcile.ts'
 import { dayReviewKey, dayReviewProblem, stableStringify, unresolvedIdentityEvidence } from '../src/engine/dayReview.ts'
 import { createCoverageLookup, inspectMonthlyPackage } from '../src/engine/monthlyFlow.ts'
-import { addDays, eachDay, monthBounds } from '../src/engine/dates.ts'
+import { addDays, eachDay, monthBounds, splitByMonth } from '../src/engine/dates.ts'
 import { OFFICES, OFFICE_CITY } from '../src/engine/ids.ts'
 import { sourceRecordState } from '../src/engine/recordReviews.ts'
 import type { Assignment, SourceFile } from '../src/engine/types.ts'
 import { createUser } from './create-user.ts'
 import { decisionOwned, globalAccess, officeAllowed, requireOffice, sourceAllowed, scopeWorkspace } from './scope.ts'
-import { registerSubmissions } from './submissions.ts'
+import { registerSubmissions, withSubmissionWarnings } from './submissions.ts'
 import { validateMasterChange } from './master.ts'
 import { previewRecordReview, recordReviewInput } from './recordReviews.ts'
 import { canRetryImport, importCommitSchema, importIntentSchema, previewImport } from './imports.ts'
@@ -478,7 +478,7 @@ export function createApp(db: Database, config: { origin: string; production: bo
     if (!upload || upload.userId !== actor.id) throw new HTTPException(404, { message: 'Preview tidak ditemukan' })
     const current = await read(), committed = current.state.files.find(f => f.id === upload.id)
     if (committed) throw new HTTPException(409, { message: 'Workbook sudah di-commit; unggah sumber baru untuk perubahan berikutnya' })
-    return c.json(previewImport(current.state, current.revision, upload.parsed as Workspace['files'][number], actor, intent).impact)
+    return c.json(await withSubmissionWarnings(db, previewImport(current.state, current.revision, upload.parsed as Workspace['files'][number], actor, intent).impact))
   })
   app.post('/api/imports/commit', async c => {
     const actor = c.get('user')
@@ -540,7 +540,7 @@ export function createApp(db: Database, config: { origin: string; production: bo
     return c.json(await change(v.expectedRevision, actor, 'coverage.nil-st', v.basis, state => {
       if (state.files.some(file => file.active !== false && file.kind === 'surat-tugas' && file.office === v.office && file.assignments.some(row => row.start <= bounds.end && row.end >= bounds.start))) throw new HTTPException(409, { message: 'Register ST aktif ditemukan pada rentang ini; periksa konflik sebelum menyatakan nihil' })
       const id = randomUUID(), at = new Date().toISOString()
-      state.files.push({ id, fileName: `Pernyataan nihil ST ${v.office} ${bounds.start}_${bounds.end}`, kind: 'surat-tugas', label: 'Pernyataan nihil ST oleh SDM', office: v.office, importedAt: at, period: bounds, evidence: [], assignments: [], warnings: [v.basis], stats: { rows: 0, people: 0 }, completeThrough: bounds.end, coverageDeclarations: [{ ...bounds, status: 'nil', actorId: actor.id, basis: v.basis, at }], revision: 1, active: true, declaration: { actorId: actor.id, basis: v.basis, at } })
+      state.files.push({ id, fileName: `Pernyataan nihil ST ${v.office} ${bounds.start}_${bounds.end}`, kind: 'surat-tugas', label: 'Pernyataan nihil ST oleh SDM', office: v.office, importedAt: at, period: bounds, evidence: [], assignments: [], warnings: [v.basis], stats: { rows: 0, people: 0 }, completeThrough: bounds.end, coverageDeclarations: splitByMonth(bounds.start, bounds.end).map(part => ({ start: part.start, end: part.end, status: 'nil' as const, actorId: actor.id, basis: v.basis, at })), revision: 1, active: true, declaration: { actorId: actor.id, basis: v.basis, at } })
       return state
     }))
   })
@@ -556,7 +556,7 @@ export function createApp(db: Database, config: { origin: string; production: bo
       const hasRecords = state.files.some(file => file.active !== false && sourceKinds.has(file.kind) && (file.office === v.office || (v.source === 'online' && file.office === 'Semua kantor')) && (file.evidence.some(row => row.office === v.office && row.date >= v.start && row.date <= v.end) || file.assignments.some(row => row.office === v.office && row.start <= v.end && row.end >= v.start)))
       if (hasRecords) throw new HTTPException(409, { message: 'Data sumber aktif ditemukan pada rentang ini; tidak dapat dinyatakan tidak berlaku' })
       const id = randomUUID(), at = new Date().toISOString(), range = { start: v.start, end: v.end }
-      state.files.push({ id, fileName: `Konfirmasi sumber tidak berlaku ${v.source} ${v.office} ${v.start}_${v.end}`, kind, label: 'Konfirmasi cakupan sumber', office: v.office, importedAt: at, period: range, evidence: [], assignments: [], warnings: [v.basis], stats: { rows: 0, people: 0 }, coverageDeclarations: [{ ...range, status: 'not-applicable', actorId: actor.id, basis: v.basis, at }], revision: 1, active: true, declaration: { actorId: actor.id, basis: v.basis, at } })
+      state.files.push({ id, fileName: `Konfirmasi sumber tidak berlaku ${v.source} ${v.office} ${v.start}_${v.end}`, kind, label: 'Konfirmasi cakupan sumber', office: v.office, importedAt: at, period: range, evidence: [], assignments: [], warnings: [v.basis], stats: { rows: 0, people: 0 }, coverageDeclarations: splitByMonth(range.start, range.end).map(part => ({ start: part.start, end: part.end, status: 'not-applicable' as const, actorId: actor.id, basis: v.basis, at })), revision: 1, active: true, declaration: { actorId: actor.id, basis: v.basis, at } })
       return state
     }))
   })
@@ -572,8 +572,11 @@ export function createApp(db: Database, config: { origin: string; production: bo
       const declarations = file.coverageDeclarations ?? []
       if (declarations.some(d => d.start <= v.end && d.end >= v.start && d.status !== v.status)) throw new HTTPException(409, { message: 'Deklarasi bertentangan pada rentang yang sama; buat revisi sumber dengan alasan dan scope jelas' })
       if (v.status === 'not-applicable' && (file.evidence.some(row => row.date >= v.start && row.date <= v.end) || file.assignments.some(row => row.start <= v.end && row.end >= v.start))) throw new HTTPException(409, { message: 'Sumber berisi catatan aktif pada rentang ini; tidak dapat dinyatakan tidak berlaku' })
-      if (declarations.some(d => d.start === v.start && d.end === v.end && d.status === v.status && d.basis === v.basis)) return state
-      file.coverageDeclarations = [...declarations, { start: v.start, end: v.end, status: v.status, basis: v.basis, actorId: actor.id, at: new Date().toISOString() }]
+      // Deklarasi lintas bulan disimpan terbelah per bulan kalender; bagian yang sudah tercatat persis sama dilewati.
+      const parts = splitByMonth(v.start, v.end).filter(part => !declarations.some(d => d.start === part.start && d.end === part.end && d.status === v.status && d.basis === v.basis))
+      if (!parts.length) return state
+      const at = new Date().toISOString()
+      file.coverageDeclarations = [...declarations, ...parts.map(part => ({ start: part.start, end: part.end, status: v.status, basis: v.basis, actorId: actor.id, at }))]
       return state
     }))
   })

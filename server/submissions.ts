@@ -9,16 +9,42 @@ import { auditEvents, mealClaimedDays, mealSubmissions, users, workspaces } from
 import { buildRoster } from '../src/engine/roster.ts'
 import { reconcile } from '../src/engine/reconcile.ts'
 import { enforcePolicy } from '../src/engine/policy.ts'
-import { monthBounds } from '../src/engine/dates.ts'
+import { monthBounds, monthLabel } from '../src/engine/dates.ts'
 import { loadXlsx } from '../src/lib/xlsx.ts'
 import { globalAccess, requireOffice } from './scope.ts'
 import { reviewsForRecords } from '../src/engine/recordReviews.ts'
 import { createCoverageLookup, inspectMonthlyPackage } from '../src/engine/monthlyFlow.ts'
 import { mealDelta, type MealSnapshot } from '../shared/submissions.ts'
+import type { ImportImpactResponse } from '../shared/imports.ts'
 const claimsOf = (snapshot: MealSnapshot) => snapshot.months.flatMap(m => m.days.filter(d => d.meal.state === 'eligible').map(d => ({ key: `${m.employee.nip || m.employee.nika || m.employee.id}|${d.date}`, employeeId: m.employee.id, date: d.date })))
 const ancestorsOf = async (tx: Pick<Database, 'execute'>, id: string) => {
   const rows = await tx.execute(sql`WITH RECURSIVE chain AS (SELECT id, supersedes_id FROM hr_internal.meal_submissions WHERE id = ${id} UNION ALL SELECT p.id, p.supersedes_id FROM hr_internal.meal_submissions p JOIN chain c ON p.id = c.supersedes_id) SELECT id FROM chain`)
   return (rows as unknown as { id: string }[]).map(r => r.id)
+}
+const SUBMISSION_STATUS_LABEL: Record<string, string> = { submitted: 'diajukan', approved: 'disetujui', locked: 'terkunci' }
+/**
+ * Menambahkan peringatan (tidak memblokir unggahan) bila bulan yang tersentuh unggahan sudah punya pengajuan uang makan.
+ * Pengajuan disetujui atau terkunci tidak boleh berubah diam-diam; perubahan bulan itu harus lewat alur koreksi.
+ */
+export async function withSubmissionWarnings(db: Pick<Database, 'select'>, impact: ImportImpactResponse): Promise<ImportImpactResponse> {
+  const touched = (impact.byMonth ?? []).filter(row => row.added > 0 || row.changedDays > 0 || row.changedAmounts > 0)
+  if (!touched.length) return impact
+  const submissions = await db.select({ id: mealSubmissions.id, period: mealSubmissions.period, status: mealSubmissions.status, version: mealSubmissions.version }).from(mealSubmissions)
+    .where(and(inArray(mealSubmissions.period, touched.map(row => row.month)), ne(mealSubmissions.status, 'cancelled')))
+  if (!submissions.length) return impact
+  const warnings = [...impact.warnings ?? []]
+  const byMonth = (impact.byMonth ?? []).map(row => {
+    const matches = submissions.filter(item => item.period === row.month)
+    const latest = matches.sort((a, b) => b.version - a.version)[0]
+    if (!latest || !touched.includes(row)) return row
+    const status = SUBMISSION_STATUS_LABEL[latest.status] ?? latest.status
+    const effect = [row.added ? `${row.added} baris baru` : '', row.changedDays ? `${row.changedDays} hari berubah` : ''].filter(Boolean).join(', ')
+    warnings.push(latest.status === 'submitted'
+      ? `${monthLabel(row.month)} sudah punya pengajuan uang makan yang belum disetujui (${effect}). Batalkan dan ajukan ulang setelah unggahan ini.`
+      : `${monthLabel(row.month)} sudah punya pengajuan uang makan ${status} v${latest.version} (${effect}). Perubahan untuk bulan ini harus lewat alur koreksi pengajuan, karena pengajuan ${status} tidak ikut berubah.`)
+    return { ...row, submission: { id: latest.id, status: latest.status, version: latest.version } }
+  })
+  return { ...impact, byMonth, warnings }
 }
 export function registerSubmissions(app: Hono<{ Variables: { user: User; sessionHash: string } }>, db: Database) {
   app.get('/api/meal-submissions', async c => {
@@ -75,9 +101,11 @@ export function registerSubmissions(app: Hono<{ Variables: { user: User; session
       if (!inspectMonthlyPackage(state.files, v.period).ready) throw new HTTPException(422, { message: 'Pengajuan ditahan: paket Mesin Offline, Mesin Online, dan ST seluruh kantor belum lengkap untuk bulan ini' })
       const calculation = reconcile(state.files, roster, bounds, state.policy, state.resolutions, undefined, state.dayReviews, createCoverageLookup(state.files))
       const months = calculation.months.filter(m => v.office === 'Semua' || m.employee.kantor === v.office)
+      // Satu tanggal hanya milik bulannya sendiri: snapshot dan klaim tidak boleh memuat tanggal di luar periode pengajuan.
+      if (months.some(m => m.days.some(d => d.date < bounds.start || d.date > bounds.end))) throw new HTTPException(500, { message: `Perhitungan memuat tanggal di luar periode ${v.period}; pengajuan dibatalkan` })
       if ((!months.length && !parent) || !state.policy.parametersApproved || !state.policy.taxParametersApproved || months.some(m => m.heldDays || m.amountPendingDays || m.openClashes)) throw new HTTPException(422, { message: 'Pengajuan ditahan: lengkapi bukti, mapping, review, serta pengesahan parameter uang makan dan PPh/netto terlebih dahulu' })
       if (roster.conflicts.some(i => i.employeeIds.some(id => months.some(m => m.employee.id === id)))) throw new HTTPException(422, { message: 'Konflik identitas harus selesai sebelum pengajuan' })
-      const eligible = months.flatMap(m => m.days.filter(d => d.meal.state === 'eligible').map(d => ({ key: `${m.employee.nip || m.employee.nika || m.employee.id}|${d.date}`, employeeId: m.employee.id, date: d.date })))
+      const eligible = months.flatMap(m => m.days.filter(d => d.meal.state === 'eligible' && d.date >= bounds.start && d.date <= bounds.end).map(d => ({ key: `${m.employee.nip || m.employee.nika || m.employee.id}|${d.date}`, employeeId: m.employee.id, date: d.date })))
       if (new Set(eligible.map(d => d.key)).size !== eligible.length) throw new HTTPException(422, { message: 'Identitas ganda menghasilkan hak employee-date yang sama' })
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext('kppu-meal-claims'))`)
       const existingClaims = eligible.length ? await tx.select().from(mealClaimedDays).where(inArray(mealClaimedDays.key, eligible.map(d => d.key))) : []

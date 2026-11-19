@@ -8,11 +8,12 @@ import { useAuth } from '../state/Auth.tsx'
 import { reconcile, STATUS_LABEL, type DayRecord, type EmployeeMonth } from '../engine/reconcile.ts'
 import { POLICY_PRESETS, type GolGroup, type MealPolicy } from '../engine/policy.ts'
 import { createCoverageLookup } from '../engine/monthlyFlow.ts'
-import { formatID, monthBounds, monthLabel } from '../engine/dates.ts'
+import { formatID, monthBounds, monthLabel, monthName, weekOtherPart } from '../engine/dates.ts'
 import { downloadWorkbook } from '../lib/xlsx.ts'
 import { fmt, money } from '../lib/format.ts'
 import { DayDetail } from '../components/DayDetail.tsx'
 import { WeekPicker } from '../components/WeekPicker.tsx'
+import { dateSpan } from '../lib/weekLabel.ts'
 import { Drawer, Kpi, Note, PageHeader, Panel, Seg, StatusChip } from '../components/ui.tsx'
 import type { Nav } from '../App.tsx'
 import './meal.css'
@@ -100,7 +101,7 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
 
   const exportXlsx = async () => {
     const period = view === 'week'
-      ? `${calculation.period.start}–${calculation.period.end}${hr.weekSlice.crossesMonth && hr.weekScope === 'month-part' ? ` · bagian ${monthLabel(hr.activePeriod)} dari pekan ${hr.weekSlice.weekStart}–${hr.weekSlice.weekEnd}` : ''}`
+      ? `${calculation.period.start}–${calculation.period.end}${hr.weekSlice.crossesMonth ? ` · bagian ${monthLabel(hr.activePeriod)} dari pekan ${hr.weekSlice.weekStart}–${hr.weekSlice.weekEnd}` : ''}`
       : monthLabel(hr.activePeriod)
     const head = ['No', 'Nama', 'NIP', 'NIKA', 'Kantor', 'Unit', 'Status', 'Jabatan', 'Golongan', 'Kelompok tarif', 'Hari kerja', 'Jumlah kehadiran', 'Hari uang makan', 'Hari ditahan', 'Tarif/hari', 'Bruto', 'PPh %', 'PPh', 'Netto', 'Catatan']
     const nominatif = rows.map((m, i) => [i + 1, m.employee.nama, m.employee.nip, m.employee.nika, m.employee.kantor, m.employee.unit, m.employee.statusKepegawaian, m.employee.jabatan, m.employee.golongan, `${m.group}${m.groupAssumed ? ' (belum diketahui)' : ''}`, m.workdays, m.present, m.mealDays, m.heldDays, m.amountPendingDays ? null : m.employee.rateHistory?.length ? 'Sesuai tarif harian' : m.rate, m.amountPendingDays ? null : m.bruto, m.amountPendingDays ? null : !m.nettoReady ? 'Belum ditetapkan' : m.employee.rateHistory?.length ? 'Sesuai tarif harian' : m.pphPct, m.amountPendingDays ? null : !m.nettoReady ? 'Belum ditetapkan' : m.pph, m.amountPendingDays ? null : !m.nettoReady ? 'Belum ditetapkan' : m.netto, [!m.employee.nip && 'NIP belum ada', m.heldDays && `${m.heldDays} hari ditahan`, m.noData && `${m.noData} hari tidak ditemukan`, m.amountPendingDays && `${m.amountPendingDays} hari tarif pending`, !m.nettoReady && 'PPh/netto belum ditetapkan'].filter(Boolean).join('; ')])
@@ -108,7 +109,7 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
     const held = rows.flatMap(m => m.days.filter(d => d.meal.state === 'held').map(d => [m.employee.nama, m.employee.nip, d.date, d.meal.reason, d.issues.map(i => i.detail).join(' | ')]))
     const evidenceRows = hr.files.flatMap(file => file.evidence.filter(e => e.date >= calculation.period.start && e.date <= calculation.period.end && (office === 'Semua' || e.office === office)).map(e => [file.fileName, e.ref, e.kind, e.office, e.name, e.sourceValues?.identifier ?? '', e.ids.nip ?? '', e.ids.nika ?? '', e.ids.mesin ?? '', e.ids.appId ?? '', e.unit ?? '', e.sourceValues?.date ?? '', e.date, e.sourceValues?.mode ?? e.mode ?? e.codeLabel ?? '', e.sourceValues?.approval ?? e.approvalStatus ?? '', e.clockIn ?? '', e.clockOut ?? '', e.sourceValues?.scheduleStart ?? e.schedule?.start ?? '', e.sourceValues?.scheduleEnd ?? e.schedule?.end ?? '', e.sourceValues?.duration ?? '', e.sourceDurationMin ?? '', e.sourceValues?.minimumDuration ?? '', e.minimumDurationMin ?? '', e.lateMin ?? '', e.earlyMin ?? '', e.overtimeMin ?? '', e.targetPekerjaan ?? '', e.hasilPekerjaan ?? '', e.sourceValues?.exception ?? e.codeLabel ?? '', e.location ?? '', e.officePending ? 'Perlu konfirmasi' : 'Terpetakan']))
     const p = hr.policy
-    const exportPeriod = view === 'week' ? `pekan_${hr.weekSlice.weekStart}` : hr.activePeriod
+    const exportPeriod = view === 'week' ? `${hr.activePeriod}_pekan${hr.weekSlice.index}` : hr.activePeriod
     await downloadWorkbook(`Daftar_Nominatif_Uang_Makan_${exportPeriod}${office !== 'Semua' ? `_${office.replace(/\s/g, '')}` : ''}.xlsx`, [
       { name: 'Nominatif', rows: [[`DAFTAR PROGRESIF UANG MAKAN — KOMISI PENGAWAS PERSAINGAN USAHA`], [`Periode ${period} · ${office === 'Semua' ? 'Seluruh KPPU' : office} · dibuat ${new Date().toLocaleString('id-ID')} oleh ${hr.reviewer}`], [], head, ...nominatif, [], ['', 'JUMLAH', '', '', '', '', '', '', '', '', '', total(m => m.present), total(m => m.mealDays), total(m => m.heldDays), '', grossReady ? total(m => m.bruto) : 'Pending', '', taxReady ? total(m => m.pph) : 'Belum ditetapkan', taxReady ? total(m => m.netto) : 'Belum ditetapkan']], widths: [5, 30, 20, 11, 11, 34, 12, 16, 10, 12, 9, 10, 10, 10, 10, 13, 7, 11, 13, 32] },
       { name: 'Rincian Harian', rows: [['Nama', 'NIP', 'Tanggal', 'Status', 'Masuk', 'Pulang', 'Terlambat (mnt)', 'Uang makan', 'Alasan', 'Nominal', 'PPh % efektif', 'Dasar status', 'Sumber'], ...daily], widths: [28, 20, 11, 22, 7, 7, 9, 10, 40, 10, 40, 22] },
@@ -125,7 +126,7 @@ export function MealPage({ nav, toast }: { nav: Nav; toast: (m: string) => void 
       Hari tanpa clash divalidasi otomatis; hari dengan clash menunggu keputusan di Rekonsiliasi. Nominal final muncul setelah ketiga sumber pekan (Offline, Online, ST) disetor, sebelumnya tampil sebagai perkiraan.
     </PageHeader>
 
-    {view === 'month' ? <SubmissionPanel /> : <Note>Setoran dan review mingguan terakumulasi pada periode {monthLabel(hr.activePeriod)}. Pengajuan nominatif tetap dilakukan melalui tampilan akumulasi bulan.</Note>}
+    {view === 'month' ? <SubmissionPanel /> : <Note>Setoran dan review mingguan terakumulasi pada periode {monthLabel(hr.activePeriod)}. Pengajuan nominatif tetap dilakukan melalui tampilan akumulasi bulan.{hr.weekSlice.crossesMonth && ` Pekan ini melintasi dua bulan; tabel hanya memuat ${dateSpan(hr.weekSlice.displayStart, hr.weekSlice.displayEnd)}, sedangkan ${weekOtherPart(hr.weekSlice).map(part => `${dateSpan(part.start, part.end)} (${monthName(part.month)})`).join(' dan ')} dihitung di bulannya.`}</Note>}
     <section className="meal-hero">
       <div className="mh-card mh-final"><span className="mh-label"><WalletCards size={14} /> UM final</span><strong>{grossReady ? money.format(total(m => m.bruto)) : 'Pending'}</strong><small>{taxReady ? `Netto ${money.format(total(m => m.netto))} · PPh ${money.format(total(m => m.pph))}` : 'Hari tanpa clash dan setoran lengkap; PPh/netto belum ditetapkan'}</small></div>
       <div className="mh-card mh-est"><span className="mh-label"><Hourglass size={14} /> UM perkiraan</span><strong>{money.format(total(m => m.estimateBruto))}</strong><small>{fmt.format(total(m => m.estimateDays))} hari menunggu setoran lengkap</small></div>

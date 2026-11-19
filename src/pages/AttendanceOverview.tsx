@@ -6,7 +6,7 @@ import { formatID, monthLabel, weeksInMonth } from '../engine/dates.ts'
 import { createCoverageLookup, inspectSourceCoverage, type CoverageSource } from '../engine/monthlyFlow.ts'
 import { reconcile } from '../engine/reconcile.ts'
 import { money, fmt } from '../lib/format.ts'
-import { Note, PageHeader, Seg } from '../components/ui.tsx'
+import { Note, PageHeader } from '../components/ui.tsx'
 import type { Nav } from '../App.tsx'
 import { ImportPage, type UploadRequest } from './ImportPage.tsx'
 import { WeekPicker } from '../components/WeekPicker.tsx'
@@ -109,7 +109,7 @@ export function AttendanceOverview({ nav, toast }: { nav: Nav; toast: (message: 
           return <div key={row.slice.weekStart} className={`board-row board-cols ${isSel ? 'selected' : ''}`}>
             <button type="button" className="week-cell" onClick={() => hr.selectWeek(row.slice.weekStart)} aria-pressed={isSel}>
               <strong>Pekan {row.slice.index}</strong>
-              <small>{dateLabel(row.slice.displayStart, row.slice.displayEnd)}{row.slice.crossesMonth ? ' · lintas bulan' : ''}</small>
+              <small>{dateLabel(row.slice.displayStart, row.slice.displayEnd)}{row.slice.crossesMonth ? ' · pekan lintas bulan' : ''}</small>
               <span className={`tone-chip tone-${row.status.tone}`}>{row.status.label}</span>
             </button>
             {SOURCES.map(source => {
@@ -127,7 +127,7 @@ export function AttendanceOverview({ nav, toast }: { nav: Nav; toast: (message: 
       </div>
     </section>
 
-    <div className="toolbar"><WeekPicker /><Seg label="Cakupan tampilan" value={hr.weekScope} onChange={value => hr.setWeekScope(value as 'month-part' | 'full')} options={[{ value: 'month-part', label: 'Bagian bulan' }, { value: 'full', label: 'Pekan penuh' }]} /></div>
+    <div className="toolbar"><WeekPicker /></div>
     {hr.roster.employees.length === 0 && <Note tone="warn"><CircleHelp size={14} /> Impor master pegawai dulu agar daftar pegawai aktif dan target review sesuai.</Note>}
 
     <ImportPage nav={nav} toast={toast} request={request} clashCount={selected.clashes} />

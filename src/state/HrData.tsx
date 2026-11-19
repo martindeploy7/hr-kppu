@@ -4,16 +4,16 @@ import { buildRoster, type Roster } from '../engine/roster.ts'
 import { reconcile, type Reconciliation } from '../engine/reconcile.ts'
 import { createCoverageLookup, inspectMonthlyPackage, type MonthlyPackage } from '../engine/monthlyFlow.ts'
 import { enforcePolicy, type MealPolicy } from '../engine/policy.ts'
-import { eachDay, monthBounds, weekRange, weeksInMonth, type WeekSlice } from '../engine/dates.ts'
+import { eachDay, monthBounds, weeksInMonth, type WeekSlice } from '../engine/dates.ts'
 import { api, ApiError, downloadJson } from '../lib/api.ts'
 import { useAuth } from './Auth.tsx'
 import { emptyWorkspace, upsertEmployees, type Workspace, type WorkspaceResponse } from '../../shared/workspace.ts'
 import type { ImportImpactResponse, ImportProposal } from '../../shared/imports.ts'
 
-export type ImportResult = { name: string; ok: boolean; message: string }
+export type ImportResult = { name: string; ok: boolean; message: string; /** Peringatan tidak memblokir, mis. bulan dengan pengajuan uang makan terkunci. */ notes?: string[] }
 type Preview = { duplicate: boolean; file: SourceFile }
 type Ctx = Workspace & {
-  ready: boolean; roster: Roster; recordRoster: Roster; recon: Reconciliation; weekRecon: Reconciliation; weekSlice: WeekSlice; weekScope: 'month-part' | 'full'; periods: string[]; activePeriod: string; monthlyPackage: MonthlyPackage
+  ready: boolean; roster: Roster; recordRoster: Roster; recon: Reconciliation; weekRecon: Reconciliation; weekSlice: WeekSlice; periods: string[]; activePeriod: string; monthlyPackage: MonthlyPackage
   revision: number; saveStatus: 'loading' | 'saved' | 'saving' | 'error'; saveError: string
   retrySave: () => void; reload: () => Promise<void>; backup: () => void
   previewFiles: (files: File[], dateOrder?: 'DMY' | 'MDY', weekly?: boolean) => Promise<{ previews: Preview[]; results: ImportResult[] }>
@@ -31,7 +31,7 @@ type Ctx = Workspace & {
   reviewDay: (input: { employeeId: string; date: string; status: ValidatedDayStatus; evidenceIds: string[]; assignmentIds: string[]; note: string; signature: string }) => void
   unreviewDay: (employeeId: string, date: string) => void
   resolve: (ids: string[], decision: Resolution['decision'], note: string) => void; unresolve: (ids: string[]) => void
-  setPolicy: (patch: Partial<MealPolicy>) => void; setPeriod: (period: string) => void; selectWeek: (weekStart: string) => void; setWeekScope: (scope: 'month-part' | 'full') => void; setReviewer: (name: string) => void
+  setPolicy: (patch: Partial<MealPolicy>) => void; setPeriod: (period: string) => void; selectWeek: (weekStart: string) => void; setReviewer: (name: string) => void
 }
 const HrContext = createContext<Ctx | null>(null)
 export function useHr() { const ctx = useContext(HrContext); if (!ctx) throw new Error('useHr outside provider'); return ctx }
@@ -116,9 +116,9 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date())
   const defaultWeek = weekSlices.find(slice => slice.displayStart <= today && slice.displayEnd >= today) ?? weekSlices[0]
   const weekSlice = weekSlices.find(slice => slice.weekStart === preferredWeekStart) ?? defaultWeek
-  const weekScopeKey = `kppu.hr.weekScope:${user.id}:${activePeriod}`
-  const weekScope = (() => { try { return window.localStorage.getItem(weekScopeKey) === 'full' ? 'full' : 'month-part' } catch { return 'month-part' } })() as 'month-part' | 'full'
-  const activeWeekRange = weekScope === 'full' ? weekRange(weekSlice.weekStart) : { start: weekSlice.displayStart, end: weekSlice.displayEnd }
+  // Tampilan selalu per bulan kalender: pekan terpilih hanya memuat bagian bulan aktif; tanggal bulan tetangga dihitung di bulannya.
+  // (Preferensi lama `kppu.hr.weekScope:*` di localStorage tidak dibaca lagi dan tidak berpengaruh.)
+  const activeWeekRange = { start: weekSlice.displayStart, end: weekSlice.displayEnd }
   const weekRecon = useMemo(() => reconcile(files, roster, activeWeekRange, state.policy, state.resolutions, undefined, state.dayReviews, coverageLookup), [files, roster, activeWeekRange.start, activeWeekRange.end, state.policy, state.resolutions, state.dayReviews, coverageLookup])
   const localMonthlyPackage = useMemo(() => inspectMonthlyPackage(files, activePeriod), [files, activePeriod])
   const officeScoped = !!user.offices?.length
@@ -144,7 +144,7 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
     ...state, files, reviewer: user.name, resolutions: effectiveResolutions, ready, revision, saveStatus, saveError,
     retrySave: () => { setSaveError(''); setRetry(n => n + 1) }, reload,
     backup: () => downloadJson(`KPPU_HR_backup_r${revision}.json`, { application: 'kppu-hr', exportedAt: new Date().toISOString(), revision, state }),
-    roster, recordRoster, recon, weekRecon, weekSlice, weekScope, periods: [...new Set([activePeriod, ...periods])], activePeriod, monthlyPackage,
+    roster, recordRoster, recon, weekRecon, weekSlice, periods: [...new Set([activePeriod, ...periods])], activePeriod, monthlyPackage,
     previewFiles: async (files, dateOrder, weekly) => {
       const previews: Preview[] = [], results: ImportResult[] = []
       for (const file of files) {
@@ -180,7 +180,6 @@ export function HrDataProvider({ children }: { children: ReactNode }) {
     setPolicy: p => patch(s => ({ policy: enforcePolicy({ ...s.policy, ...p }) })),
     setPeriod: next => { setLocalPeriod(next); if (user.role === 'superadmin') patch(() => ({ period: next })) },
     selectWeek: weekStart => { try { window.localStorage.setItem(weekPreferenceKey, weekStart) } catch { /* preference is optional */ }; setRetry(n => n + 1) },
-    setWeekScope: scope => { try { window.localStorage.setItem(weekScopeKey, scope) } catch { /* preference is optional */ }; setRetry(n => n + 1) },
     setReviewer: () => {},
   }
   return <HrContext.Provider value={value}>{children}</HrContext.Provider>

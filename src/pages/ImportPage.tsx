@@ -4,14 +4,15 @@ import { useAuth } from '../state/Auth.tsx'
 import { useHr, type ImportResult } from '../state/HrData.tsx'
 import type { SourceFile, SourceKind } from '../engine/types.ts'
 import { OFFICES } from '../engine/ids.ts'
-import { formatID, weekRange } from '../engine/dates.ts'
+import { formatID, monthLabel, monthName, splitByMonth, weekOtherPart, weekRange } from '../engine/dates.ts'
 import { coverageSource, inspectSourceCoverage, type CoverageSource } from '../engine/monthlyFlow.ts'
 import { fmt } from '../lib/format.ts'
 import { Note } from '../components/ui.tsx'
 import { useDialog } from '../components/Dialog.tsx'
 import type { Nav } from '../App.tsx'
 import { SourceRecords } from '../components/SourceRecords.tsx'
-import type { ImportProposal } from '../../shared/imports.ts'
+import { dateSpan, neighbourCoverage } from '../lib/weekLabel.ts'
+import type { ImportImpactResponse, ImportProposal } from '../../shared/imports.ts'
 import './setoran.css'
 
 const FORMATS: { kind: string; example: string; detail: string }[] = [
@@ -28,6 +29,11 @@ const SOURCE_ICON = { offline: Printer, online: Globe2, 'surat-tugas': ScrollTex
 type UploadContext = { office: string; source: CoverageSource; start: string; end: string }
 
 export type UploadRequest = { source: CoverageSource; nonce: number }
+
+/** Ringkasan per bulan setelah unggah: "Juli 2026: 9 baris baru, 3 hari berubah". */
+function monthBreakdown(impact: ImportImpactResponse) {
+  return (impact.byMonth ?? []).filter(row => row.added || row.duplicate || row.changedDays).map(row => `${monthLabel(row.month)}: ${fmt.format(row.added)} baris baru${row.duplicate ? `, ${fmt.format(row.duplicate)} duplikat` : ''}${row.changedDays ? `, ${fmt.format(row.changedDays)} hari berubah` : ''}`)
+}
 
 export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; toast: (m: string) => void; request?: UploadRequest; clashCount?: number }) {
   const hr = useHr()
@@ -46,11 +52,17 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
   const [dragSource, setDragSource] = useState<CoverageSource>()
   const dialog = useDialog()
   const [open, setOpen] = useState<string | null>(null)
-  const selectedRange = hr.weekScope === 'full' ? weekRange(hr.weekSlice.weekStart) : { start: hr.weekSlice.displayStart, end: hr.weekSlice.displayEnd }
+  // Satuan unggah selalu pekan Senin–Minggu penuh; baris disimpan dengan tanggalnya sendiri dan dihitung di bulan kalendernya.
+  const selectedRange = weekRange(hr.weekSlice.weekStart)
+  const otherParts = weekOtherPart(hr.weekSlice)
   const offices = user.offices?.length ? user.offices : OFFICES
   const sourceCoverage = useMemo(() => inspectSourceCoverage(hr.files, selectedRange.start, selectedRange.end), [hr.files, selectedRange.start, selectedRange.end])
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date())
   const rangeElapsed = selectedRange.end <= today
+  const declarable = selectedRange.start <= today
+  const declaredEnd = selectedRange.end < today ? selectedRange.end : today
+  const neighbourNote = neighbourCoverage(selectedRange, hr.activePeriod, today)
+  const partCoverage = useMemo(() => hr.weekSlice.crossesMonth ? splitByMonth(selectedRange.start, selectedRange.end).map(part => ({ part, coverage: inspectSourceCoverage(hr.files, part.start, part.end) })) : [], [hr.files, hr.weekSlice.crossesMonth, selectedRange.start, selectedRange.end])
   const uploadedFiles = hr.files.filter(file => !file.id.startsWith('manual-st:') && (!fileFilter || coverageSource(file.kind) === fileFilter.source && (fileFilter.office === 'Semua kantor' || file.office === fileFilter.office || file.evidence.some(row => row.office === fileFilter.office) || file.assignments.some(row => row.office === fileFilter.office))))
 
   useEffect(() => {
@@ -78,18 +90,18 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
   }, [request?.nonce])
 
   const submitNa = async (source: CoverageSource) => {
-    if (!rangeElapsed) { toast('Konfirmasi hanya dapat dibuat untuk tanggal yang sudah berlangsung'); return }
+    if (!declarable) { toast('Konfirmasi hanya dapat dibuat untuk tanggal yang sudah berlangsung'); return }
     const nil = source === 'surat-tugas'
     const basis = await dialog.prompt({
       title: nil ? 'Tidak ada ST pekan ini' : `${sourceLabels[source]}: tidak ada data pekan ini`,
-      message: `${formatID(selectedRange.start)}–${formatID(selectedRange.end)}. Pernyataan ini dicatat sebagai jejak audit dan menandai sumber sudah beres untuk pekan ini.`,
+      message: `${formatID(selectedRange.start)}–${formatID(declaredEnd)}. Pernyataan ini dicatat sebagai jejak audit dan menandai sumber sudah beres untuk pekan ini.${neighbourNote ? ` ${neighbourNote}` : ''}`,
       label: 'Alasan atau dasar', minLength: 10, placeholder: nil ? 'Mis. register ST Pusat dan Kanwil dicek, tidak ada ST pekan ini.' : 'Mis. mesin tidak beroperasi pekan ini, sesuai surat ...',
       confirmLabel: 'Simpan pernyataan',
     })
     if (!basis) return
     try {
-      if (nil) await hr.declareNilSt('Pusat', selectedRange.start, selectedRange.end, basis)
-      else await hr.declareNotApplicable('Pusat', source, selectedRange.start, selectedRange.end, basis)
+      if (nil) await hr.declareNilSt('Pusat', selectedRange.start, declaredEnd, basis)
+      else await hr.declareNotApplicable('Pusat', source, selectedRange.start, declaredEnd, basis)
       toast(`${sourceLabels[source]}: tidak ada data pekan ini dicatat`)
     } catch (error) { toast((error as Error).message) }
   }
@@ -110,7 +122,8 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
         try {
           if (!target) throw new Error('Pilih kartu sumber terlebih dahulu.')
           if (coverageSource(file.kind) !== target.source) throw new Error(`File terdeteksi sebagai ${sourceLabels[coverageSource(file.kind)]}. Pilih kartu sumber yang sesuai.`)
-          // Setoran mingguan: baris di luar pekan disaring di server; upload menandai sumber ini diterima untuk pekan tsb.
+          // Setoran mingguan: rentang selalu pekan penuh. Baris di luar pekan disaring di server; baris di dalamnya disimpan dengan
+          // tanggalnya sendiri (bulan tetangga ikut dihitung di bulannya) dan deklarasi cakupan dibelah per bulan oleh server.
           const coverageEnd = target.end < today ? target.end : today
           const proposal: ImportProposal = {
             uploadId: file.id, expectedRevision: revision, office: 'Semua kantor',
@@ -122,7 +135,9 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
           await hr.commitImport(proposal, impact.checksum)
           revision++
           const outside = impact.source.parsedRows - impact.counts.added - impact.counts.duplicate
-          result.message = `${fmt.format(impact.counts.added)} baris baru tersimpan${impact.counts.duplicate ? `, ${fmt.format(impact.counts.duplicate)} duplikat dilewati` : ''}${outside > 0 ? `; ${fmt.format(outside)} baris di luar pekan tidak dipakai` : ''}. Kantor tiap baris dipetakan otomatis.${file.quarantined?.length ? ` ${file.quarantined.length} baris perlu diperiksa di rincian sumber.` : ''}${impact.coverageNote ? ` ${impact.coverageNote}` : ''}`
+          const months = monthBreakdown(impact)
+          result.message = `${fmt.format(impact.counts.added)} baris baru tersimpan${impact.counts.duplicate ? `, ${fmt.format(impact.counts.duplicate)} duplikat dilewati` : ''}${outside > 0 ? `; ${fmt.format(outside)} baris di luar pekan tidak dipakai` : ''}.${months.length > 1 ? ` Per bulan: ${months.join('; ')}.` : ''} Kantor tiap baris dipetakan otomatis.${file.quarantined?.length ? ` ${file.quarantined.length} baris perlu diperiksa di rincian sumber.` : ''}${impact.coverageNote ? ` ${impact.coverageNote}` : ''}${neighbourNote ? ` ${neighbourNote}` : ''}`
+          if (impact.warnings?.length) result.notes = impact.warnings
         } catch (error) {
           result.ok = false
           result.message = (error as Error).message
@@ -136,16 +151,16 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
   }
 
   const declareFileCoverage = async (file: SourceFile, status: 'complete' | 'partial') => {
-    if (!rangeElapsed) { toast('Cakupan hanya dapat dikonfirmasi untuk tanggal yang sudah berlangsung'); return }
+    if (!declarable) { toast('Cakupan hanya dapat dikonfirmasi untuk tanggal yang sudah berlangsung'); return }
     const complete = status === 'complete'
     const basis = await dialog.prompt({
       title: complete ? `Konfirmasi cakupan lengkap ${file.fileName}` : `Tandai ${file.fileName} sebagai parsial`,
-      message: `${file.office}, ${formatID(selectedRange.start)}–${formatID(selectedRange.end)}.${complete ? ' Untuk ST, pastikan seluruh register yang diwajibkan sudah tercakup.' : ''}`,
+      message: `${file.office}, ${formatID(selectedRange.start)}–${formatID(declaredEnd)}.${complete ? ' Untuk ST, pastikan seluruh register yang diwajibkan sudah tercakup.' : ''}${neighbourNote ? ` ${neighbourNote.replace('Konfirmasi ini', complete ? 'Konfirmasi ini' : 'Penandaan ini')}` : ''}`,
       label: complete ? 'Dasar kelengkapan' : 'Dasar status parsial', minLength: 10, placeholder: 'Rujukan dan alasan, minimal 10 karakter',
       confirmLabel: complete ? 'Konfirmasi lengkap' : 'Tandai parsial',
     })
     if (!basis) return
-    try { await hr.declareFileCoverage(file.id, selectedRange.start, selectedRange.end, status, basis); toast(`Cakupan ${complete ? 'lengkap' : 'parsial'} dicatat`) }
+    try { await hr.declareFileCoverage(file.id, selectedRange.start, declaredEnd, status, basis); toast(`Cakupan ${complete ? 'lengkap' : 'parsial'} dicatat`) }
     catch (error) { toast((error as Error).message) }
   }
 
@@ -154,9 +169,10 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
       <div className="week-head">
         <h3>Setoran pekan {formatID(selectedRange.start, { short: true })}–{formatID(selectedRange.end, { short: true })}</h3>
         <p className="setoran-hint">Tiga file untuk seluruh KPPU. Seret file ke kartu atau klik tombolnya.</p>
+        {otherParts.length > 0 && <p className="setoran-hint cross-month-hint">Pekan ini melintasi dua bulan. Baris bertanggal {otherParts.map(part => `${dateSpan(part.start, part.end)} (${monthName(part.month)})`).join(' dan ')} ikut tersimpan dan dihitung di bulannya, bukan di {monthName(hr.activePeriod)}.</p>}
         <details className="setoran-how"><summary>Cara kerja</summary>
-          <p>Kantor tiap baris dipetakan otomatis. File multi-pekan boleh diunggah; hanya tanggal pekan ini yang dipakai.</p>
-          <p>Setelah tersimpan, sumber tersebut tercatat sudah disetor untuk pekan ini. Mengunggah ulang file yang sama untuk pekan lain diperbolehkan; baris ganda dilewati.</p>
+          <p>Kantor tiap baris dipetakan otomatis. Satu unggahan mencakup satu pekan penuh, Senin sampai Minggu. Tiap baris dihitung di bulan sesuai tanggalnya sendiri, jadi pekan yang melintasi dua bulan cukup diunggah sekali.</p>
+          <p>Setelah tersimpan, sumber tersebut tercatat sudah disetor untuk seluruh tanggal pekan ini, di kedua bulan. File yang berisi banyak pekan boleh diunggah ulang untuk pekan lain; baris ganda dilewati, dan file yang sama untuk pekan yang sama ditolak.</p>
         </details>
       </div>
       <div className="weekly-upload-cards" role="group" aria-label="Sumber setoran mingguan">
@@ -179,12 +195,13 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
             <div className="src-head"><span className="src-icon"><Icon size={18} /></span><strong>{label}</strong></div>
             <span className={`tone-chip tone-${tone}`}>{item.ready ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />} {status}</span>
             <small className="src-meta">{item.files ? `${item.files} file tersimpan` : 'Belum ada file'}</small>
+            {partCoverage.length > 0 && <small className="src-meta src-months">{partCoverage.map(({ part, coverage }) => { const c = coverage.find(entry => entry.source === source)!; return `${dateSpan(part.start, part.end)} ${c.ready ? 'disetor' : c.state === 'missing' ? 'belum' : 'sebagian'}` }).join(' · ')}</small>}
             <button type="button" className="office-source-main" disabled={busy} onClick={() => selectSource('Semua kantor', source)} aria-label={canUpload ? `Unggah ${sourceLabels[source]}` : `Lihat ${sourceLabels[source]}`}>
               <UploadCloud size={15} /> <span className="office-source-action">{canUpload ? item.files ? 'Unggah tambahan / koreksi' : 'Pilih file atau seret ke sini' : 'Lihat sumber'}</span>
             </button>
             <div className="office-source-extra">
               {source === 'surat-tugas' && <button type="button" className="link" onClick={() => nav('rekap-st', 'Pusat')}>Isi ST manual</button>}
-              {canUpload && !item.ready && <button type="button" className="link" disabled={busy || !rangeElapsed} onClick={() => void submitNa(source)}>{source === 'surat-tugas' ? 'Tidak ada ST pekan ini' : 'Tidak ada data pekan ini'}</button>}
+              {canUpload && !item.ready && <button type="button" className="link" disabled={busy || !declarable} onClick={() => void submitNa(source)}>{source === 'surat-tugas' ? 'Tidak ada ST pekan ini' : 'Tidak ada data pekan ini'}</button>}
             </div>
           </div>
         })}
@@ -200,7 +217,7 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
         <h2 id="setoran-dialog-title">{sourceLabels[modalTarget.source]} · seluruh KPPU</h2>
         <p className="setoran-dialog-period">{formatID(modalTarget.start)}–{formatID(modalTarget.end)}</p>
         {user.role === 'superadmin' ? <>
-          <p>Pilih file Excel asli dari sumbernya. Hanya tanggal pekan ini yang dipakai; kantor tiap baris dipetakan otomatis.</p>
+          <p>Pilih file Excel asli dari sumbernya. Hanya tanggal pekan ini yang dipakai; kantor tiap baris dipetakan otomatis.{neighbourNote ? ` Baris bertanggal bulan tetangga dihitung di bulannya. ${neighbourNote}` : ''}</p>
           <input ref={input} aria-label="Pilih file absensi" hidden type="file" multiple accept=".xls,.xlsx" disabled={busy} onChange={e => {
             const files = [...(e.currentTarget.files ?? [])]
             e.currentTarget.value = ''
@@ -223,7 +240,7 @@ export function ImportPage({ nav, toast, request, clashCount = 0 }: { nav: Nav; 
         <label className="select-label">Urutan tanggal dalam file<select className="select" value={dateOrder} onChange={e => setDateOrder(e.target.value as typeof dateOrder)}><option value="">Deteksi otomatis; minta konfirmasi jika ambigu</option><option value="DMY">DD/MM/YYYY</option><option value="MDY">MM/DD/YYYY</option></select></label>
       </details>
       {results.length > 0 && <div className="import-results" aria-live="polite">
-        {results.map(r => <div key={r.name} className={r.ok ? 'ok' : 'fail'}>{r.ok ? <CheckCircle2 size={15} /> : <XCircle size={15} />}<strong>{r.name}</strong><span>{r.message}</span></div>)}
+        {results.map(r => <div key={r.name} className={r.ok ? 'ok' : 'fail'}>{r.ok ? <CheckCircle2 size={15} /> : <XCircle size={15} />}<strong>{r.name}</strong><span>{r.message}</span>{r.notes?.map(note => <span key={note} className="import-warning" role="alert"><AlertTriangle size={13} /> {note}</span>)}</div>)}
       </div>}
       {results.some(r => r.ok) && <div className="upload-cta"><div><strong>Setoran tersimpan.</strong><span>{clashCount ? `${fmt.format(clashCount)} clash menunggu keputusan di pekan ini.` : 'Tidak ada clash menunggu di pekan ini.'}</span></div><button type="button" className="btn primary" onClick={() => nav('reconcile')}>Lanjut ke rekonsiliasi{clashCount ? ` (${fmt.format(clashCount)} clash)` : ''} <ArrowRight size={15} /></button></div>}
     </section>}
