@@ -73,8 +73,12 @@ describe('POST /api/rekap-st (satu ST, banyak pegawai, rentang tanggal)', () => 
     expect(again.status).toBe(409)
     expect((await manualRows()).filter(row => row.letterNo === '256/')).toHaveLength(6)
   })
-  test('operator is forced to own office and own-office employees', async () => {
-    expect((await post({ employeeIds: ['4'], startDate: '2026-04-10', endDate: '2026-04-10' }, 'op')).status).toBe(403)
+  test('operator register office is forced to own office; participants may come from any office', async () => {
+    const cross = await post({ letterNo: '390/', employeeIds: ['4'], startDate: '2026-04-10', endDate: '2026-04-10' }, 'op')
+    expect(cross.status).toBe(201)
+    const crossRows = (await manualRows()).filter(row => row.letterNo === '390/')
+    expect(crossRows).toHaveLength(1)
+    expect(crossRows[0]).toMatchObject({ office: 'Pusat', employeeId: '4' })
     const ok = await post({ letterNo: '400/', registerOffice: 'Kanwil I', employeeIds: ['1'], startDate: '2026-04-10', endDate: '2026-04-11' }, 'op')
     expect(ok.status).toBe(201)
     const rows = (await manualRows()).filter(row => row.letterNo === '400/')

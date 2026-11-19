@@ -255,6 +255,8 @@ export function buildRoster(files: SourceFile[], master: Employee[], overrides: 
   // 3) Surat tugas: hanya mencocokkan (tidak pernah membuat pegawai baru).
   const stGroups = new Map<string, Assignment[]>()
   for (const f of files) if (f.kind === 'surat-tugas') for (const a of f.assignments) {
+    // Peserta eksternal ("Lainnya") sengaja tidak dicocokkan: bukan pegawai master, tanpa tugas identitas dan tanpa tautan nama.
+    if (a.external) continue
     const k = a.employeeId ? `${a.office}|employee:${a.employeeId}` : a.nip ? `${a.office}|nip:${a.nip}` : matchKey(a.office, a.name)
     const g = stGroups.get(k)
     if (g) g.push(a); else stGroups.set(k, [a])

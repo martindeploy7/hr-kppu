@@ -5,7 +5,7 @@ import { HTTPException } from 'hono/http-exception'
 import { bodyLimit } from 'hono/body-limit'
 import { secureHeaders } from 'hono/secure-headers'
 import { hash, verify } from '@node-rs/argon2'
-import { and, eq, gt, inArray, sql } from 'drizzle-orm'
+import { and, eq, gt, sql } from 'drizzle-orm'
 import { z, ZodError } from 'zod'
 import type { Database } from './db.ts'
 import { auditEvents, loginAttempts, sessions, uploads, users, workspaces } from './schema.ts'
@@ -18,10 +18,8 @@ import { buildRoster } from '../src/engine/roster.ts'
 import { reconcile } from '../src/engine/reconcile.ts'
 import { dayReviewKey, dayReviewProblem, stableStringify, unresolvedIdentityEvidence } from '../src/engine/dayReview.ts'
 import { createCoverageLookup, inspectMonthlyPackage } from '../src/engine/monthlyFlow.ts'
-import { addDays, eachDay, monthBounds, splitByMonth } from '../src/engine/dates.ts'
-import { OFFICES, OFFICE_CITY } from '../src/engine/ids.ts'
-import { sourceRecordState } from '../src/engine/recordReviews.ts'
-import type { Assignment, SourceFile } from '../src/engine/types.ts'
+import { monthBounds, splitByMonth } from '../src/engine/dates.ts'
+import { OFFICES } from '../src/engine/ids.ts'
 import { createUser } from './create-user.ts'
 import { decisionOwned, globalAccess, officeAllowed, requireOffice, sourceAllowed, scopeWorkspace } from './scope.ts'
 import { registerSubmissions, withSubmissionWarnings } from './submissions.ts'
@@ -29,6 +27,7 @@ import { validateMasterChange } from './master.ts'
 import { previewRecordReview, recordReviewInput } from './recordReviews.ts'
 import { canRetryImport, importCommitSchema, importIntentSchema, previewImport } from './imports.ts'
 import type { WhatsAppConnector } from './whatsapp.ts'
+import { registerRekapSt } from './rekapStRoutes.ts'
 import { AutomationInputError, AutomationService, canReadAutomation, canWriteAutomation } from './automation.ts'
 
 const digest = (s: string | Buffer) => createHash('sha256').update(s).digest('hex')
@@ -47,25 +46,6 @@ const roleOffices = (role: User['role'], offices: string[] | null | undefined) =
   }
   if (offices?.length) throw new HTTPException(400, { message: 'Superadmin dan Admin memiliki akses seluruh kantor' })
   return null
-}
-const REKAP_ST_MAX_DAYS = 31, REKAP_ST_MAX_EMPLOYEES = 50
-const manualStSourceId = (office: string, period: string) => `manual-st:${digest(`${office}|${period}`).slice(0, 24)}`
-const normalizeStText = (value: string) => value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('id-ID').replace(/\s+/g, ' ').trim()
-function isLocalDestination(office: string, destination: string) {
-  const value = normalizeStText(destination)
-  if (/\b(luar kota|luar daerah|luar negeri|antar kota)\b/.test(value)) return false
-  if (/\b(dalam kota|setempat|lokal)\b/.test(value)) return true
-  return (OFFICE_CITY[office] ?? '').split('/').some(city => city && value.includes(normalizeStText(city)))
-}
-function publicStRecord(file: SourceFile, assignment: Assignment, createdBy?: string) {
-  return {
-    id: assignment.id, sourceId: file.id, registerOffice: file.office,
-    letterNo: assignment.letterNo ?? '', letterDate: assignment.letterDate ?? '',
-    employeeId: assignment.employeeId ?? '', name: assignment.name, nip: assignment.nip ?? '',
-    activityDate: assignment.start, destination: assignment.destination ?? '',
-    status: sourceRecordState(file, 'assignment', assignment.id), createdAt: assignment.createdAt ?? file.importedAt,
-    createdBy: createdBy ?? assignment.createdBy ?? 'Akun lama',
-  }
 }
 export function createApp(db: Database, config: { origin: string; production: boolean }, whatsapp?: WhatsAppConnector, automation: AutomationService = new AutomationService(db, whatsapp)) {
   const app = new Hono<{ Variables: { user: User; sessionHash: string } }>()
@@ -120,11 +100,14 @@ export function createApp(db: Database, config: { origin: string; production: bo
     const readOnlyPost = c.req.method === 'POST' && path === '/api/automation/campaigns/preview'
     if (readOnlyPost && user.role === 'admin') { await next(); return }
     if (user.role === 'admin' && !readMethod && !accountSelfService && !reconciliationMutation) throw new HTTPException(403, { message: 'Admin hanya dapat mengubah keputusan rekonsiliasi' })
-    if (user.role === 'operator_st' && !(
-      readMethod && ['/api/auth/me', '/api/rekap-st', '/api/rekap-st/employees'].includes(path)
-      || accountSelfService
-      || (c.req.method === 'POST' && path === '/api/rekap-st')
-    )) throw new HTTPException(403, { message: 'Operator Rekap ST hanya dapat mengelola rekap ST di kantor cakupannya' })
+    // Operator Rekap ST: kelola ST (tambah, koreksi, batalkan, lampiran) di kantor register sendiri; pembatasan kantor ada di tiap rute.
+    const operatorStRoute = (readMethod && ['/api/auth/me', '/api/rekap-st', '/api/rekap-st/employees'].includes(path))
+      || (c.req.method === 'GET' && /^\/api\/rekap-st\/attachments\/[^/]+\/file$/.test(path))
+      || (readMethod && /^\/api\/rekap-st\/groups\/[^/]+$/.test(path))
+      || (c.req.method === 'POST' && (path === '/api/rekap-st' || /^\/api\/rekap-st\/(?:groups\/)?[^/]+\/void$/.test(path) || /^\/api\/rekap-st\/groups\/[^/]+\/attachments$/.test(path)))
+      || (c.req.method === 'PUT' && /^\/api\/rekap-st\/groups\/[^/]+$/.test(path))
+      || (c.req.method === 'DELETE' && /^\/api\/rekap-st\/attachments\/[^/]+$/.test(path))
+    if (user.role === 'operator_st' && !(operatorStRoute || accountSelfService)) throw new HTTPException(403, { message: 'Operator Rekap ST hanya dapat mengelola rekap ST di kantor cakupannya' })
     await next()
   })
   app.get('/api/auth/me', c => c.json({ user: c.get('user') }))
@@ -188,7 +171,7 @@ export function createApp(db: Database, config: { origin: string; production: bo
     const [w] = await db.select().from(workspaces).where(eq(workspaces.id, 'default'))
     return { ...w, state: { ...w.state, dayReviews: w.state.dayReviews ?? [], policy: enforcePolicy(w.state.policy) } }
   }
-  const change = async (expectedRevision: number, actor: User, action: string, reason: string, mutate: (state: Workspace, tx: Database) => Promise<Workspace> | Workspace) => {
+  const change = async (expectedRevision: number, actor: User, action: string, reason: string, mutate: (state: Workspace, tx: Database) => Promise<Workspace> | Workspace, extra: Record<string, unknown> = {}) => {
     await read()
     return db.transaction(async tx => {
       const [w] = await tx.select().from(workspaces).where(eq(workspaces.id, 'default')).for('update')
@@ -220,7 +203,7 @@ export function createApp(db: Database, config: { origin: string; production: bo
         return [{ sourceId: id, selectedAdded: [...afterSelected].filter(x => !beforeSelected.has(x)), selectedRemoved: [...beforeSelected].filter(x => !afterSelected.has(x)), importMode: after?.importCommit?.mode, importConfirmation: after?.importCommit?.confirmation }]
       })
       const sourceSummary = (f: Workspace['files'][number]) => ({ id: f.id, active: f.active, hash: f.hash, revision: f.revision, recordReviewCount: f.recordReviews?.length ?? 0, evidenceSelectedCount: f.evidenceImport?.selectedIds?.length, assignmentSelectedCount: f.assignmentImport?.selectedIds?.length, assignmentSupersessionCount: f.assignmentImport?.supersessions?.length ?? 0, importMode: f.importCommit?.mode, importConfirmation: f.importCommit?.confirmation, coverageDeclarations: f.coverageDeclarations ?? [] })
-      await tx.insert(auditEvents).values({ id: randomUUID(), actorId: actor.id, action, revision, reason, details: { checksum: digest(JSON.stringify(next)), changed, recordReviewChanges, dayReviewChanges, dayReviewCountBefore: w.state.dayReviews?.length ?? 0, dayReviewCountAfter: next.dayReviews?.length ?? 0, assignmentScopeChanges, evidenceScopeChanges, restorePoint: action === 'workspace.restore' ? w.state : undefined, before: Object.fromEntries(changed.filter(k => k !== 'files' && k !== 'dayReviews').map(k => [k, w.state[k as keyof Workspace]])), after: Object.fromEntries(changed.filter(k => k !== 'files' && k !== 'dayReviews').map(k => [k, next[k as keyof Workspace]])), sourcesBefore: w.state.files.map(sourceSummary), sourcesAfter: next.files.map(sourceSummary) } })
+      await tx.insert(auditEvents).values({ id: randomUUID(), actorId: actor.id, action, revision, reason, details: { checksum: digest(JSON.stringify(next)), changed, recordReviewChanges, dayReviewChanges, dayReviewCountBefore: w.state.dayReviews?.length ?? 0, dayReviewCountAfter: next.dayReviews?.length ?? 0, assignmentScopeChanges, evidenceScopeChanges, restorePoint: action === 'workspace.restore' ? w.state : undefined, before: Object.fromEntries(changed.filter(k => k !== 'files' && k !== 'dayReviews').map(k => [k, w.state[k as keyof Workspace]])), after: Object.fromEntries(changed.filter(k => k !== 'files' && k !== 'dayReviews').map(k => [k, next[k as keyof Workspace]])), sourcesBefore: w.state.files.map(sourceSummary), sourcesAfter: next.files.map(sourceSummary), ...extra } })
       return { state: scopeWorkspace(next, actor), revision }
     })
   }
@@ -231,138 +214,7 @@ export function createApp(db: Database, config: { origin: string; production: bo
     const offices = actor.offices?.length ? actor.offices : undefined
     return c.json({ package: inspectMonthlyPackage(state.files, period, offices) })
   })
-  app.get('/api/rekap-st/employees', async c => {
-    const actor = c.get('user')
-    if (!['superadmin', 'operator_st'].includes(actor.role)) throw new HTTPException(403)
-    const query = z.object({ office: z.enum(OFFICES).optional() }).parse({ office: c.req.query('office') || undefined })
-    const office = actor.role === 'operator_st' ? actor.offices?.[0] : query.office
-    if (office) requireOffice(actor, office)
-    const state = (await read()).state
-    const roster = buildRoster(state.files, state.master, state.overrides, state.decisions)
-    const employees = roster.employees
-      .filter(employee => employee.nama && employee.sources.includes('Master pegawai') && (!office || employee.kantor === office))
-      .map(({ id, nama, nip, kantor, unit, jabatan }) => ({ id, nama, nip, kantor, unit, jabatan }))
-      .sort((a, b) => a.nama.localeCompare(b.nama, 'id'))
-    return c.json({ employees })
-  })
-  app.get('/api/rekap-st', async c => {
-    const actor = c.get('user')
-    const input = z.object({ period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), office: z.enum(OFFICES).optional() }).parse({ period: c.req.query('period'), office: c.req.query('office') || undefined })
-    const office = actor.role === 'operator_st' ? actor.offices?.[0] : input.office
-    if (office) requireOffice(actor, office)
-    const w = await read(), state = scopeWorkspace(w.state, actor)
-    const creatorIds = [...new Set(state.files.filter(file => file.id.startsWith('manual-st:')).flatMap(file => file.assignments.map(row => row.createdBy).filter((id): id is string => !!id)))]
-    const creators = creatorIds.length ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, creatorIds)) : []
-    const creatorNames = new Map(creators.map(user => [user.id, user.name]))
-    const files = state.files.filter(file => file.kind === 'surat-tugas' && file.id.startsWith('manual-st:') && file.period?.start.slice(0, 7) === input.period && (!office || file.office === office))
-    const records = files.flatMap(file => file.assignments.map(row => publicStRecord(file, row, creatorNames.get(row.createdBy ?? ''))))
-      .sort((a, b) => b.activityDate.localeCompare(a.activityDate) || a.name.localeCompare(b.name, 'id'))
-    return c.json({ revision: w.revision, records, sourceIds: files.map(file => ({ office: file.office, id: file.id, coverage: file.coverageDeclarations ?? [] })) })
-  })
-  app.post('/api/rekap-st', async c => {
-    const actor = c.get('user')
-    if (!['superadmin', 'operator_st'].includes(actor.role)) throw new HTTPException(403)
-    const input = z.object({
-      expectedRevision: z.number().int().nonnegative(), registerOffice: z.enum(OFFICES).optional(),
-      letterNo: z.string().trim().min(1).max(100), letterDate: z.iso.date(),
-      employeeIds: z.array(z.string().min(1).max(200)).min(1).max(REKAP_ST_MAX_EMPLOYEES),
-      startDate: z.iso.date(), endDate: z.iso.date(), destination: z.string().trim().min(1).max(250),
-    }).strict().superRefine((value, ctx) => {
-      if (value.endDate < value.startDate) ctx.addIssue({ code: 'custom', path: ['endDate'], message: 'Tanggal tugas selesai tidak boleh sebelum tanggal mulai' })
-      else if (eachDay(value.startDate, value.endDate).length > REKAP_ST_MAX_DAYS) ctx.addIssue({ code: 'custom', path: ['endDate'], message: `Rentang tanggal tugas maksimal ${REKAP_ST_MAX_DAYS} hari` })
-    }).parse(await c.req.json())
-    const office = actor.role === 'operator_st' ? actor.offices?.[0] : input.registerOffice
-    if (!office || !OFFICES.includes(office)) throw new HTTPException(400, { message: 'Pilih kantor register ST' })
-    requireOffice(actor, office)
-    const employeeIds = [...new Set(input.employeeIds)], dates = eachDay(input.startDate, input.endDate)
-    const current = await read(), roster = buildRoster(current.state.files, current.state.master, current.state.overrides, current.state.decisions)
-    const employees = employeeIds.map(id => {
-      const employee = roster.byId.get(id)
-      if (!employee || !employee.sources.includes('Master pegawai')) throw new HTTPException(422, { message: 'Pegawai tidak ditemukan di master resmi. Perbarui master pegawai terlebih dahulu.' })
-      if (actor.role === 'operator_st' && employee.kantor !== office) throw new HTTPException(403, { message: 'Operator hanya dapat memasukkan pegawai di kantor cakupannya' })
-      return employee
-    })
-    // No month lock/approval state exists for manual ST today; each date is still checked per month against the actor's office scope above (requireOffice).
-    const at = new Date().toISOString()
-    const cleanLetter = normalizeStText(input.letterNo), cleanDestination = normalizeStText(input.destination)
-    const createdIds: { sourceId: string; id: string }[] = []
-    let skipped = 0
-    const result = await change(input.expectedRevision, actor, 'rekap-st.create', `Tambah ST ${input.letterNo} untuk ${employees.length} pegawai, ${input.startDate} s.d. ${input.endDate}`, state => {
-      const months = [...new Set(dates.map(date => date.slice(0, 7)))]
-      for (const period of months) {
-        const bounds = monthBounds(period), sourceId = manualStSourceId(office, period)
-        let file = state.files.find(candidate => candidate.id === sourceId)
-        const existing = new Set((file?.assignments ?? []).filter(row =>
-          normalizeStText(row.letterNo ?? '') === cleanLetter && normalizeStText(row.destination ?? '') === cleanDestination
-          && sourceRecordState(file!, 'assignment', row.id) === 'active').map(row => `${row.employeeId}|${row.start}`))
-        const rows: Assignment[] = []
-        for (const date of dates.filter(day => day.startsWith(period))) for (const employee of employees) {
-          if (existing.has(`${employee.id}|${date}`)) { skipped++; continue }
-          const id = randomUUID()
-          rows.push({
-            id, fileId: sourceId, employeeId: employee.id, createdBy: actor.id, createdAt: at,
-            office, unit: employee.unit || undefined, letterNo: input.letterNo, letterDate: input.letterDate,
-            name: employee.nama, nip: employee.nip || undefined, start: date, end: date,
-            rawDate: date, destination: input.destination, local: isLocalDestination(office, input.destination), ref: `Input Rekap ST · ${actor.name}`,
-          })
-        }
-        if (!rows.length) continue
-        if (!file) {
-          file = {
-            id: sourceId, fileName: `Rekap ST manual · ${office} · ${period}`, kind: 'surat-tugas', label: 'Rekap ST manual', office,
-            importedAt: at, period: bounds, evidence: [], assignments: [], warnings: [], stats: { rows: 0, people: 0 }, revision: 1, active: true,
-          }
-          state.files.push(file)
-        }
-        file.coverageDeclarations = (file.coverageDeclarations ?? []).filter(declaration => declaration.end < bounds.start || declaration.start > bounds.end)
-        for (const previousSource of state.files) {
-          // ST coverage is one KPPU-wide confirmation: a new ST from any office reopens every "lengkap"/"nihil" claim for that month.
-          if (previousSource === file || previousSource.kind !== 'surat-tugas' || previousSource.active === false) continue
-          let invalidated = false
-          previousSource.coverageDeclarations = (previousSource.coverageDeclarations ?? []).flatMap(declaration => {
-            if ((declaration.status !== 'nil' && declaration.status !== 'complete') || declaration.end < bounds.start || declaration.start > bounds.end) return [declaration]
-            invalidated = true
-            const overlapStart = declaration.start < bounds.start ? bounds.start : declaration.start
-            const overlapEnd = declaration.end > bounds.end ? bounds.end : declaration.end
-            const suffix = ` [${declaration.status === 'nil' ? 'Nihil' : 'Konfirmasi lengkap'} dibuka kembali setelah input ST ${input.letterNo} (${office}) oleh ${actor.name}]`
-            const invalidatedRange = { ...declaration, start: overlapStart, end: overlapEnd, status: 'partial' as const, basis: `${declaration.basis.slice(0, Math.max(0, 2000 - suffix.length))}${suffix}` }
-            return [
-              ...(declaration.start < overlapStart ? [{ ...declaration, end: addDays(overlapStart, -1) }] : []),
-              invalidatedRange,
-              ...(declaration.end > overlapEnd ? [{ ...declaration, start: addDays(overlapEnd, 1) }] : []),
-            ]
-          })
-          if (invalidated) previousSource.revision = (previousSource.revision ?? 0) + 1
-        }
-        file.assignments.push(...rows)
-        createdIds.push(...rows.map(row => ({ sourceId, id: row.id })))
-        file.stats = { rows: file.assignments.length, people: new Set(file.assignments.map(row => row.employeeId ?? row.nip ?? row.name)).size }
-        file.revision = (file.revision ?? 0) + 1
-      }
-      if (!createdIds.length) throw new HTTPException(409, { message: 'Rekap ST yang sama sudah tercatat untuk seluruh pegawai dan tanggal ini' })
-      return state
-    })
-    const records = createdIds.flatMap(({ sourceId, id }) => {
-      const file = result.state.files.find(candidate => candidate.id === sourceId), row = file?.assignments.find(item => item.id === id)
-      return file && row ? [publicStRecord(file, row, actor.name)] : []
-    })
-    if (records.length !== createdIds.length) throw new HTTPException(500, { message: 'Rekap tersimpan tetapi tidak dapat dibaca ulang' })
-    return c.json({ created: records.length, skipped, records, revision: result.revision }, 201)
-  })
-  app.post('/api/rekap-st/:id/void', async c => {
-    const actor = c.get('user'); requireSuperadmin(actor)
-    const input = z.object({ expectedRevision: z.number().int().nonnegative(), reason: z.string().trim().min(10).max(2000) }).strict().parse(await c.req.json())
-    return c.json(await change(input.expectedRevision, actor, 'rekap-st.void', input.reason, state => {
-      const file = state.files.find(source => source.id.startsWith('manual-st:') && source.assignments.some(row => row.id === c.req.param('id')))
-      const assignment = file?.assignments.find(row => row.id === c.req.param('id'))
-      if (!file || !assignment) throw new HTTPException(404)
-      if (sourceRecordState(file, 'assignment', assignment.id) !== 'active') throw new HTTPException(409, { message: 'Catatan ini sudah dibatalkan' })
-      file.recordReviews = [...file.recordReviews ?? [], { id: randomUUID(), kind: 'assignment', recordId: assignment.id, disposition: 'excluded', reason: input.reason, actorId: actor.id, reviewer: actor.name, at: new Date().toISOString() }]
-      file.revision = (file.revision ?? 1) + 1
-      file.stats = { rows: file.assignments.length, people: new Set(file.assignments.map(row => row.employeeId ?? row.nip ?? row.name)).size }
-      return state
-    }))
-  })
+  registerRekapSt(app, { db, read, change })
   app.get('/api/workspace/revision', async c => { const [w] = await db.select({ revision: workspaces.revision }).from(workspaces).where(eq(workspaces.id, 'default')); return c.json({ revision: w?.revision ?? 0 }) })
   app.put('/api/workspace', async c => {
     const { expectedRevision, patch, reason } = workspaceEditSchema.parse(await c.req.json())

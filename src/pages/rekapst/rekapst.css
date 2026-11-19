@@ -20,3 +20,77 @@
 .st-how { margin: 0 0 10px; color: var(--ink-soft); font-size: var(--fs-sm) }
 .st-how summary { cursor: pointer; font-weight: 600 }
 .st-how p { margin: 6px 0 0 }
+
+/* ===== Form: tujuan, catatan, bidang umum ===== */
+.st-entry-grid .st-destination-field { display: grid; gap: 6px; min-width: 0 }
+.st-catatan-field { grid-column: 1 / -1 }
+.st-entry-grid textarea, .st-field textarea { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--field-line); border-radius: var(--radius-sm); background: var(--surface); color: #203d4f; font: inherit; resize: vertical }
+.st-field { display: grid; gap: 6px; min-width: 0; color: #314c5b; font-size: var(--fs-sm); font-weight: 600 }
+.st-field input, .st-field select { width: 100%; min-width: 0; min-height: 44px; padding: 9px 10px; border: 1px solid var(--field-line); border-radius: var(--radius-sm); background: var(--surface); color: #203d4f; font: inherit }
+.st-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center }
+.st-tools .btn { min-height: 44px }
+
+/* ===== Peserta ===== */
+.st-picker-search { display: grid; grid-template-columns: minmax(0, 1fr) minmax(130px, 200px); gap: 8px }
+.st-picker-search input, .st-picker-search select { min-width: 0; min-height: 44px; padding: 9px 10px; border: 1px solid var(--field-line); border-radius: var(--radius-sm); background: var(--surface); color: #203d4f; font: inherit }
+.st-picker-list button { min-height: 44px }
+.st-chips.scroll { max-height: 340px; overflow: auto; padding: 2px }
+.st-chip button { min-width: 44px; min-height: 44px }
+.st-chip.external { border-style: dashed }
+.st-badge { display: inline-block; padding: 1px 7px; border-radius: var(--radius-sm); background: var(--surface-sunken); border: 1px solid var(--line-strong); color: var(--ink-soft); font-size: var(--fs-2xs); font-weight: 700 }
+.st-external-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) auto; gap: 10px; align-items: end; padding: 12px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md) }
+.st-external-form > p { grid-column: 1 / -1; margin: 0 }
+.st-external-form .btn { min-height: 44px }
+
+/* ===== Tempel daftar peserta ===== */
+.st-bulk { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface) }
+.st-bulk p { margin: 0 }
+.st-bulk-result { display: grid; gap: 10px }
+.st-bulk-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 420px; overflow: auto }
+.st-bulk-row { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md) }
+.st-bulk-row.ambiguous { border-color: #e0c98a }
+.st-bulk-row.notfound { border-color: var(--danger-line) }
+.st-bulk-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline }
+.st-bulk-status { padding: 2px 8px; border-radius: var(--radius-sm); font-size: var(--fs-xs); font-weight: 700; background: var(--surface-sunken) }
+.st-bulk-status.matched { background: #e7f3ec; color: #286748 }
+.st-bulk-status.ambiguous { background: #fbf2d9; color: #7a5a00 }
+.st-bulk-status.notfound { background: #fbe9e7; color: #a02b20 }
+.st-bulk-warning { color: #7a5a00 }
+.st-bulk-check { display: flex; gap: 10px; align-items: center; min-height: 44px }
+.st-bulk-check input { width: 22px; height: 22px; flex: none }
+.st-bulk-choice, .st-bulk-external { display: grid; gap: 8px }
+.st-bulk-external { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+
+/* ===== Lampiran ===== */
+.st-attach { display: grid; gap: 8px; margin-top: 12px }
+.st-attach p { margin: 0 }
+.st-attach-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px }
+.st-attach-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 6px 4px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-md) }
+.st-attach-list li > span { min-width: 0; overflow-wrap: anywhere }
+.st-attach-list .btn { min-height: 44px }
+.st-attach-links { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; min-width: 150px }
+.st-attach-links a { overflow-wrap: anywhere }
+.st-attach-links li { display: grid; gap: 1px }
+
+/* ===== Riwayat ===== */
+.st-history td small { display: block }
+.st-catatan-cell { max-width: 240px; overflow-wrap: anywhere }
+.st-strike { text-decoration: line-through; color: var(--ink-muted) }
+.st-cancelled td { background: var(--surface-sunken) }
+.st-cancel-note { color: var(--danger) }
+.st-actions { white-space: nowrap }
+.st-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid transparent; border-radius: var(--radius-md); background: none; color: var(--brand-navy); cursor: pointer; transition: background-color var(--dur-press) var(--ease-out), transform var(--dur-press) var(--ease-out) }
+.st-icon-btn:active { transform: scale(.97) }
+.st-icon-btn:disabled { opacity: .5; cursor: not-allowed }
+.st-icon-btn.danger { color: var(--danger) }
+@media (hover: hover) and (pointer: fine) { .st-icon-btn:hover:not(:disabled) { background: var(--surface-sunken) } }
+.st-group-people li { display: grid; grid-template-columns: minmax(140px, 1.2fr) minmax(160px, 1.4fr) 80px auto; gap: 12px; align-items: baseline }
+
+@media (max-width: 760px) {
+  .st-entry-grid input, .st-entry-grid select, .st-group-toggle { min-height: 44px }
+  .st-picker-search { grid-template-columns: minmax(0, 1fr) }
+  .st-external-form, .st-bulk-external { grid-template-columns: minmax(0, 1fr) }
+  .st-group-people li { grid-template-columns: minmax(0, 1fr); gap: 2px }
+  .st-form-actions .st-tools { width: 100% }
+  .st-form-actions .st-tools .btn { flex: 1 }
+}

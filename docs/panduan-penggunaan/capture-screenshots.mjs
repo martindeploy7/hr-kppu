@@ -12,7 +12,9 @@
 // Skrip lalu memeriksa teks halaman dan berhenti bila nama lengkap asli masih terlihat.
 //
 // Skrip hanya membuka tab, filter, drawer, dan dialog. Tidak ada tombol simpan, ajukan, batalkan, atau putuskan
-// yang ditekan. Satu pengecualian: memilih periode April pada pemilih periode atas menyimpan nilai periode ke
+// yang ditekan. Formulir Rekap ST hanya diisi, tidak pernah dikirim. Tangkapan daftar Rekap ST (06, 06a) membaca dua
+// ST contoh yang sudah ada di basis data uji: 270/ST/2026 (aktif, bercatatan, berlampiran, satu peserta Lainnya bernama Warsito Sutarman) dan
+// 271/ST/2026 (sudah dibatalkan dengan alasan). Buat keduanya lebih dulu lewat formulir bila basis datanya baru. Satu pengecualian: memilih periode April pada pemilih periode atas menyimpan nilai periode ke
 // ruang kerja, sama seperti saat pengguna memilihnya.
 //
 // Pakai:  node docs/panduan-penggunaan/capture-screenshots.mjs [--only=id1,id2]
@@ -82,6 +84,8 @@ function installScrubber(data) {
   walk()
 }
 
+/** Nama peserta Lainnya fiktif pada ST contoh; boleh tampil apa adanya karena bukan orang sungguhan. */
+const DEMO_EXTERNAL = ['warsito sutarman']
 const STOP = new Set(['pusat', 'kantor', 'unit', 'nama', 'hadir', 'sakit', 'izin', 'cuti', 'dinas', 'bagian', 'kepala', 'staf', 'staff', 'online', 'offline', 'mesin', 'aktif', 'ditahan', 'dapat', 'valid', 'flag', 'batal', 'semua', 'baru', 'lama', 'tanpa', 'data', 'akun', 'admin', 'super', 'superadmin', 'operator', 'test', 'demo', 'uji', 'april', 'mei', 'maret', 'juni', 'juli', 'agustus', 'september', 'oktober', 'november', 'desember', 'januari', 'februari', 'senin', 'selasa', 'rabu', 'kamis', 'jumat', 'sabtu', 'minggu', 'islam', 'kristen', 'katolik', 'hindu', 'buddha', 'konghucu', 'pegawai', 'pengguna'])
 /** Kata yang muncul di kode antarmuka; nama depan sama dengan kata ini tidak disamarkan sendirian. */
 async function uiWords() {
@@ -100,7 +104,8 @@ const normName = s => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, 
 
 /** Kumpulkan nama dan angka identitas dari API, lalu bentuk peta samaran yang stabil. */
 async function buildScrubData(page) {
-  const raw = await page.evaluate(async () => {
+  const demo = DEMO_EXTERNAL
+  const raw = await page.evaluate(async demo => {
     const get = async p => { try { const r = await fetch(p, { credentials: 'same-origin' }); return r.ok ? await r.json() : null } catch { return null } }
     const ws = (await get('/api/workspace'))?.state
     const users = (await get('/api/users'))?.users ?? []
@@ -112,10 +117,10 @@ async function buildScrubData(page) {
     }
     for (const f of ws?.files ?? []) {
       for (const e of f.evidence ?? []) { names.add(e.name); addId(e.ids?.nip); addId(e.ids?.nika); addId(e.ids?.appId) }
-      for (const a of f.assignments ?? []) names.add(a.name)
+      for (const a of f.assignments ?? []) if (!(a.external && demo.includes(String(a.name ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()))) names.add(a.name)
     }
     return { names: [...names].filter(Boolean), ids: [...ids], users: users.map(u => ({ name: u.name, email: u.email })) }
-  })
+  }, demo)
   const map = new Map()
   const people = [...new Set(raw.names.map(normName))].filter(k => k && (k.includes(' ') ? true : k.length >= 4 && !STOP.has(k))).sort()
   people.forEach((k, i) => map.set(k, `Pegawai ${String(i + 1).padStart(3, '0')}`))
@@ -150,7 +155,7 @@ async function scrubAndVerify(p, label) {
   await p.waitForTimeout(250)
   await p.evaluate(() => window.__scrubNow())
   await p.waitForTimeout(150)
-  const text = await p.evaluate(() => document.body.innerText)
+  const text = await p.evaluate(() => document.body.innerText + '\n' + [...document.querySelectorAll('input, textarea')].map(el => el.value).join('\n'))
   const flat = ' ' + normName(text) + ' '
   const hits = scrubData.realNames.filter(n => flat.includes(` ${n} `))
   const words = new Set(flat.trim().split(' '))
@@ -175,11 +180,11 @@ async function union(p, selectors) {
   return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 }
 }
 /** Tangkapan area (gabungan beberapa elemen) atau seluruh viewport. */
-async function snap(id, { clip, full = false, p = page, maxH } = {}) {
+async function snap(id, { clip, full = false, p = page, maxH, trimBottom = 0 } = {}) {
   if (only.length && !only.includes(id)) return
   await scrubAndVerify(p, id)
   const path = join(outDir, `${id}.png`)
-  if (clip) { const box = pad(await union(p, clip), 8); if (maxH) box.height = Math.min(box.height, maxH); await p.screenshot({ path, fullPage: true, clip: box }) }
+  if (clip) { const box = pad(await union(p, clip), 8); if (maxH) box.height = Math.min(box.height, maxH); box.height -= trimBottom; await p.screenshot({ path, fullPage: true, clip: box }) }
   else await p.screenshot({ path, fullPage: full })
   done.push(id); log('ok', id)
 }
@@ -241,17 +246,69 @@ await page.keyboard.press('Escape'); await sleep(300)
 // ---------------------------------------------------------------- Rekap ST
 await go('rekap-st')
 const search = page.locator('input[aria-label="Cari pegawai"]')
-await page.locator('input[placeholder="256/"]').fill('256/ST/2026')
+const officeFilter = page.locator('select[aria-label="Saring menurut kantor"]')
+const destination = page.locator('#st-destination')
+await page.locator('input[placeholder="256/"]').fill('272/ST/2026')
 await page.locator('.st-entry-grid input[type=date]').nth(0).fill('2026-04-17')
 await page.locator('.st-entry-grid input[type=date]').nth(1).fill('2026-04-20')
 await page.locator('.st-entry-grid input[type=date]').nth(2).fill('2026-04-22')
-await page.locator('input[placeholder="Kota, Provinsi"]').fill('Bandung, Jawa Barat')
-for (const q of ['abd', 'ach', 'ade']) { await search.fill(q); await sleep(250); await search.press('Enter'); await sleep(200) }
-await search.fill(''); await sleep(300)
+// Tujuan: ketik singkatan provinsi, tangkap daftar pilihan, lalu pilih Kota Bandung.
+await destination.click(); await destination.fill('jabar'); await sleep(400)
+await snap('05a-rekap-st-tujuan', { clip: ['#st-destination', '.dest-picker__list'], trimBottom: 8 })
+await destination.fill('bandung'); await sleep(300)
+await page.locator('.dest-picker__opt', { hasText: 'Kota Bandung' }).first().click(); await sleep(200)
+await page.locator('textarea').first().fill('Daftar peserta lengkap ada pada lampiran ST.')
+// Peserta dari beberapa kantor: Kanwil I, Kanwil III, lalu Pusat lewat pencarian.
+for (const kantor of ['Kanwil I', 'Kanwil III']) { await officeFilter.selectOption(kantor); await sleep(250); await page.locator('.st-picker-list li button').first().click(); await sleep(200) }
+await officeFilter.selectOption('Pusat'); await search.fill('ade'); await sleep(250); await search.press('Enter'); await sleep(200)
+await officeFilter.selectOption('Semua'); await search.fill(''); await sleep(300)
+await page.getByRole('button', { name: /Tambah peserta Lainnya/ }).click()
+await page.getByLabel('Nama', { exact: true }).fill('Warsito Sutarman')
+await page.getByLabel('Keterangan (peran)').fill('Driver Komisi')
+await page.getByRole('button', { name: 'Tambahkan', exact: true }).click(); await sleep(200)
+await page.locator('input[type=file]').setInputFiles({ name: 'scan-ST-272.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF\n') })
+await sleep(300)
+await blur(page)
 await snapEl('05-rekap-st-form', 'section.panel >> nth=0')
-await go('rekap-st')
-await page.locator('.st-group-toggle').first().click(); await sleep(300)
-await snap('06-rekap-st-daftar', { clip: ['section.panel >> nth=1', 'section.panel >> nth=2'] })
+
+// Tempel daftar peserta: baris dari lampiran ST dicocokkan ke master. Isi kotak teks diganti nilai samaran sebelum ditangkap.
+await page.getByRole('button', { name: 'Tempel daftar peserta' }).click(); await sleep(300)
+const sample = await page.evaluate(async () => {
+  const employees = (await (await fetch('/api/rekap-st/employees')).json()).employees
+  const tokens = e => e.nama.trim().split(/\s+/)
+  const withNip = employees.filter(e => e.nip && e.kantor !== 'Pusat' && tokens(e).length >= 2)
+  const prefixes = new Map()
+  for (const e of employees) if (tokens(e).length >= 3) { const k = tokens(e).slice(0, 2).join(' ').toLowerCase(); prefixes.set(k, [...(prefixes.get(k) ?? []), e]) }
+  const similar = [...prefixes.entries()].find(([k, list]) => list.length >= 2 && !employees.some(e => e.nama.trim().toLowerCase() === k))
+  return { first: withNip[0], second: withNip[1], similar: similar ? tokens(similar[1][0]).slice(0, 2).join(' ') : '' }
+})
+const lines = [`1. ${sample.first.nama}, S.H.\t${sample.first.nip}`, `2. ${sample.second.nama}`, ...(sample.similar ? [`3. ${sample.similar}`] : []), `${sample.similar ? 4 : 3}. Warsito Sutarman, Driver Komisi`]
+await page.locator('.st-bulk textarea').fill(lines.join('\n'))
+await page.getByRole('button', { name: 'Cocokkan dengan master' }).click(); await sleep(500)
+const lastRow = page.locator('.st-bulk-row.notfound').last()
+await lastRow.locator('select').selectOption('external'); await sleep(300)
+await blur(page)
+// Daftar hasil biasanya bergulir di dalam kotaknya (maks. 420 px); lepas batas itu supaya semua baris tertangkap.
+await page.addStyleTag({ content: '.st-bulk-list { max-height: none !important; overflow: visible !important; }' })
+await page.locator('.st-bulk textarea').evaluate(el => { el.value = ['1. Pegawai 001, S.H.\t1990xxxxxxxxxxx001', '2. Pegawai 002', '3. Pegawai 003 (nama sebagian)', '4. Warsito Sutarman, Driver Komisi'].join('\n') })
+await snapEl('05b-rekap-st-tempel', '.st-bulk')
+await page.getByRole('button', { name: 'Tutup', exact: true }).click(); await sleep(200)
+
+// Riwayat: ST contoh dibuka agar peserta (termasuk Lainnya) terlihat; potong tepat setelah ST yang dibatalkan.
+await page.locator('tr:has-text("270/ST/2026") .st-group-toggle').click(); await sleep(300)
+if (!only.length || only.includes('06-rekap-st-daftar')) {
+  await scrubAndVerify(page, '06-rekap-st-daftar')
+  const top = await union(page, ['section.panel >> nth=1'])
+  const bottom = await page.locator('tr:has-text("271/ST/2026")').first().evaluate(el => { const r = el.getBoundingClientRect(); return r.bottom + scrollY })
+  const box = pad({ x: top.x, y: top.y, width: top.width, height: bottom - top.y }, 8)
+  await page.screenshot({ path: join(outDir, '06-rekap-st-daftar.png'), fullPage: true, clip: box })
+  done.push('06-rekap-st-daftar'); log('ok', '06-rekap-st-daftar')
+}
+// Ubah ST: ikon pensil membuka formulir berisi data ST, tanpa menyimpan.
+await page.locator('tr:has-text("270/ST/2026")').first().getByRole('button', { name: /Ubah ST/ }).click(); await sleep(1500)
+await blur(page)
+await snapEl('06a-rekap-st-ubah', 'section.panel >> nth=0')
+await page.getByRole('button', { name: 'Batal ubah' }).click(); await sleep(300)
 
 // ---------------------------------------------------------------- Pencocokan Identitas
 await go('pencocokan')

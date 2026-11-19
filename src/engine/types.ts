@@ -57,6 +57,19 @@ export type Assignment = {
   fileId: string
   /** Set by the controlled manual ST form; imports continue to resolve by identifiers/name. */
   employeeId?: string
+  /**
+   * Peserta eksternal ("Lainnya", mis. pengemudi tanpa NIP): bukan pegawai master. Tidak pernah dicocokkan ke
+   * roster lewat nama, tidak membuat tugas pencocokan identitas, dan tidak menahan uang makan siapa pun.
+   * `note` memuat keterangan peran (mis. "Driver Komisi").
+   */
+  external?: boolean
+  note?: string
+  /** ID grup ST manual (satu surat). Tetap sama setelah koreksi; baris lama tanpa ID dikelompokkan lewat kantor, nomor, dan tanggal ST. */
+  groupId?: string
+  /** Nomor koreksi ST dalam grup (1 = awal). Koreksi memperbarui baris di tempat dan mencatat sebelum/sesudah di jejak audit. */
+  version?: number
+  /** Catatan bebas operator untuk ST ini (maks 500 karakter). */
+  catatan?: string
   createdBy?: string
   createdAt?: string
   office: string

@@ -284,7 +284,10 @@ describe('Authenticated PostgreSQL API',()=>{
   const login=await request('/auth/login','POST',{email:'office-one@kppu.test',password});cookies.officeOne=login.headers.get('set-cookie')!.split(';')[0]
   expect((await request('/workspace','GET',undefined,'officeOne')).status).toBe(403)
   const st=await request('/rekap-st/employees','GET',undefined,'officeOne');expect(st.status).toBe(200)
-  expect(JSON.stringify(await st.json())).not.toContain('snapshot-person')
+  // ST participants may come from any office, so the picker list spans all offices but carries only basic identity columns.
+  const stList=(await st.json()).employees as Record<string,string>[]
+  expect(stList.map(e=>e.id)).toEqual(expect.arrayContaining(['snapshot-person','other-office-person']))
+  expect(stList.every(e=>Object.keys(e).sort().join()==='id,jabatan,kantor,nama,nip,unit')).toBe(true)
   const reject=await request('/workspace','PUT',{expectedRevision:before.revision+1,patch:{overrides:{'snapshot-person':{nama:'Unauthorized'}}},reason:'Cross office rejected'},'officeOne');expect(reject.status).toBe(403)
   const global=await workspace();expect(global.state.master.some((e:any)=>e.id==='snapshot-person')).toBe(true)
   expect((await request('/coverage/nil-st','POST',{expectedRevision:global.revision,office:'Pusat',period:'2026-09',basis:'Outside scope test should fail'},'officeOne')).status).toBe(403)

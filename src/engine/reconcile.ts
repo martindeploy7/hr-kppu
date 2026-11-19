@@ -197,6 +197,7 @@ export function reconcile(files: SourceFile[], roster: Roster, period: { start: 
   for (const file of sourceFiles) {
     for (const evidence of file.evidence) if (evidence.date >= period.start && evidence.date <= period.end) addRawRow(`${evidence.office}|${evidence.date}`, { file, kind: 'evidence', id: evidence.id, name: evidence.name, office: evidence.office, date: evidence.date, ids: evidence.ids })
     for (const assignment of file.assignments) {
+      if (assignment.external) continue // peserta eksternal tidak terkait pegawai mana pun
       const start = assignment.start > period.start ? assignment.start : period.start
       const end = assignment.end < period.end ? assignment.end : period.end
       if (start > end) continue
@@ -204,7 +205,7 @@ export function reconcile(files: SourceFile[], roster: Roster, period: { start: 
     }
   }
 
-  const unresolvedAssignments = files.flatMap(f => f.assignments).filter(a => !roster.assignmentLink.has(a.id) && a.end >= period.start && a.start <= period.end)
+  const unresolvedAssignments = files.flatMap(f => f.assignments).filter(a => !a.external && !roster.assignmentLink.has(a.id) && a.end >= period.start && a.start <= period.end)
   // Peserta ST yang belum tertaut hanya menahan pegawai yang namanya mungkin cocok, bukan seluruh kantor.
   const unresolvedStByEmployee = new Map<string, Assignment[]>()
   if (unresolvedAssignments.length) {

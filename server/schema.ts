@@ -19,6 +19,13 @@ export const uploads = hr.table('uploads', {
   id: text('id').primaryKey(), hash: text('hash').notNull(), name: text('name').notNull(), bytes: bytes('bytes').notNull(), parsed: jsonb('parsed').$type<SourceFile>().notNull(),
   userId: text('user_id').references(() => users.id).notNull(), createdAt: time('created_at').defaultNow().notNull(), committed: boolean('committed').default(false).notNull(),
 }, t => [index('uploads_hash_idx').on(t.hash)])
+/** Lampiran scan surat tugas (PDF/JPG/PNG). Satu grup ST (group_id) boleh punya beberapa lampiran; dihapus lunak agar jejak audit tetap ada. */
+export const stAttachments = hr.table('st_attachments', {
+  id: text('id').primaryKey(), groupId: text('group_id').notNull(), registerOffice: text('register_office').notNull(),
+  fileName: text('file_name').notNull(), mime: text('mime').notNull(), size: integer('size').notNull(), sha256: text('sha256').notNull(), content: bytes('content').notNull(),
+  uploadedBy: text('uploaded_by').references(() => users.id).notNull(), createdAt: time('created_at').defaultNow().notNull(),
+  deletedAt: time('deleted_at'), deletedBy: text('deleted_by').references(() => users.id),
+}, t => [index('st_attachments_group_idx').on(t.groupId)])
 export const auditEvents = hr.table('audit_events', {
   id: text('id').primaryKey(), actorId: text('actor_id').references(() => users.id).notNull(), action: text('action').notNull(),
   revision: integer('revision').notNull(), reason: text('reason').notNull(), details: jsonb('details').notNull(), at: time('at').defaultNow().notNull(),
