@@ -138,7 +138,7 @@ export function locationCentroids(files: SourceFile[]): Record<string, [number, 
   return out
 }
 
-export function reconcile(files: SourceFile[], roster: Roster, period: { start: ISODate; end: ISODate }, policy: MealPolicy, resolutions: Resolution[], asOf = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date()), dayReviews: DayReview[] = [], isSourceCoverageComplete?: ((office: string, date: ISODate) => boolean) & { missing?: (date: ISODate) => string[] }): Reconciliation {
+export function reconcile(files: SourceFile[], roster: Roster, period: { start: ISODate; end: ISODate }, policy: MealPolicy, resolutions: Resolution[], asOf = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date()), dayReviews: DayReview[] = [], isSourceCoverageComplete?: ((office: string, date: ISODate) => boolean) & { missing?: (date: ISODate) => string[] }, onlyEmployees?: ReadonlySet<string>): Reconciliation {
   const sourceFiles = files.filter(f => f.active !== false)
   files = sourceFiles.map(effectiveSource)
   policy = enforcePolicy(policy)
@@ -205,6 +205,44 @@ export function reconcile(files: SourceFile[], roster: Roster, period: { start: 
     }
   }
 
+  // Performa: baris per kantor-tanggal diindeks per NIP/NIKA/ID mesin/ID aplikasi/nama, sehingga tiap pegawai hanya membaca barisnya sendiri.
+  // Kandidat dari indeks memenuhi aturan yang sama persis dengan pencocokan lama (bukti: identifier atau nama; ST: employeeId, atau NIP/nama bila belum tertaut).
+  type RawRow = NonNullable<ReturnType<typeof rawRowsByOfficeDate.get>>[number]
+  type RowIndex = { evidence: Record<'nip' | 'nika' | 'mesin' | 'app' | 'nama', Map<string, RawRow[]>>; assignment: Record<'employee' | 'nip' | 'nama', Map<string, RawRow[]>> }
+  const rowIndexes = new Map<string, RowIndex>()
+  const pushTo = (map: Map<string, RawRow[]>, key: string | undefined, row: RawRow) => { if (key === undefined) return; const list = map.get(key); if (list) list.push(row); else map.set(key, [row]) }
+  const indexFor = (key: string) => {
+    let index = rowIndexes.get(key)
+    if (index) return index
+    index = { evidence: { nip: new Map(), nika: new Map(), mesin: new Map(), app: new Map(), nama: new Map() }, assignment: { employee: new Map(), nip: new Map(), nama: new Map() } }
+    for (const row of rawRowsByOfficeDate.get(key) ?? []) {
+      if (row.kind === 'evidence') {
+        const ids = row.ids ?? {}
+        pushTo(index.evidence.nip, ids.nip, row); pushTo(index.evidence.nika, ids.nika, row); pushTo(index.evidence.mesin, ids.mesin, row); pushTo(index.evidence.app, ids.appId, row); pushTo(index.evidence.nama, row.nk, row)
+      } else if (row.employeeId) pushTo(index.assignment.employee, row.employeeId, row)
+      else { pushTo(index.assignment.nip, row.nip, row); pushTo(index.assignment.nama, row.nk, row) }
+    }
+    rowIndexes.set(key, index)
+    return index
+  }
+  const matchingRawRows = (key: string, employee: Employee, employeeNameKey: string) => {
+    const index = indexFor(key), found = new Set<RawRow>()
+    const take = (list: RawRow[] | undefined) => { if (list) for (const row of list) found.add(row) }
+    if (employee.nip) take(index.evidence.nip.get(employee.nip))
+    if (employee.nika) take(index.evidence.nika.get(employee.nika))
+    for (const alias of employee.aliases ?? []) {
+      if (alias.kind === 'nip') take(index.evidence.nip.get(alias.value))
+      else if (alias.kind === 'nika') take(index.evidence.nika.get(alias.value))
+      else if (alias.kind === 'mesin') take(index.evidence.mesin.get(alias.value))
+      else if (alias.kind === 'app') take(index.evidence.app.get(alias.value))
+    }
+    take(index.evidence.nama.get(employeeNameKey))
+    take(index.assignment.employee.get(employee.id))
+    if (employee.nip) take(index.assignment.nip.get(employee.nip))
+    take(index.assignment.nama.get(employeeNameKey))
+    return [...found]
+  }
+
   const unresolvedAssignments = files.flatMap(f => f.assignments).filter(a => !a.external && !roster.assignmentLink.has(a.id) && a.end >= period.start && a.start <= period.end)
   // Peserta ST yang belum tertaut hanya menahan pegawai yang namanya mungkin cocok, bukan seluruh kantor.
   const unresolvedStByEmployee = new Map<string, Assignment[]>()
@@ -221,6 +259,8 @@ export function reconcile(files: SourceFile[], roster: Roster, period: { start: 
   const months: EmployeeMonth[] = []
   const allIssues: Issue[] = []
   for (const employee of roster.employees) {
+    // Validasi keputusan cukup menghitung pegawai yang diputuskan; tiap pegawai dihitung terpisah sehingga hasilnya sama dengan hitungan penuh.
+    if (onlyEmployees && !onlyEmployees.has(employee.id)) continue
     const startDate = /^\d{4}-\d{2}-\d{2}$/.test(employee.tanggalMulaiKerja) ? employee.tanggalMulaiKerja : undefined
     const employeeWorkdays = workdays.filter(date => (!startDate || date >= startDate) && date <= asOf)
     const empId = employee.id
@@ -240,15 +280,7 @@ export function reconcile(files: SourceFile[], roster: Roster, period: { start: 
       const sourceCoverageComplete = isSourceCoverageComplete?.(employee.kantor, date) ?? false
       const covered = spans.some(s => date >= s.start && date <= s.end) || dayEv.length > 0 || sourceCoverageComplete
       const isPartial = dayEv.some(e => partial.has(`${e.fileId}|${date}`))
-      const recordStates = (rawRowsByOfficeDate.get(`${employee.kantor}|${date}`) ?? []).filter(row => {
-        if (row.kind === 'evidence') {
-          const ids = row.ids ?? {}
-          const aliases = employee.aliases ?? []
-          const numericMatch = (!!employee.nip && ids.nip === employee.nip) || (!!employee.nika && ids.nika === employee.nika) || aliases.some(a => (a.kind === 'nip' && a.value === ids.nip) || (a.kind === 'nika' && a.value === ids.nika) || (a.kind === 'mesin' && a.value === ids.mesin) || (a.kind === 'app' && a.value === ids.appId))
-          return numericMatch || row.nk === employeeNameKey
-        }
-        return row.employeeId ? row.employeeId === employee.id : (!!employee.nip && row.nip === employee.nip) || row.nk === employeeNameKey
-      }).map(row => {
+      const recordStates = matchingRawRows(`${employee.kantor}|${date}`, employee, employeeNameKey).map(row => {
         const cacheKey = `${row.file.id}|${row.kind}|${row.id}`
         const cached = rowStateCache.get(cacheKey)
         if (cached !== undefined) return cached

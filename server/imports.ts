@@ -6,6 +6,7 @@ import { effectiveSource, sourceRecordState } from '../src/engine/recordReviews.
 import { buildRoster } from '../src/engine/roster.ts'
 import { reconcile } from '../src/engine/reconcile.ts'
 import { createCoverageLookup } from '../src/engine/monthlyFlow.ts'
+import { stableStringify } from '../src/engine/dayReview.ts'
 import { addDays, eachDay, formatID, isWeekend, monthBounds, monthLabel, splitByMonth } from '../src/engine/dates.ts'
 import { groupAssignments, type ImportChange, type ImportCounts, type ImportDaySummary, type ImportImpactResponse, type ImportMonthImpact, type ImportReviewImpact, type ImportValue } from '../shared/imports.ts'
 import type { User, Workspace } from '../shared/workspace.ts'
@@ -96,6 +97,21 @@ const emptyCounts = (): Counts => ({ added: 0, changed: 0, removed: 0, ambiguous
 const norm = (s: string | undefined) => (s ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('id-ID').replace(/[^a-z0-9]+/g, ' ').trim()
 const json = (v: unknown) => JSON.stringify(v)
 const sha = (v: unknown) => createHash('sha256').update(json(v)).digest('hex')
+
+/** Hasil reviewImpact per (revisi workspace, akun, tanggal hari ini, upload, intent). Workspace pada satu revisi tidak berubah,
+ *  sehingga commit dapat memakai dampak yang sudah dihitung saat pratinjau tanpa menghitung ulang rekonsiliasi. */
+export type ImpactCache = Map<string, ReviewImpact>
+export const createImpactCache = (): ImpactCache => new Map()
+const IMPACT_CACHE_LIMIT = 16
+function cachedReview(cache: ImpactCache | undefined, key: string, compute: () => ReviewImpact): ReviewImpact {
+  if (!cache) return compute()
+  let value = cache.get(key)
+  if (value) cache.delete(key)
+  else value = compute()
+  cache.set(key, value)
+  while (cache.size > IMPACT_CACHE_LIMIT) cache.delete(cache.keys().next().value!)
+  return structuredClone(value)
+}
 
 function evidenceData(e: Evidence) {
   return { kind: e.kind, office: e.office, officePending: e.officePending ?? false, officeConflict: e.officeConflict ?? false, officeCandidates: e.officeCandidates ?? [], name: norm(e.name), identityPending: e.identityPending ?? false, ids: { nip: e.ids.nip ?? '', nika: e.ids.nika ?? '', mesin: e.ids.mesin ?? '', appId: e.ids.appId ?? '', nonAsn: e.ids.nonAsn ?? false }, date: e.date, schedule: e.schedule ?? null, clockIn: e.clockIn ?? '', clockOut: e.clockOut ?? '', present: e.present ?? null, incomplete: e.incomplete ?? null, code: e.code ?? '', codeLabel: norm(e.codeLabel), mode: e.mode ?? '', approved: e.approved ?? null, approvalStatus: e.approvalStatus ?? '', sourceDurationMin: e.sourceDurationMin ?? null, minimumDurationMin: e.minimumDurationMin ?? null, targetPekerjaan: e.targetPekerjaan ?? '', hasilPekerjaan: e.hasilPekerjaan ?? '', sourceValues: e.sourceValues ?? null, location: norm(e.location), coordIn: e.coordIn ?? null, coordOut: e.coordOut ?? null, lateMin: e.lateMin ?? null, earlyMin: e.earlyMin ?? null, overtimeMin: e.overtimeMin ?? null, unit: norm(e.unit), notes: [...(e.notes ?? [])].sort() }
@@ -265,8 +281,9 @@ function coverageGapNote(coverage: { start: string; end: string }, dates: string
   return `Data di file berakhir ${lastDate}, sedangkan setoran dinyatakan lengkap sampai ${coverage.end}. Tanggal yang dinyatakan lengkap per bulan: ${perMonth.join('; ')}. Pastikan tanggal tanpa baris memang tanpa absensi; bila belum, setor ulang file yang lengkap.`
 }
 
-export function previewImport(state: Workspace, revision: number, parsed: SourceFile, actor: User, rawIntent: ImportIntent): { next: Workspace; impact: ImportImpact } {
+export function previewImport(state: Workspace, revision: number, parsed: SourceFile, actor: User, rawIntent: ImportIntent, cache?: ImpactCache): { next: Workspace; impact: ImportImpact } {
   const intent = importIntentSchema.parse(rawIntent)
+  const cacheKey = sha({ revision, actor: { id: actor.id, role: actor.role, offices: actor.offices ?? null }, today: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date()), upload: { id: parsed.id, hash: parsed.hash }, intent: stableStringify({ ...intent, offset: undefined, limit: undefined }) })
   if (intent.expectedRevision !== revision) throw new HTTPException(409, { message: 'Data berubah; muat ulang lalu periksa preview impor kembali' })
   if (actor.role !== 'superadmin') throw new HTTPException(403, { message: 'Hanya Superadmin yang dapat mengimpor sumber' })
   requireOffice(actor, intent.office)
@@ -442,7 +459,7 @@ export function previewImport(state: Workspace, revision: number, parsed: Source
     }
   }
   const touched = listDays(touchedFiles)
-  const review = reviewImpact(state, next, actor, touched)
+  const review = cachedReview(cache, cacheKey, () => reviewImpact(state, next, actor, touched))
   const allChanges = changes.sort((a, b) => `${a.kind}|${a.status}|${a.after?.start ?? a.before?.start ?? ''}|${a.after?.name ?? a.before?.name ?? ''}|${a.after?.ref ?? a.before?.ref ?? ''}`.localeCompare(`${b.kind}|${b.status}|${b.after?.start ?? b.before?.start ?? ''}|${b.after?.name ?? b.before?.name ?? ''}|${b.after?.ref ?? b.before?.ref ?? ''}`, 'id'))
   const confirmation = {
     actorId: actor.id, revision, uploadId: intent.uploadId, hash: parsed.hash, office: intent.office, mode: intent.mode, range: intent.range ?? null, replaces: intent.replaces ?? '', completeThrough: intent.completeThrough ?? '', coverage: intent.coverage ?? null, completeSnapshot: !!intent.completeSnapshot, reason: intent.reason?.trim() ?? '',

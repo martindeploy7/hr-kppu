@@ -25,7 +25,7 @@ import { decisionOwned, globalAccess, officeAllowed, requireOffice, sourceAllowe
 import { registerSubmissions, withSubmissionWarnings } from './submissions.ts'
 import { validateMasterChange } from './master.ts'
 import { previewRecordReview, recordReviewInput } from './recordReviews.ts'
-import { canRetryImport, importCommitSchema, importIntentSchema, previewImport } from './imports.ts'
+import { canRetryImport, createImpactCache, importCommitSchema, importIntentSchema, previewImport } from './imports.ts'
 import type { WhatsAppConnector } from './whatsapp.ts'
 import { registerRekapSt } from './rekapStRoutes.ts'
 import { AutomationInputError, AutomationService, canReadAutomation, canWriteAutomation } from './automation.ts'
@@ -47,6 +47,18 @@ const roleOffices = (role: User['role'], offices: string[] | null | undefined) =
   if (offices?.length) throw new HTTPException(400, { message: 'Superadmin dan Admin memiliki akses seluruh kantor' })
   return null
 }
+
+/** Pegawai yang keputusannya berubah, dikelompokkan per bulan; dipakai untuk membatasi hitungan validasi. */
+export function employeesByPeriod(items: { employeeId: string; period: string }[]) {
+  const out = new Map<string, Set<string>>()
+  for (const { employeeId, period } of items) {
+    let set = out.get(period)
+    if (!set) out.set(period, set = new Set())
+    set.add(employeeId)
+  }
+  return out
+}
+
 export function createApp(db: Database, config: { origin: string; production: boolean }, whatsapp?: WhatsAppConnector, automation: AutomationService = new AutomationService(db, whatsapp)) {
   const app = new Hono<{ Variables: { user: User; sessionHash: string } }>()
   const cookie = config.production ? '__Host-kppu_session' : 'kppu_session'
@@ -166,13 +178,17 @@ export function createApp(db: Database, config: { origin: string; production: bo
     return c.json({ ok: true })
   })
 
+  // Dampak impor yang sudah dihitung saat pratinjau, dipakai ulang oleh halaman berikutnya dan oleh commit pada revisi yang sama.
+  const impactCache = createImpactCache()
+  const ensureWorkspace = () => db.insert(workspaces).values({ id: 'default', state: emptyWorkspace() }).onConflictDoNothing()
   const read = async () => {
-    await db.insert(workspaces).values({ id: 'default', state: emptyWorkspace() }).onConflictDoNothing()
+    await ensureWorkspace()
     const [w] = await db.select().from(workspaces).where(eq(workspaces.id, 'default'))
     return { ...w, state: { ...w.state, dayReviews: w.state.dayReviews ?? [], policy: enforcePolicy(w.state.policy) } }
   }
   const change = async (expectedRevision: number, actor: User, action: string, reason: string, mutate: (state: Workspace, tx: Database) => Promise<Workspace> | Workspace, extra: Record<string, unknown> = {}) => {
-    await read()
+    // Cukup pastikan baris ada; isi workspace dibaca sekali di dalam transaksi berkunci di bawah.
+    await ensureWorkspace()
     return db.transaction(async tx => {
       const [w] = await tx.select().from(workspaces).where(eq(workspaces.id, 'default')).for('update')
       if (w.revision !== expectedRevision) throw new HTTPException(409, { message: 'Data berubah oleh admin lain. Simpan backup pekerjaan, lalu muat ulang data server.' })
@@ -261,14 +277,19 @@ export function createApp(db: Database, config: { origin: string; production: bo
         const previous = new Map(state.resolutions.map(r => [r.issueId, r]))
         const roster = buildRoster(state.files, state.master, state.overrides, state.decisions)
         const issuesByPeriod = new Map<string, Map<string, ReturnType<typeof reconcile>['issues'][number]>>()
+        // Hanya pegawai yang keputusannya berubah yang dihitung ulang; tiap pegawai dihitung terpisah di mesin rekonsiliasi.
+        // Bandingkan isi, bukan urutan kunci: Postgres (jsonb) dan validasi zod menyusun kunci berbeda, sehingga JSON.stringify
+        // menganggap semua keputusan lama berubah, memvalidasinya ulang, dan menimpa nama peninjau aslinya.
+        const unchanged = (r: (typeof patch.resolutions)[number]) => stableStringify(r) === stableStringify(previous.get(r.issueId))
+        const resolutionEmployees = employeesByPeriod(patch.resolutions.filter(r => !unchanged(r)).map(r => ({ employeeId: r.issueId.split('|')[0], period: r.issueId.split('|')[1]?.slice(0, 7) ?? '' })))
         patch.resolutions = patch.resolutions.map(r => {
-          if (JSON.stringify(r) === JSON.stringify(previous.get(r.issueId))) return r
+          if (unchanged(r)) return r
           if (r.note.trim().length < 3) throw new HTTPException(400, { message: 'Catatan review wajib diisi minimal 3 karakter' })
           const period = r.issueId.split('|')[1]?.slice(0, 7)
           if (!period || !/^\d{4}-\d{2}$/.test(period)) throw new HTTPException(400, { message: 'Kasus review tidak valid' })
           // Satu perhitungan per bulan untuk seluruh keputusan dalam patch (sebelumnya dihitung ulang per keputusan).
           let issues = issuesByPeriod.get(period)
-          if (!issues) { issues = new Map(reconcile(state.files, roster, monthBounds(period), state.policy, [], undefined, state.dayReviews).issues.map(i => [i.id, i])); issuesByPeriod.set(period, issues) }
+          if (!issues) { issues = new Map(reconcile(state.files, roster, monthBounds(period), state.policy, [], undefined, state.dayReviews, undefined, resolutionEmployees.get(period)).issues.map(i => [i.id, i])); issuesByPeriod.set(period, issues) }
           const issue = issues.get(r.issueId)
           if (!issue || !r.signature || issue.signature !== r.signature) throw new HTTPException(409, { message: 'Bukti kasus telah berubah; tinjau ulang sebelum memutuskan' })
           return { ...r, reviewer: actor.name, at: new Date().toISOString() }
@@ -278,12 +299,13 @@ export function createApp(db: Database, config: { origin: string; production: bo
         const previous = new Map(state.dayReviews.map(r => [dayReviewKey(r.employeeId, r.date), r]))
         const roster = buildRoster(state.files, state.master, state.overrides, state.decisions)
         const calculations = new Map<string, ReturnType<typeof reconcile>>()
+        const reviewEmployees = employeesByPeriod(patch.dayReviews.filter(review => stableStringify(review) !== stableStringify(previous.get(dayReviewKey(review.employeeId, review.date)))).map(review => ({ employeeId: review.employeeId, period: review.date.slice(0, 7) })))
         patch.dayReviews = patch.dayReviews.map(review => {
           const key = dayReviewKey(review.employeeId, review.date)
           if (stableStringify(review) === stableStringify(previous.get(key))) return review
           const period = review.date.slice(0, 7)
           let calculation = calculations.get(period)
-          if (!calculation) { calculation = reconcile(state.files, roster, monthBounds(period), state.policy, state.resolutions, undefined, state.dayReviews, createCoverageLookup(state.files)); calculations.set(period, calculation) }
+          if (!calculation) { calculation = reconcile(state.files, roster, monthBounds(period), state.policy, state.resolutions, undefined, state.dayReviews, createCoverageLookup(state.files), reviewEmployees.get(period)); calculations.set(period, calculation) }
           const day = calculation.months.find(m => m.employee.id === review.employeeId)?.days.find(d => d.date === review.date)
           if (!day || day.reviewSignature !== review.signature) throw new HTTPException(409, { message: 'Bukti hari ini berubah; muat ulang dan tinjau ulang sebelum menyimpan' })
           const problem = dayReviewProblem(review, day.evidence, day.assignments)
@@ -292,7 +314,10 @@ export function createApp(db: Database, config: { origin: string; production: bo
           return { ...review, reviewer: actor.name, actorId: actor.id, at: new Date().toISOString() }
         })
       }
-      if (patch.decisions) patch.decisions = patch.decisions.map(d => state.decisions.some(old => JSON.stringify(old) === JSON.stringify(d)) ? d : { ...d, reviewer: actor.name, at: new Date().toISOString() })
+      if (patch.decisions) {
+        const previousDecisions = new Set(state.decisions.map(old => stableStringify(old)))
+        patch.decisions = patch.decisions.map(d => previousDecisions.has(stableStringify(d)) ? d : { ...d, reviewer: actor.name, at: new Date().toISOString() })
+      }
       const next = { ...state, ...patch, reviewer: actor.name }
       if (patch.master || patch.overrides) {
         try { validateMasterChange(state, next) } catch (e) { throw new HTTPException(400, { message: (e as Error).message }) }
@@ -330,7 +355,7 @@ export function createApp(db: Database, config: { origin: string; production: bo
     if (!upload || upload.userId !== actor.id) throw new HTTPException(404, { message: 'Preview tidak ditemukan' })
     const current = await read(), committed = current.state.files.find(f => f.id === upload.id)
     if (committed) throw new HTTPException(409, { message: 'Workbook sudah di-commit; unggah sumber baru untuk perubahan berikutnya' })
-    return c.json(await withSubmissionWarnings(db, previewImport(current.state, current.revision, upload.parsed as Workspace['files'][number], actor, intent).impact))
+    return c.json(await withSubmissionWarnings(db, previewImport(current.state, current.revision, upload.parsed as Workspace['files'][number], actor, intent, impactCache).impact))
   })
   app.post('/api/imports/commit', async c => {
     const actor = c.get('user')
@@ -349,7 +374,7 @@ export function createApp(db: Database, config: { origin: string; production: bo
       const sameWeek = (f: Workspace['files'][number]) => !v.range || (f.coverageDeclarations?.length ? f.coverageDeclarations.some(d => overlaps(d, v.range!)) : !f.period || overlaps(f.period, v.range))
       if (state.files.some(f => f.hash === upload.hash && sameWeek(f))) throw new HTTPException(409, { message: v.range ? 'File yang sama sudah disetor untuk pekan ini; tidak ada bukti yang ditambahkan' : 'File identik sudah aktif atau diarsipkan; tidak ada bukti yang ditambahkan' })
       const { confirmedImpact, ...intent } = v
-      const result = previewImport(state, v.expectedRevision, upload.parsed as Workspace['files'][number], actor, intent)
+      const result = previewImport(state, v.expectedRevision, upload.parsed as Workspace['files'][number], actor, intent, impactCache)
       if (result.impact.checksum !== confirmedImpact) throw new HTTPException(409, { message: 'Dampak impor berubah; buka preview terbaru sebelum menyimpan' })
       const file = result.next.files.find(f => f.id === upload.id)
       if (!file) throw new HTTPException(500, { message: 'Hasil preview impor tidak lengkap' })

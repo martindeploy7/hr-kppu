@@ -5,12 +5,30 @@ import { nameKey } from './names.ts'
 export function dayReviewKey(employeeId: string, date: string) { return `${employeeId}|${date}` }
 
 /** JSON objects are key-sorted so schema parsing/serialization cannot stale a decision. */
+// Urutan kunci per bentuk objek disimpan sekali; bentuk yang sama (baris absensi, ST) berulang ribuan kali per rekonsiliasi.
+// Mengurutkan seluruh kunci lalu membuang yang undefined memberi urutan yang sama dengan membuang dulu lalu mengurutkan.
+const sortedKeysByShape = new Map<string, string[]>()
+const sortedKeys = (item: object) => {
+  const keys = Object.keys(item), shape = keys.join('\u0000')
+  let sorted = sortedKeysByShape.get(shape)
+  if (!sorted) {
+    sorted = [...keys].sort((a, b) => a.localeCompare(b))
+    if (sortedKeysByShape.size < 5000) sortedKeysByShape.set(shape, sorted)
+  }
+  return sorted
+}
+const canonical = (item: unknown): unknown => {
+  if (Array.isArray(item)) return item.map(canonical)
+  if (!item || typeof item !== 'object') return item
+  // Tanpa prototype: kunci seperti "__proto__" tetap menjadi properti biasa, sama seperti Object.fromEntries.
+  const out: Record<string, unknown> = Object.create(null)
+  for (const key of sortedKeys(item)) {
+    const field = (item as Record<string, unknown>)[key]
+    if (field !== undefined) out[key] = canonical(field)
+  }
+  return out
+}
 export function stableStringify(value: unknown): string {
-  const canonical = (item: unknown): unknown => Array.isArray(item)
-    ? item.map(canonical)
-    : item && typeof item === 'object'
-      ? Object.fromEntries(Object.entries(item).filter(([, field]) => field !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, field]) => [key, canonical(field)]))
-      : item
   return JSON.stringify(canonical(value))
 }
 
